@@ -16,7 +16,7 @@
  *
  */
 
-package org.apache.skywalking.apm.plugin.zuul.v1;
+package org.apache.skywalking.apm.plugin.hutool.v5.http;
 
 import org.apache.skywalking.apm.agent.core.boot.PluginConfig;
 
@@ -26,10 +26,10 @@ import org.apache.skywalking.apm.agent.core.boot.PluginConfig;
  * @deprecated 暂未启用
  */
 @Deprecated
-public class ZuulConfig {
+public class HutoolHttpRequestConfig {
  
     public static class Plugin {
-        @PluginConfig(root = ZuulConfig.class)
+        @PluginConfig(root = HutoolHttpRequestConfig.class)
         public static class Zuul {
             /**
              * <p> If set to true, the final routed url will record.

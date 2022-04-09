@@ -8,6 +8,7 @@
 
     <modules>
         <module>zuul-1.x-plugin</module>
+		<module>hutool-http-5.x-plugin</module>
     </modules>
     <packaging>pom</packaging>
 
