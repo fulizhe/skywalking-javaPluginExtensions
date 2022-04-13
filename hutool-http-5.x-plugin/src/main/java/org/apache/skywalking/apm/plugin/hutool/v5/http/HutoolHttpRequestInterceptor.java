@@ -47,11 +47,6 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
 	@Override
 	public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
 			MethodInterceptResult result) throws Throwable {
-		//        if (allArguments[0] == null) {
-		//            // illegal args, can't trace. ignore.
-		//            return;
-		//        }    	
-
 		if (!(objInst instanceof cn.hutool.http.HttpRequest)) {
 			return;
 		}
@@ -63,8 +58,6 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
 		final AbstractSpan span = ContextManager.createExitSpan("hutool/http/" + method.getName(), contextCarrier,
 				uri.getHost() + ":" + uri.getPort());
 		span.setComponent(new OfficialComponent(9999, "hutoolHttp"));
-
-		span.tag(Tags.ofKey("executeParams"), Arrays.toString(allArguments));
 
 		Tags.URL.set(span, request.getUrl());
 		Tags.HTTP.METHOD.set(span, request.getMethod().name());
