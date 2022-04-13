@@ -78,7 +78,7 @@
     </dependency>
   </dependencies>
   <properties>
-    <hutool.version>5.4.1</hutool.version>
+    <hutool.version>5.7.12</hutool.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 </project>

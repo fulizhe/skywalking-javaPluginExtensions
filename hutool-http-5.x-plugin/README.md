@@ -1,5 +1,4 @@
 # 项目说明
-依赖于《sc-zuul-sc》项目, 递归依赖于《projectB》项目
 
 
 # 额外说明
@@ -17,5 +16,5 @@ ls D:\apps\apache-skywalking-java-agent-8.8.0\plugins\ | findstr hutool-http-
 cat D:\apps\apache-skywalking-java-agent-8.8.0\logs\skywalking-api.log | findstr hutool-http-
 
 // 验证
-http://localhost/projectB/LQ
+
 ```

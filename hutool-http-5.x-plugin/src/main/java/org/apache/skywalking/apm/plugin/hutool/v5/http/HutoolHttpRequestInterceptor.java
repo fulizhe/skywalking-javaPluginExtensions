@@ -18,11 +18,15 @@
 package org.apache.skywalking.apm.plugin.hutool.v5.http;
 
 import java.lang.reflect.Method;
+import java.net.URI;
 import java.util.Arrays;
 
+import org.apache.skywalking.apm.agent.core.context.CarrierItem;
+import org.apache.skywalking.apm.agent.core.context.ContextCarrier;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
+import org.apache.skywalking.apm.agent.core.context.trace.SpanLayer;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
@@ -30,35 +34,72 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.InstanceM
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.network.trace.component.OfficialComponent;
 
+import cn.hutool.core.util.URLUtil;
+import cn.hutool.http.HttpResponse;
+
 /**
  * {@link HutoolHttpRequestInterceptor} intercepted the method of hutool-http.
  * <p> 参考 apm-httpClient-4.x-plugin 中的 {@code HttpClientExecuteInterceptor}
  */
 public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterceptor {
-    private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestInterceptor.class);
+	private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestInterceptor.class);
 
-    @Override
-    public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes, MethodInterceptResult result) throws Throwable {
-        if (allArguments[0] == null) {
-            // illegal args, can't trace. ignore.
-            return;
-        }
-        Object skyWalkingDynamicField = objInst.getSkyWalkingDynamicField();
-        LOGGER.info(skyWalkingDynamicField.getClass().toString());
-        //LOGGER.info(ObjectUtil.toString(skyWalkingDynamicField));
-        AbstractSpan span = ContextManager.createLocalSpan("hutool/http/" + method.getName());
-        span.setComponent(new OfficialComponent(9999, "hutoolHttp")); 
-        span.tag(Tags.ofKey("url"), Arrays.toString(allArguments));  
-    }
+	@Override
+	public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
+			MethodInterceptResult result) throws Throwable {
+		//        if (allArguments[0] == null) {
+		//            // illegal args, can't trace. ignore.
+		//            return;
+		//        }    	
 
-    @Override
-    public Object afterMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes, Object ret) throws Throwable {
-        ContextManager.stopSpan();
-        return ret;
-    }
+		if (!(objInst instanceof cn.hutool.http.HttpRequest)) {
+			return;
+		}
 
-    @Override
-    public void handleMethodException(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes, Throwable t) {
-        ContextManager.activeSpan().errorOccurred().log(t);
-    }
+		final cn.hutool.http.HttpRequest request = (cn.hutool.http.HttpRequest) objInst;
+		
+		final ContextCarrier contextCarrier = new ContextCarrier();
+		final URI uri = URLUtil.toURI(request.getUrl());
+		final AbstractSpan span = ContextManager.createExitSpan("hutool/http/" + method.getName(), contextCarrier,
+				uri.getHost() + ":" + uri.getPort());
+		span.setComponent(new OfficialComponent(9999, "hutoolHttp"));
+
+		span.tag(Tags.ofKey("executeParams"), Arrays.toString(allArguments));
+
+		Tags.URL.set(span, request.getUrl());
+		Tags.HTTP.METHOD.set(span, request.getMethod().name());
+		Tags.HTTP.HEADERS.set(span, "charset=" + request.charset());
+		SpanLayer.asHttp(span);
+
+		CarrierItem next = contextCarrier.items();
+		while (next.hasNext()) {
+			next = next.next();
+			request.header(next.getHeadKey(), next.getHeadValue());
+		}
+
+	}
+
+	@Override
+	public Object afterMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
+			Object ret) throws Throwable {
+		if (ret != null && ret instanceof HttpResponse) {
+			final HttpResponse response = (HttpResponse) ret;
+
+			int statusCode = response.getStatus();
+			AbstractSpan span = ContextManager.activeSpan();
+			if (statusCode >= 400) {
+				span.errorOccurred();
+				Tags.HTTP_RESPONSE_STATUS_CODE.set(span, statusCode);
+			}
+		}
+
+		ContextManager.stopSpan();
+		return ret;
+	}
+
+	@Override
+	public void handleMethodException(EnhancedInstance objInst, Method method, Object[] allArguments,
+			Class<?>[] argumentsTypes, Throwable t) {
+		ContextManager.activeSpan().errorOccurred().log(t);
+	}
 }

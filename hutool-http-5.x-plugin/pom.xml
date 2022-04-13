@@ -36,12 +36,6 @@
 			<groupId>cn.hutool</groupId>
 			<artifactId>hutool-http</artifactId>
 		    <version>${hutool.version}</version>
-		    <exclusions>
-		    	<exclusion>
-		    		<groupId>cn.hutool</groupId>
-		    		<artifactId>hutool-core</artifactId>
-		    	</exclusion>
-		    </exclusions>
 		</dependency>        
     </dependencies>
 

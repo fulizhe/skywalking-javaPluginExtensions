@@ -39,7 +39,7 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpRequestInterceptor";
 
     @Override
-    protected ClassMatch enhanceClass() {
+    protected ClassMatch enhanceClass() {    	
         return byName(ENHANCE_CLASS);
     }
 
@@ -54,7 +54,7 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
         		new InstanceMethodsInterceptPoint() {
                     @Override
                     public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                        return named(ENHANCE_METHOD).and(takesArguments(Boolean.class));
+                        return named(ENHANCE_METHOD).and(takesArguments(boolean.class));
                     }
 
                     @Override
@@ -66,7 +66,7 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
                     public boolean isOverrideArgs() {
                         return false;
                     }
-                }
+                }      		
         };
     }
 
