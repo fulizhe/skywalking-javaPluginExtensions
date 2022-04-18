@@ -9,6 +9,9 @@
     <modules>
         <module>zuul-1.x-plugin</module>
 		<module>hutool-http-5.x-plugin</module>
+		<!-- <module>sqlite-plugin</module> -->
+		
+		<module>dynamic-debug-runtime-8.x-plugin</module>
     </modules>
     <packaging>pom</packaging>
 
