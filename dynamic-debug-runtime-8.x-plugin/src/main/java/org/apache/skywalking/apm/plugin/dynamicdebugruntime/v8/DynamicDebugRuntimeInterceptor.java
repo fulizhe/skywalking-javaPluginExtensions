@@ -22,9 +22,8 @@ import java.lang.reflect.Method;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
-import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
-import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.InstanceMethodsAroundInterceptor;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
+import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
 
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.exceptions.UtilException;
@@ -33,22 +32,22 @@ import cn.hutool.core.util.ReflectUtil;
 /**
  * 
  */
-public class DynamicDebugRuntimeInterceptor implements InstanceMethodsAroundInterceptor {
+public class DynamicDebugRuntimeInterceptor implements StaticMethodsAroundInterceptor {
 	private static final ILog LOGGER = LogManager.getLogger(DynamicDebugRuntimeInterceptor.class);
 
-	@Override
-	public void beforeMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
-			MethodInterceptResult result) throws Throwable {
+    @Override
+    public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
+        MethodInterceptResult result) {
 		LOGGER.info("==========================================");
 		LOGGER.info(this.getClass().getClassLoader().toString());
 		LOGGER.info(this.getClass().getClassLoader().getParent().toString());
-		ddd();
+		toggleFeign();
 		LOGGER.info("==========================================");		
 	}
 
 	private static String className = "org.apache.skywalking.apm.plugin.feign.http.v9.FeignPluginConfig$Plugin$Feign";
 
-	private static void ddd() {
+	private static void toggleFeign() {
 		try {			
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
 			Class<?> cls = cl.loadClass(className);
@@ -59,17 +58,15 @@ public class DynamicDebugRuntimeInterceptor implements InstanceMethodsAroundInte
 			throw new RuntimeException(e);
 		}
 	}
+    @Override
+    public Object afterMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
+        Object ret) {
+        return ret;
+    }
 
-	@Override
-	public Object afterMethod(EnhancedInstance objInst, Method method, Object[] allArguments, Class<?>[] argumentsTypes,
-			Object ret) throws Throwable {
-		ContextManager.stopSpan();
-		return ret;
-	}
-
-	@Override
-	public void handleMethodException(EnhancedInstance objInst, Method method, Object[] allArguments,
-			Class<?>[] argumentsTypes, Throwable t) {
+    @Override
+    public void handleMethodException(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
+        Throwable t) {
 		ContextManager.activeSpan().errorOccurred().log(t);
-	}
+    }	
 }
