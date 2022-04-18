@@ -42,23 +42,64 @@ public class DynamicDebugRuntimeInterceptor implements StaticMethodsAroundInterc
 		LOGGER.info(this.getClass().getClassLoader().toString());
 		LOGGER.info(this.getClass().getClassLoader().getParent().toString());
 		toggleFeign();
+		toggleJdbc();
+		toggleHttpclient();
+		toggleSpringMvc();
 		LOGGER.info("==========================================");		
 	}
 
-	private static String className = "org.apache.skywalking.apm.plugin.feign.http.v9.FeignPluginConfig$Plugin$Feign";
+	private static final String CLASS_NAME_FEIGN_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.feign.http.v9.FeignPluginConfig$Plugin$Feign";
+	private static final String CLASS_NAME_JDBC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.jdbc.JDBCPluginConfig$Plugin$JDBC";
+	private static final String CLASS_NAME_SPRINGMVC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.spring.mvc.commons.SpringMVCPluginConfig$Plugin$SpringMVC";
+	private static final String CLASS_NAME_HTTPCLIENT_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig$Plugin$HttpClient";
 
+	
+	
 	private static void toggleFeign() {
 		try {			
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
-			Class<?> cls = cl.loadClass(className);
+			Class<?> cls = cl.loadClass(CLASS_NAME_FEIGN_PLUGIN_CONFIG);
 			final Boolean COLLECT_REQUEST_BODY = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_REQUEST_BODY"));
-			LOGGER.info("### COLLECT_REQUEST_BODY: [ {} ]", COLLECT_REQUEST_BODY);
 			ReflectUtil.setFieldValue(cls, "COLLECT_REQUEST_BODY", !COLLECT_REQUEST_BODY);
 		} catch (SecurityException | ClassNotFoundException | UtilException e) {
 			throw new RuntimeException(e);
 		}
 	}
-    @Override
+	
+	private static void toggleJdbc() {
+		try {			
+			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
+			Class<?> cls = cl.loadClass(CLASS_NAME_JDBC_PLUGIN_CONFIG);
+			final Boolean TRACE_SQL_PARAMETERS = Convert.toBool(ReflectUtil.getFieldValue(cls, "TRACE_SQL_PARAMETERS"));
+			ReflectUtil.setFieldValue(cls, "TRACE_SQL_PARAMETERS", !TRACE_SQL_PARAMETERS);
+		} catch (SecurityException | ClassNotFoundException | UtilException e) {
+			throw new RuntimeException(e);
+		}
+	}	
+	
+	private static void toggleHttpclient() {
+		try {			
+			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
+			Class<?> cls = cl.loadClass(CLASS_NAME_HTTPCLIENT_PLUGIN_CONFIG);
+			final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", !COLLECT_HTTP_PARAMS);
+		} catch (SecurityException | ClassNotFoundException | UtilException e) {
+			throw new RuntimeException(e);
+		}
+	}		
+	
+	private static void toggleSpringMvc() {
+		try {			
+			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
+			Class<?> cls = cl.loadClass(CLASS_NAME_SPRINGMVC_PLUGIN_CONFIG);
+			final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", !COLLECT_HTTP_PARAMS);
+		} catch (SecurityException | ClassNotFoundException | UtilException e) {
+			throw new RuntimeException(e);
+		}
+	}	
+	
+	@Override
     public Object afterMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
         Object ret) {
         return ret;
