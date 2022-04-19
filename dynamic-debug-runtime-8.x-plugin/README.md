@@ -1,5 +1,5 @@
 # 项目说明
-在运行时, 动态启动/停止诸如sql参数收集, http请求参数收集等等功能.
+在运行时, 动态启动/停止诸如sql参数收集, http请求参数收集等等功能. 兼顾正常运行时的系统性能, 以及问题排错时能收集所需的更详尽上下文诉求。
 1. plugin.jdbc.trace_sql_parameters=true ( JDBCPluginConfig.java )
 2. plugin.springmvc.collect_http_params=true  ( SpringMVCPluginConfig.java )
 3. plugin.httpclient.collect_http_params=true  ( HttpClientPluginConfig.java )
