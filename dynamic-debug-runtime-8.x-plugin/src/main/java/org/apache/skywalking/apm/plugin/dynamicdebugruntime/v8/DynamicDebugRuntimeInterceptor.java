@@ -39,12 +39,13 @@ public class DynamicDebugRuntimeInterceptor implements StaticMethodsAroundInterc
     public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
         MethodInterceptResult result) {
 		LOGGER.info("==========================================");
-		LOGGER.info(this.getClass().getClassLoader().toString());
-		LOGGER.info(this.getClass().getClassLoader().getParent().toString());
+		LOGGER.info("toggle debug for [ " + "feign, jdbc, httpclient, springmvc, tomcat" + " ]");
 		toggleFeign();
 		toggleJdbc();
 		toggleHttpclient();
 		toggleSpringMvc();
+		toggleTomcat();
+		//toggleDubbo();		
 		LOGGER.info("==========================================");		
 	}
 
@@ -52,7 +53,9 @@ public class DynamicDebugRuntimeInterceptor implements StaticMethodsAroundInterc
 	private static final String CLASS_NAME_JDBC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.jdbc.JDBCPluginConfig$Plugin$JDBC";
 	private static final String CLASS_NAME_SPRINGMVC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.spring.mvc.commons.SpringMVCPluginConfig$Plugin$SpringMVC";
 	private static final String CLASS_NAME_HTTPCLIENT_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig$Plugin$HttpClient";
-
+	private static final String CLASS_NAME_TOMCAT_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.tomcat78x.TomcatPluginConfig$Plugin$Tomcat";
+	private static final String CLASS_NAME_DUBBO_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig$Plugin$HttpClient";
+	
 	
 	
 	private static void toggleFeign() {
@@ -97,6 +100,17 @@ public class DynamicDebugRuntimeInterceptor implements StaticMethodsAroundInterc
 		} catch (SecurityException | ClassNotFoundException | UtilException e) {
 			throw new RuntimeException(e);
 		}
+	}
+	
+	private void toggleTomcat() {
+		try {			
+			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
+			Class<?> cls = cl.loadClass(CLASS_NAME_TOMCAT_PLUGIN_CONFIG);
+			final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", !COLLECT_HTTP_PARAMS);
+		} catch (SecurityException | ClassNotFoundException | UtilException e) {
+			throw new RuntimeException(e);
+		}		
 	}	
 	
 	@Override

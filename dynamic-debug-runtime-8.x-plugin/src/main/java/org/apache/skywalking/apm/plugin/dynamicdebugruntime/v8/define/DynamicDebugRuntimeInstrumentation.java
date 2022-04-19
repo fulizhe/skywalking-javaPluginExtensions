@@ -11,14 +11,12 @@ import net.bytebuddy.matcher.ElementMatcher;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.takesNoArguments;
 /**
- * Active the toolkit class "TraceContext". Should not dependency or import any class in
- * "skywalking-toolkit-trace-context" module. Activation's classloader is diff from "TraceContext", using direct will
- * trigger classloader issue.
+ * Refer To {@code TraceContextActivation}
  * <p>
  */
 public class DynamicDebugRuntimeInstrumentation extends ClassStaticMethodsEnhancePluginDefine {
 
-    private static final String ENHANCE_CLASS = "com.fulizhe.demo.util.SWUtils";
+    private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWUtils";
     private static final String ENHANCE_METHOD = "toggleDebug";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicDebugRuntimeInterceptor";
 
