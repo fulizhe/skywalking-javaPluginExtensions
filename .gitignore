@@ -46,3 +46,4 @@ README-TODO.md
 *.tgz
 mvnw
 mvnw.cmd
+dependency-reduced-pom.xml
