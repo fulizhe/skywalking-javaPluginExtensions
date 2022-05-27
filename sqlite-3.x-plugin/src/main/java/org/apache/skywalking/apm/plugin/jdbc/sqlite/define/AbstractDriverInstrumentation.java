@@ -1,11 +1,11 @@
 package org.apache.skywalking.apm.plugin.jdbc.sqlite.define;
-import net.bytebuddy.description.method.MethodDescription;
-import net.bytebuddy.matcher.ElementMatcher;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
 
 public abstract class AbstractDriverInstrumentation extends ClassInstanceMethodsEnhancePluginDefine {
 

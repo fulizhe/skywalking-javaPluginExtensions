@@ -18,13 +18,13 @@
 
 package org.apache.skywalking.apm.plugin.jdbc.sqlite.define;
 
-import net.bytebuddy.description.method.MethodDescription;
-import net.bytebuddy.matcher.ElementMatcher;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 import org.apache.skywalking.apm.agent.core.plugin.match.NameMatch;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
 
-import static net.bytebuddy.matcher.ElementMatchers.any;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.any;
 
 /**
  * {@link PooledJdbcConnectionInstrumentation} presents that skywalking intercepts {@link

@@ -18,15 +18,15 @@
 
 package org.apache.skywalking.apm.plugin.jdbc.sqlite.define;
 
-import net.bytebuddy.description.method.MethodDescription;
-import net.bytebuddy.matcher.ElementMatcher;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 import org.apache.skywalking.apm.plugin.jdbc.define.Constants;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
-import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 /**
  * {@link AbstractConnectionInstrumentation} define how to enhance the following methods that the class which extend
