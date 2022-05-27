@@ -5,11 +5,11 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassStat
 import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
 import org.apache.skywalking.apm.agent.core.plugin.match.NameMatch;
 
-import net.bytebuddy.description.method.MethodDescription;
-import net.bytebuddy.matcher.ElementMatcher;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
-import static net.bytebuddy.matcher.ElementMatchers.takesNoArguments;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesNoArguments;
 /**
  * Refer To {@code TraceContextActivation}
  * <p>
