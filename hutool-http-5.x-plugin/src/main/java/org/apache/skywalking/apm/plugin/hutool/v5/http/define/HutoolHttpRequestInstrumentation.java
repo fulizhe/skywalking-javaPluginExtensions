@@ -17,8 +17,8 @@
 
 package org.apache.skywalking.apm.plugin.hutool.v5.http.define;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
-import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArguments;
 import static org.apache.skywalking.apm.agent.core.plugin.match.NameMatch.byName;
 
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
@@ -27,8 +27,15 @@ import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInte
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
 import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
 
-import net.bytebuddy.description.method.MethodDescription;
-import net.bytebuddy.matcher.ElementMatcher;
+//import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
+//import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
+//import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInterceptPoint;
+//import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
+//import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
+
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+
 
 /**
  * 
