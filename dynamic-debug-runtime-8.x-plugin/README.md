@@ -41,8 +41,17 @@ cp ./dynamic-debug-runtime-8.x-plugin/target/dynamic-debug-runtime-8.x-plugin-1.
 // 验证拷贝成功
 ls D:\apps\apache-skywalking-java-agent-8.8.0\plugins\ | findstr dynamic-debug-runtime-8.x
 // 验证加载成功
-cat D:\apps\apache-skywalking-java-agent-8.8.0\logs\skywalking-api.log | findstr hutool-http-
+cat D:\apps\apache-skywalking-java-agent-8.8.0\logs\skywalking-api.log | findstr dynamic-debug-runtime-8.x
 
 // 验证
 
 ```
+
+---- 以上的快捷版本
+cd E:\gitRepository\_skywalking-javaPluginExtensions\
+mvn clean package '-Dmaven.test.skip=true' -T 2C -pl dynamic-debug-runtime-8.x-plugin -am
+cp ./dynamic-debug-runtime-8.x-plugin/target/dynamic-debug-runtime-8.x-plugin-1.0.0.jar D:\apps\apache-skywalking-java-agent-8.8.0\plugins\dynamic-debug-runtime-8.x-plugin-1.0.0.jar
+ls D:\apps\apache-skywalking-java-agent-8.8.0\plugins\ | findstr dynamic-debug-runtime-8.x
+cat D:\apps\apache-skywalking-java-agent-8.8.0\logs\skywalking-api.log | findstr dynamic-debug-runtime-8.x
+
+
