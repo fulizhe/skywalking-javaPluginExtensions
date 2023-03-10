@@ -21,6 +21,7 @@ package org.apache.skywalking.apm.plugin.dynamic;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.conf.dynamic.AgentConfigChangeWatcher;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
@@ -41,12 +42,14 @@ public class DyanmicEnabledConfigWatcher extends AgentConfigChangeWatcher {
 		}
 
 		enable.getAndSet(e);
-		LOGGER.warn("### current agent-enable status is [ {} ]", isEnbaleSendDataToServer());
+		LOGGER.warn("### [ {} ] current agent-enable status is [ {} ]", Config.Agent.SERVICE_NAME,
+				isEnbaleSendDataToServer());
 	}
 
 	@Override
 	public void notify(final ConfigChangeEvent value) {
-		LOGGER.warn("### change agent-enable status to [ {} ], event type is [ {} ]", value.getNewValue(), value.getEventType());
+		LOGGER.warn("### [ {} ] change agent-enable status to [ {} ], event type is [ {} ]", Config.Agent.SERVICE_NAME,
+				value.getNewValue(), value.getEventType());
 		if (EventType.DELETE.equals(value.getEventType())) {
 			enable(false);
 		} else {

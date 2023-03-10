@@ -20,6 +20,7 @@ package org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8;
 import java.lang.reflect.Method;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
+import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
@@ -42,9 +43,9 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 	@Override
 	public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
 			MethodInterceptResult result) {
-		LOGGER.info("==========================================");
-		LOGGER.info("### toggle enable for agent-enable status");
-		LOGGER.info("==========================================");
+		LOGGER.info("============================================================");
+		LOGGER.info("### toggle enable for agent-enable status of [ {} ]", Config.Agent.SERVICE_NAME);
+		LOGGER.info("============================================================");
 
 		enableAgentSendDataToServer();
 		enbaleAgentGrpcHeartBeat();
@@ -70,7 +71,7 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 			return;
 		}
 
-		LOGGER.warn("### begin beg the grpc to heart beat");
+		LOGGER.warn("### begin beg the grpc to heart beat of [ {} ]", Config.Agent.SERVICE_NAME);
 		// 让 reconnect 字段置为 true, 为重连做准备
 		invokeMethod(grpcChannelManager, "reportError", new StatusRuntimeException(Status.UNAVAILABLE));
 		// 马上重连一次, 进行验活
