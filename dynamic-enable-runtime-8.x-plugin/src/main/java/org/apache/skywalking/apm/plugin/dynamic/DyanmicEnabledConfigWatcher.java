@@ -25,12 +25,12 @@ import org.apache.skywalking.apm.agent.core.conf.dynamic.AgentConfigChangeWatche
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 
-public class DyanmicEnabledTraceSegmentServiceClientConfigWatcher extends AgentConfigChangeWatcher {
-	private static final ILog LOGGER = LogManager.getLogger(DyanmicEnabledTraceSegmentServiceClientConfigWatcher.class);
+public class DyanmicEnabledConfigWatcher extends AgentConfigChangeWatcher {
+	private static final ILog LOGGER = LogManager.getLogger(DyanmicEnabledConfigWatcher.class);
 
 	private final AtomicBoolean enable;
 
-	public DyanmicEnabledTraceSegmentServiceClientConfigWatcher(final String propertyKey) {
+	public DyanmicEnabledConfigWatcher(final String propertyKey) {
 		super(propertyKey);
 		this.enable = new AtomicBoolean(false);
 	}

@@ -51,6 +51,7 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 	}
 
 	private void enableAgentSendDataToServer() {
+		// 修改我们自定义的配置项
 		final TraceSegmentServiceClient traceSegmentServiceClient = ServiceManager.INSTANCE
 				.findService(TraceSegmentServiceClient.class);
 		if (!traceSegmentServiceClient.getClass().getName().contains("DyanmicEnabledTraceSegmentServiceClient")) {
@@ -62,6 +63,7 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 	}
 
 	private void enbaleAgentGrpcHeartBeat() {
+		// 让agent对服务端进行心跳检测, 为之后发送监控数据做准备
 		final GRPCChannelManager grpcChannelManager = ServiceManager.INSTANCE.findService(GRPCChannelManager.class);
 		if (!grpcChannelManager.getClass().getName().contains("DynamicEnabledGRPCChannelManager")) {
 			LOGGER.warn("### do not use [ DynamicEnabledGRPCChannelManager ]. skip set");

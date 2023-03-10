@@ -22,7 +22,7 @@ import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.agent.test.tools.AgentServiceRule;
 import org.apache.skywalking.apm.plugin.dynamic.DyanmicEnabledTraceSegmentServiceClient;
-import org.apache.skywalking.apm.plugin.dynamic.DyanmicEnabledTraceSegmentServiceClientConfigWatcher;
+import org.apache.skywalking.apm.plugin.dynamic.DyanmicEnabledConfigWatcher;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
@@ -48,6 +48,6 @@ public class DyanmicEnabledTraceSegmentServiceClientTest {
 	public void test2() {
 		TraceSegmentServiceClient service = ServiceManager.INSTANCE.findService(TraceSegmentServiceClient.class);
 		Whitebox.setInternalState(service, "dyanmicEnabledTraceSegmentServiceClientConfigWatcher",
-				new DyanmicEnabledTraceSegmentServiceClientConfigWatcher(""));
+				new DyanmicEnabledConfigWatcher(""));
 	}
 }

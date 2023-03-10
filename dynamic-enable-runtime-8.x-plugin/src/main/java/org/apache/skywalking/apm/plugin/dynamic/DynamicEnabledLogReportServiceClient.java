@@ -18,24 +18,31 @@
 
 package org.apache.skywalking.apm.plugin.dynamic;
 
+import java.util.List;
+
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
-import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
-import org.apache.skywalking.apm.agent.core.remote.GRPCChannelManager;
+import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
+import org.apache.skywalking.apm.network.logging.v3.LogData;
+import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 
-@OverrideImplementor(GRPCChannelManager.class)
-public class DynamicEnabledGRPCChannelManager extends GRPCChannelManager {
-	private static final ILog LOGGER = LogManager.getLogger(DynamicEnabledGRPCChannelManager.class);
+@OverrideImplementor(LogReportServiceClient.class)
+public class DynamicEnabledLogReportServiceClient extends LogReportServiceClient {
+	private static final ILog LOGGER = LogManager.getLogger(DynamicEnabledLogReportServiceClient.class);
 
 	private DyanmicEnabledConfigWatcher dyanmicEnabledTraceSegmentServiceClientConfigWatcher;
 
 	@Override
-	public void boot() {
-		Config.Collector.GRPC_CHANNEL_CHECK_INTERVAL = 24 * 60 * 60; // 一天验活一次
-		
+	public void prepare() throws Throwable {
+		//ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
+		super.prepare();
+	}
+
+	@Override
+	public void boot() throws Throwable {
 		super.boot();
 
 		DyanmicEnabledTraceSegmentServiceClient findService = (DyanmicEnabledTraceSegmentServiceClient) ServiceManager.INSTANCE
@@ -44,15 +51,18 @@ public class DynamicEnabledGRPCChannelManager extends GRPCChannelManager {
 	}
 
 	@Override
-	public void run() {
-		//LOGGER.debug("Selected collector grpc service running, reconnect:{}.", reconnect);
-
-		if (!dyanmicEnabledTraceSegmentServiceClientConfigWatcher.isEnbaleSendDataToServer()) {
-			LOGGER.info("### disable grpc heart beat");
+	public void consume(List<LogData> arg0) {
+		if (CollectionUtil.isEmpty(arg0)) {
 			return;
 		}
-		
-		super.run();				
+
+		if (!dyanmicEnabledTraceSegmentServiceClientConfigWatcher.isEnbaleSendDataToServer()) {
+			LOGGER.debug("### disable push log data to server, the collection size of log data is [ {} ]", arg0);
+			return;
+		}
+
+		// 其实在8.8.x中, 已经实现了基于 GRPCChannelStatus 的判断. 但是我们还是在上面加上我们的配置判断
+		super.consume(arg0);
 	}
 
 }

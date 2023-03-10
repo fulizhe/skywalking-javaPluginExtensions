@@ -34,16 +34,16 @@ import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 @OverrideImplementor(TraceSegmentServiceClient.class)
 public class DyanmicEnabledTraceSegmentServiceClient extends TraceSegmentServiceClient {
 	private static final ILog LOGGER = LogManager.getLogger(DyanmicEnabledTraceSegmentServiceClient.class);
-	private DyanmicEnabledTraceSegmentServiceClientConfigWatcher dyanmicEnabledTraceSegmentServiceClientConfigWatcher;
+	private DyanmicEnabledConfigWatcher dyanmicEnabledTraceSegmentServiceClientConfigWatcher;
 
-	DyanmicEnabledTraceSegmentServiceClientConfigWatcher getConfigWatcher() {
+	DyanmicEnabledConfigWatcher getConfigWatcher() {
 		return dyanmicEnabledTraceSegmentServiceClientConfigWatcher;
 	}
 
 	@Override
 	public void prepare() {
 		super.prepare();
-		dyanmicEnabledTraceSegmentServiceClientConfigWatcher = new DyanmicEnabledTraceSegmentServiceClientConfigWatcher(
+		dyanmicEnabledTraceSegmentServiceClientConfigWatcher = new DyanmicEnabledConfigWatcher(
 				"agent.dynamic.enable");
 	}
 
