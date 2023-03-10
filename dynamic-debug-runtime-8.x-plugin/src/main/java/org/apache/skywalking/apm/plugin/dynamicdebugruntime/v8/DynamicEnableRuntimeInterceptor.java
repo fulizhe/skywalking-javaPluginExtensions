@@ -87,7 +87,9 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 		// 参考: PrintTraceIdInterceptor.java
 		final GRPCChannelManager grpcChannelManager = ServiceManager.INSTANCE.findService(GRPCChannelManager.class);
 		// 返回值, 告知调用者当前agent是否已经可以正确向服务端推送监控数据
-		return (!Convert.toBool(ReflectUtil.getFieldValue(grpcChannelManager, "reconnect")));
+		final boolean grpcLive = (!Convert.toBool(ReflectUtil.getFieldValue(grpcChannelManager, "reconnect")));
+		LOGGER.warn("### current grpc is alive: [ {} ]", grpcLive);		
+		return grpcLive;
 	}
 
 	@Override

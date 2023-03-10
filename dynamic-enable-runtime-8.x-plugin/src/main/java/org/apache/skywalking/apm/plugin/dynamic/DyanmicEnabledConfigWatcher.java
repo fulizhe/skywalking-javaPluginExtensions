@@ -46,7 +46,7 @@ public class DyanmicEnabledConfigWatcher extends AgentConfigChangeWatcher {
 
 	@Override
 	public void notify(final ConfigChangeEvent value) {
-		LOGGER.warn("### change agent-enable status to [ {} ]", value.getNewValue());
+		LOGGER.warn("### change agent-enable status to [ {} ], event type is [ {} ]", value.getNewValue(), value.getEventType());
 		if (EventType.DELETE.equals(value.getEventType())) {
 			enable(false);
 		} else {
