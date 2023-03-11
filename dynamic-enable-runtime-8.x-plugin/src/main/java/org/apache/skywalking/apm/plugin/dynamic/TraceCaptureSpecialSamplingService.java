@@ -69,6 +69,7 @@ class TraceCaptureSpecialSamplingService extends SamplingService {
 			return false;
 		}
 
+		// 这里可以在gateway层面形成约定, 约定满足时使用: TraceContext.putCorrelation("__CAPTURE_CURRENT_TRACE__", "VALUE"); 方式向插件报告本次需要采集		
 		if (ContextManager.isActive()
 				&& ContextManager.getCorrelationContext().get("__CAPTURE_CURRENT_TRACE__").isPresent()) {
 			return true;

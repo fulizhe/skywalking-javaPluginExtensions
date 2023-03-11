@@ -34,7 +34,8 @@ import cn.hutool.core.convert.Convert;
 import cn.hutool.core.util.ReflectUtil;
 
 /**
- * 针对"启用agent向server端发送数据"功能, 向外界提供可观测性
+ * <p> 针对"启用agent向server端发送数据"功能, 向外界提供可观测性
+ * <p> 参考自: {@code }
  */
 public class ReportStatusOfAgentPushToServerInterceptor implements StaticMethodsAroundInterceptor {
 	private static final ILog LOGGER = LogManager.getLogger(ReportStatusOfAgentPushToServerInterceptor.class);
