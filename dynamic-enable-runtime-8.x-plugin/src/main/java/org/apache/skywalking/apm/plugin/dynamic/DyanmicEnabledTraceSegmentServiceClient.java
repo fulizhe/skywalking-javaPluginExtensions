@@ -43,8 +43,7 @@ public class DyanmicEnabledTraceSegmentServiceClient extends TraceSegmentService
 	@Override
 	public void prepare() {
 		super.prepare();
-		dyanmicEnabledTraceSegmentServiceClientConfigWatcher = new DyanmicEnabledConfigWatcher(
-				"agent.dynamic.enable");
+		dyanmicEnabledTraceSegmentServiceClientConfigWatcher = new DyanmicEnabledConfigWatcher("agent.dynamic.enable");
 	}
 
 	@Override
@@ -73,9 +72,16 @@ public class DyanmicEnabledTraceSegmentServiceClient extends TraceSegmentService
 		super.consume(arg0);
 	}
 
-	public void notifyAgentEnableStatusChange() {
+	public void changeAgentEnableStatus(boolean isEnable) {
 		final String value = dyanmicEnabledTraceSegmentServiceClientConfigWatcher.value();
 		final boolean currentVal = Boolean.parseBoolean(value);
+		if (currentVal == isEnable) {
+			if (LOGGER.isInfoEnable()) {
+				LOGGER.info("### current agent-enable status is [ {} ], do not need change", currentVal);
+			}
+			return;
+		}
+		//
 		if (LOGGER.isInfoEnable()) {
 			LOGGER.info("### current agent-enable status is [ {} ],will change to [ {} ]", currentVal, !currentVal);
 		}

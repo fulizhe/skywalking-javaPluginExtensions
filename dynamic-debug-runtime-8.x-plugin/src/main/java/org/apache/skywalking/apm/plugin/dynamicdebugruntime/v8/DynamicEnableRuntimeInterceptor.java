@@ -43,15 +43,18 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 	@Override
 	public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
 			MethodInterceptResult result) {
+		final boolean isEnable = Convert.toBool(allArguments[0]);
+
 		LOGGER.info("============================================================");
-		LOGGER.info("### toggle enable for agent-enable status of [ {} ]", Config.Agent.SERVICE_NAME);
+		LOGGER.info("### toggle enable for agent-enable status of [ {} ] to [ {} ]", Config.Agent.SERVICE_NAME,
+				isEnable);
 		LOGGER.info("============================================================");
 
-		enableAgentSendDataToServer();
-		enbaleAgentGrpcHeartBeat();
+		enableAgentSendDataToServer(isEnable);
+		enbaleAgentGrpcHeartBeat(isEnable);
 	}
 
-	private void enableAgentSendDataToServer() {
+	private void enableAgentSendDataToServer(boolean isEnable) {
 		// 修改我们自定义的配置项
 		final TraceSegmentServiceClient traceSegmentServiceClient = ServiceManager.INSTANCE
 				.findService(TraceSegmentServiceClient.class);
@@ -60,14 +63,22 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 			return;
 		}
 
-		invokeMethod(traceSegmentServiceClient, "notifyAgentEnableStatusChange");
+		invokeMethod(traceSegmentServiceClient, "changeAgentEnableStatus", isEnable);
 	}
 
-	private void enbaleAgentGrpcHeartBeat() {
+	private void enbaleAgentGrpcHeartBeat(boolean isEnable) {
 		// 让agent对服务端进行心跳检测, 为之后发送监控数据做准备
 		final GRPCChannelManager grpcChannelManager = ServiceManager.INSTANCE.findService(GRPCChannelManager.class);
 		if (!grpcChannelManager.getClass().getName().contains("DynamicEnabledGRPCChannelManager")) {
 			LOGGER.warn("### do not use [ DynamicEnabledGRPCChannelManager ]. skip set");
+			return;
+		}
+
+		final boolean currentGrpcHeartBeatResult = ReportStatusOfAgentPushToServerInterceptor.currentGrpcHeartBeatResult();
+		if (currentGrpcHeartBeatResult == isEnable) {
+			if (LOGGER.isInfoEnable()) {
+				LOGGER.info("### current grpc-heartbeat status is [ {} ], do not need change", currentGrpcHeartBeatResult);
+			}			
 			return;
 		}
 
@@ -85,12 +96,7 @@ public class DynamicEnableRuntimeInterceptor implements StaticMethodsAroundInter
 	@Override
 	public Object afterMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
 			Object ret) {
-		// 参考: PrintTraceIdInterceptor.java
-		final GRPCChannelManager grpcChannelManager = ServiceManager.INSTANCE.findService(GRPCChannelManager.class);
-		// 返回值, 告知调用者当前agent是否已经可以正确向服务端推送监控数据
-		final boolean grpcLive = (!Convert.toBool(ReflectUtil.getFieldValue(grpcChannelManager, "reconnect")));
-		LOGGER.warn("### current grpc is alive: [ {} ]", grpcLive);		
-		return grpcLive;
+		return ReportStatusOfAgentPushToServerInterceptor.currentGrpcHeartBeatResult();
 	}
 
 	@Override
