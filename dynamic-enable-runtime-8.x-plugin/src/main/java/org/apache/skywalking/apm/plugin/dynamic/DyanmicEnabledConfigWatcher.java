@@ -51,7 +51,9 @@ public class DyanmicEnabledConfigWatcher extends AgentConfigChangeWatcher {
 		LOGGER.warn("### [ {} ] change agent-enable status to [ {} ], event type is [ {} ]", Config.Agent.SERVICE_NAME,
 				value.getNewValue(), value.getEventType());
 		if (EventType.DELETE.equals(value.getEventType())) {
-			enable(false);
+			// 因为我们不会主动删除这个key, 所以这里先注释; 并且打印出堆栈以调查这个原因
+			//enable(false);
+			LOGGER.error("### unExcepect delete event. current stack is ", new RuntimeException());
 		} else {
 			enable(Boolean.parseBoolean(value.getNewValue()));
 		}
