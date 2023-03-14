@@ -48,7 +48,7 @@ public class DynamicEnabledGRPCChannelManager extends GRPCChannelManager {
 		//LOGGER.debug("Selected collector grpc service running, reconnect:{}.", reconnect);
 
 		if (!dyanmicEnabledTraceSegmentServiceClientConfigWatcher.isEnbaleSendDataToServer()) {
-			LOGGER.info("### disable grpc heart beat");
+			LOGGER.info("### disable grpc heart beat for [ {} ]", Config.Agent.SERVICE_NAME);
 			return;
 		}
 		
