@@ -13,11 +13,36 @@
 	d. 问题解决后, 关闭server端, 关闭agent端向服务端推送监控数据的开关.
 6. 实现这个"动态启用"启用功能之后, 可以让h2版本的skywalking存活得久一些. 实属无奈之举.	
 	
+# 操作手册
+1. 将项目根目录下的`SWEnableUtils.java`文件拷贝到自己的项目中, 这里注意**不要更改其中的package结构**, 直接使用IDE的重构功能在你的项目中创建出对应的package结构.
+2. 在任意地方调用`SWEnableUtils.toggleDebug();` (推荐Controller层)
+
+	```
+		@RestController
+		public class SWController {
+		
+			// 开启/关闭"agent端向server端推送监控数据功能"
+			@GetMapping("/sw/toggleAgentPushDataToServer/{isEnable}")
+			public String toggleAgentPushDataToServer(@PathVariable boolean isEnable) {
+		
+				Object toggleAgentPushDataToServer = SWEnableUtils.toggleAgentPushDataToServer(isEnable);
+		
+				return String.format("toggleAgentPushDataToServer - [ %s ]", toggleAgentPushDataToServer);
+			}
+		
+			// 可观测性接口
+			@GetMapping("/sw/getCurrentStatus")
+			public Object getCurrentStatus() {
+				return SWEnableUtils.getAllStatus();
+			}
+		}	
+	```	
 	
-	
-TODO
+# TODO
 1. <s>向服务端推送logger数据</s>	
 2. <s>关闭metric功能</s>
+
+
 
 # 额外说明
 

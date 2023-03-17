@@ -11,8 +11,8 @@
 
 
 # 操作手册
-1. 将项目根目录下的`SWUtils.java`文件拷贝到自己的项目中, 这里注意**不要更改其中的package结构**, 直接使用IDE的重构功能在你的项目中创建出对应的package结构.
-2. 在任意地方调用`SWUtils.toggleDebug();` (推荐Controller层)
+1. 将项目根目录下的`SWDebugUtils.java`文件拷贝到自己的项目中, 这里注意**不要更改其中的package结构**, 直接使用IDE的重构功能在你的项目中创建出对应的package结构.
+2. 在任意地方调用`SWDebugUtils.toggleDebug();` (推荐Controller层)
 
 	```
 		@RestController
@@ -20,7 +20,7 @@
 			@GetMapping("/sw/toggleDebug")
 			public String toggleDebug() {
 				
-				SWUtils.toggleDebug();
+				SWDebugUtils.toggleDebug();
 				
 				return "toggleDebug";
 			}
