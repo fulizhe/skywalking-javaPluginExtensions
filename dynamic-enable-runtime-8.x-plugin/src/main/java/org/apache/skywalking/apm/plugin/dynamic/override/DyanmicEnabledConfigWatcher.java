@@ -16,7 +16,7 @@
  *
  */
 
-package org.apache.skywalking.apm.plugin.dynamic;
+package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;

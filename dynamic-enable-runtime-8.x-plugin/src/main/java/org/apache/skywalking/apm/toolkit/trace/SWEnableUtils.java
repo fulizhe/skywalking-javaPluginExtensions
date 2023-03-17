@@ -8,15 +8,7 @@ import java.util.Map;
  * @author LQ
  *
  */
-public class SWUtils {
-	/**
-	 * 开启/关闭 SW 调试信息
-	 * @author LQ
-	 *
-	 */
-	public static void toggleDebug() {
-	}
-
+public class SWEnableUtils {
 	/**
 	 * 开启/关闭 SW Agent向Server推送信息
 	 * @author LQ

@@ -1,4 +1,4 @@
-package org.apache.skywalking.apm.plugin.dynamic;
+package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;

@@ -15,7 +15,7 @@
  *  limitations under the License.
  */
 
-package org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8;
+package org.apache.skywalking.apm.plugin.dynamic;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;

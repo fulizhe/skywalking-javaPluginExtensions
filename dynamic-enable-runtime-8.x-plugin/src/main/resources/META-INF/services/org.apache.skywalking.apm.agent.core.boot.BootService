@@ -16,8 +16,8 @@
 #
 #
 
-org.apache.skywalking.apm.plugin.dynamic.DyanmicEnabledTraceSegmentServiceClient
-org.apache.skywalking.apm.plugin.dynamic.DynamicEnabledGRPCChannelManager
-org.apache.skywalking.apm.plugin.dynamic.DynamicEnabledLogReportServiceClient
-org.apache.skywalking.apm.plugin.dynamic.DisableJVMService
-org.apache.skywalking.apm.plugin.dynamic.DisableEventReportServiceClient
+org.apache.skywalking.apm.plugin.dynamic.override.DyanmicEnabledTraceSegmentServiceClient
+org.apache.skywalking.apm.plugin.dynamic.override.DynamicEnabledGRPCChannelManager
+org.apache.skywalking.apm.plugin.dynamic.override.DynamicEnabledLogReportServiceClient
+org.apache.skywalking.apm.plugin.dynamic.override.DisableJVMService
+org.apache.skywalking.apm.plugin.dynamic.override.DisableEventReportServiceClient

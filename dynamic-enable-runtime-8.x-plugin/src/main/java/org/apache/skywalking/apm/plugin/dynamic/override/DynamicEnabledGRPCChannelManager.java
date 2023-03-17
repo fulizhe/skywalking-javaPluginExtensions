@@ -16,36 +16,26 @@
  *
  */
 
-package org.apache.skywalking.apm.plugin.dynamic;
+package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
-import org.apache.skywalking.apm.agent.core.context.ContextManager;
+import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
+import org.apache.skywalking.apm.agent.core.remote.GRPCChannelManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
-import org.apache.skywalking.apm.agent.core.sampling.SamplingService;
 
-/**
- * <p> 只向server端推送指定的链路
- * @author LQ
- * @see trace-ignore-plugin模块中的{@code TraceIgnoreExtendService}冲突
- * @deprecated 暂未启用, 需要完善逻辑, 并且注册到 META-INF/services 中
- */
-@Deprecated
-@OverrideImplementor(SamplingService.class)
-class TraceCaptureSpecialSamplingService extends SamplingService {
-	private static final ILog LOGGER = LogManager.getLogger(TraceCaptureSpecialSamplingService.class);
+@OverrideImplementor(GRPCChannelManager.class)
+public class DynamicEnabledGRPCChannelManager extends GRPCChannelManager {
+	private static final ILog LOGGER = LogManager.getLogger(DynamicEnabledGRPCChannelManager.class);
 
 	private DyanmicEnabledConfigWatcher dyanmicEnabledTraceSegmentServiceClientConfigWatcher;
 
 	@Override
-	public void prepare() {
-		super.prepare();
-	}
-
-	@Override
 	public void boot() {
+		Config.Collector.GRPC_CHANNEL_CHECK_INTERVAL = 24 * 60 * 60; // 一天验活一次
+		
 		super.boot();
 
 		DyanmicEnabledTraceSegmentServiceClient findService = (DyanmicEnabledTraceSegmentServiceClient) ServiceManager.INSTANCE
@@ -54,34 +44,15 @@ class TraceCaptureSpecialSamplingService extends SamplingService {
 	}
 
 	@Override
-	public void onComplete() {
-	}
+	public void run() {
+		//LOGGER.debug("Selected collector grpc service running, reconnect:{}.", reconnect);
 
-	@Override
-	public void shutdown() {
-		super.shutdown();
-	}
-
-	@Override
-	public boolean trySampling(final String operationName) {
 		if (!dyanmicEnabledTraceSegmentServiceClientConfigWatcher.isEnbaleSendDataToServer()) {
-			LOGGER.debug("### discard trace of current operationName [ {} ]", operationName);
-			return false;
+			LOGGER.info("### disable grpc heart beat for [ {} ]", Config.Agent.SERVICE_NAME);
+			return;
 		}
-
-		// 这里可以在gateway层面形成约定, 约定满足时使用: TraceContext.putCorrelation("__CAPTURE_CURRENT_TRACE__", "VALUE"); 方式向插件报告本次需要采集		
-		if (ContextManager.isActive()
-				&& ContextManager.getCorrelationContext().get("__CAPTURE_CURRENT_TRACE__").isPresent()) {
-			return true;
-		}
-
-		return false;
-		//return super.trySampling(operationName);
-	}
-
-	@Override
-	public void forceSampled() {
-		super.forceSampled();
+		
+		super.run();				
 	}
 
 }

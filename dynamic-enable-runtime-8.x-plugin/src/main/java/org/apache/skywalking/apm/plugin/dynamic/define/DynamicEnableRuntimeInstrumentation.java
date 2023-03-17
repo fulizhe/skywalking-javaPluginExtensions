@@ -1,4 +1,4 @@
-package org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.define;
+package org.apache.skywalking.apm.plugin.dynamic.define;
 
 import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArgument;
@@ -17,12 +17,12 @@ import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatch
  */
 public class DynamicEnableRuntimeInstrumentation extends ClassStaticMethodsEnhancePluginDefine {
 
-	private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWUtils";
+	private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWEnableUtils";
 	private static final String ENHANCE_METHOD = "toggleAgentPushDataToServer";
 	private static final String ENHANCE_METHOD_2 = "getAllStatus";
 
-	private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicEnableRuntimeInterceptor";
-	private static final String INTERCEPTOR_CLASS_2 = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.ReportStatusOfAgentPushToServerInterceptor";
+	private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.dynamic.DynamicEnableRuntimeInterceptor";
+	private static final String INTERCEPTOR_CLASS_2 = "org.apache.skywalking.apm.plugin.dynamic.ReportStatusOfAgentPushToServerInterceptor";
 	
 
 	/**

@@ -23,7 +23,7 @@ import java.lang.reflect.Method;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
 import org.apache.skywalking.apm.agent.core.remote.GRPCChannelManager;
-import org.apache.skywalking.apm.plugin.dynamic.DynamicEnabledGRPCChannelManager;
+import org.apache.skywalking.apm.plugin.dynamic.override.DynamicEnabledGRPCChannelManager;
 import org.junit.Assert;
 import org.junit.Test;
 
