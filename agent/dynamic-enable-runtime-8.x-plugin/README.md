@@ -41,8 +41,7 @@
 # TODO
 1. <s>向服务端推送logger数据</s>	
 2. <s>关闭metric功能</s>
-
-
+3. Server端的`core.default.recordDataTTL=3`(删除该时间之前的数据), 其默认单位为天, 如果做到半小时以内.... 关键类型: `DataTTLKeeperTimer`.
 
 # 额外说明
 
