@@ -18,7 +18,6 @@
 
 package org.apache.skywalking.oap.server.storage.plugin.jdbc.h2.snapshot;
 
-import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.skywalking.oap.server.core.storage.IHistoryDeleteDAO;
@@ -37,7 +36,6 @@ import java.util.Arrays;
  * <p>
  * If someone wants to implement SQL-style database as storage, please just refer the logic.
  */
-@Slf4j
 public class H2SnapshotStorageProvider extends H2StorageProvider {
 
     private static final Logger LOGGER = LogManager.getLogger(H2SnapshotStorageProvider.class);
@@ -66,6 +64,7 @@ public class H2SnapshotStorageProvider extends H2StorageProvider {
             try {
                 t.setAccessible(true);
                 JDBCHikariCPClient h2Client = (JDBCHikariCPClient) t.get(this);
+                LOGGER.warn("### register self IHistoryDeleteDAO impl");
                 this.registerServiceImplementation(
                         IHistoryDeleteDAO.class, new H2SnapshotHistoryDeleteDAO(h2Client, config));
             } catch (IllegalAccessException e) {
