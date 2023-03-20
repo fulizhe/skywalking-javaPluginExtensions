@@ -31,6 +31,7 @@ import org.joda.time.DateTime;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.stream.Collectors;
 
 public class H2SnapshotHistoryDeleteDAO extends H2HistoryDeleteDAO {
 
@@ -55,7 +56,10 @@ public class H2SnapshotHistoryDeleteDAO extends H2HistoryDeleteDAO {
         // get the bigger one
         ttl = (config.getRecordDataTTL() > ttl) ? config.getRecordDataTTL() : ttl;
         if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("### current model which will deleted is [ {} ], the record is [ {} ], the downsample is [ {} ], the ttl is [ {} ], this config ttl is [ {} ].", model.getName(), model.isRecord(), model.getDownsampling(), ttl, config.getRecordDataTTL());
+            LOGGER.debug(
+                    "### current model which will deleted is [ {} ], the record is [ {} ], the downsample is [ {} ], the ttl is [ {} ], this config ttl is [ {} ]. the columns is [ {} ]",
+                    model.getName(), model.isRecord(), model.getDownsampling(), ttl, config.getRecordDataTTL(),
+                    model.getColumns().stream().map(s -> s.getColumnName().getName()).collect(Collectors.joining(",")));
         }
 
         try (Connection connection = client.getConnection()) {
@@ -65,13 +69,13 @@ public class H2SnapshotHistoryDeleteDAO extends H2HistoryDeleteDAO {
             } else {
                 switch (model.getDownsampling()) {
                     case Minute:
-                        deadline = Long.parseLong(new DateTime().plusDays(-ttl).toString("yyyyMMddHHmm"));
+                        deadline = Long.parseLong(new DateTime().plusMinutes(-ttl).toString("yyyyMMddHHmm"));
                         break;
                     case Hour:
-                        deadline = Long.parseLong(new DateTime().plusDays(-ttl).toString("yyyyMMddHH"));
+                        deadline = Long.parseLong(new DateTime().plusMinutes(-ttl).toString("yyyyMMddHHmm"));
                         break;
                     case Day:
-                        deadline = Long.parseLong(new DateTime().plusDays(-ttl).toString("yyyyMMdd"));
+                        deadline = Long.parseLong(new DateTime().plusMinutes(-ttl).toString("yyyyMMddHHmm"));
                         break;
                     default:
                         return;
