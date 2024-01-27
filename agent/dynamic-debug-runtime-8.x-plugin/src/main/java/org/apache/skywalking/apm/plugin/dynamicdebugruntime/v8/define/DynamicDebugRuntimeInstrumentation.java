@@ -18,7 +18,11 @@ public class DynamicDebugRuntimeInstrumentation extends ClassStaticMethodsEnhanc
 
     private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWUtils";
     private static final String ENHANCE_METHOD = "toggleDebug";
+	private static final String ENHANCE_METHOD_2 = "getAllStatus";    
+    
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicDebugRuntimeInterceptor";
+    private static final String INTERCEPTOR_CLASS_2 = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicDebugRuntimeInterceptor";
+    
 
     /**
      * @return the target class, which needs active.

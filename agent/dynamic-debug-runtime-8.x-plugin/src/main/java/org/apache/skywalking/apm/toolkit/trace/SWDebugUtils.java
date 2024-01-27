@@ -14,6 +14,6 @@ public class SWUtils {
 	 * @author LQ
 	 *
 	 */
-	public static void toggleDebug() {
+	public static void toggleDebug(boolean isEnable) {
 	}
 }
