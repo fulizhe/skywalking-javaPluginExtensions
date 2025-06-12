@@ -13,6 +13,8 @@
 		
 		<module>dynamic-debug-runtime-8.x-plugin</module>
 		<module>dynamic-enable-runtime-8.x-plugin</module>
+		
+		<module>logfile-reporter-plugin</module>
     </modules>
     <packaging>pom</packaging>
 
