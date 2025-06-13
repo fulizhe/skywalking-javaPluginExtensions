@@ -188,8 +188,6 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			logList.add(log);
 		}
 		logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
-//		LOGGER.info("### consume-SegmentObjectList【{}】: {}", data.get(0).getTraceSegmentId(),
-//				JSONUtil.toJsonStr(collect));
 	}
 
 	@Override

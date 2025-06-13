@@ -38,9 +38,7 @@ public class LogfileReporterEnableRuntimeInstrumentation extends ClassStaticMeth
 	@Override
 	protected ClassMatch enhanceClass() {
 		LOGGER.warn("### enhanceClass, {} ", ENHANCE_CLASS);
-		NameMatch byName = NameMatch.byName(ENHANCE_CLASS);
-		
-		LOGGER.warn("### enhanceClass. {} ", byName.getClassName());
+		NameMatch byName = NameMatch.byName(ENHANCE_CLASS);		
 		return byName;
 	}
 
