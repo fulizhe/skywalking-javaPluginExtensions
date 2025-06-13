@@ -26,8 +26,6 @@ import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 
-import cn.hutool.json.JSONUtil;
-
 /**
  * <p>
  * A tracing segment data reporter.
@@ -123,12 +121,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	@Override
 	public void consume(final List<TraceSegment> data) {
-
-//    	data.forEach(traceSegment -> {
-//            SegmentObject upstreamSegment = traceSegment.transform();
-//            
-//            LOGGER.info("### SegmentObject: {}", JSONUtil.toJsonStr(upstreamSegment));
-//        }); 
+		// 触发时机：由 DataCarrier（数据传输队列）批量消费时触发。DataCarrier 会把队列里的 TraceSegment 批量取出，调用 consume(List<TraceSegment> data)。
+		// 你可以在这里做“批量 TraceSegment 的统一处理”，比如：批量序列化、写日志、落盘、上报等。
 
 		if (!isEnbaleLogfileReporter()) {
 			LOGGER.info(
@@ -197,11 +191,15 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	@Override
 	public void onExit() {
-
+		carrier.shutdownConsumers();
 	}
 
 	@Override
 	public void afterFinished(final TraceSegment traceSegment) {
+		// afterFinished(final TraceSegment traceSegment) 方法会在每个 TraceSegment 完成（即一次完整的链路追踪数据采集结束）时被 SkyWalking Agent 回调。
+		// 原理是：SkyWalking 的核心链路追踪逻辑（如 TracingContext）在采集完一段 Trace 后，会遍历注册的 TracingContextListener，依次调用其 afterFinished 方法，把刚刚完成的 TraceSegment 传递给监听者，实现自定义处理（如上报、落盘等）。
+		// 你可以在这里做“单条 TraceSegment 完成后的自定义处理”，比如：把它放到队列、缓存、异步处理等。
+		// 这样可以解耦采集与后续处理逻辑。
 		if (LOGGER.isDebugEnable()) {
 			LOGGER.debug("Trace segment reporting, traceId: {}", traceSegment.getTraceSegmentId());
 		}
