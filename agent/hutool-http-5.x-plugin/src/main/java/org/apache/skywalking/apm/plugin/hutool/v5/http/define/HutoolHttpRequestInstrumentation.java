@@ -21,6 +21,8 @@ import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.Eleme
 import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArguments;
 import static org.apache.skywalking.apm.agent.core.plugin.match.NameMatch.byName;
 
+import org.apache.skywalking.apm.agent.core.logging.api.ILog;
+import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInterceptPoint;
@@ -45,8 +47,12 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
     private static final String ENHANCE_METHOD = "execute";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpRequestInterceptor";
 
+	private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestInstrumentation.class);
+
+    
     @Override
-    protected ClassMatch enhanceClass() {    	
+    protected ClassMatch enhanceClass() {    
+		LOGGER.warn("### enhanceClass-hutool, {} ", ENHANCE_CLASS);
         return byName(ENHANCE_CLASS);
     }
 
@@ -61,11 +67,14 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
         		new InstanceMethodsInterceptPoint() {
                     @Override
                     public ElementMatcher<MethodDescription> getMethodsMatcher() {
+                		LOGGER.warn("### getMethodsMatcher-hutool, {} ", ENHANCE_METHOD);
+
                         return named(ENHANCE_METHOD).and(takesArguments(boolean.class));
                     }
 
                     @Override
                     public String getMethodsInterceptor() {
+                    	LOGGER.warn("### getMethodsInterceptor-hutool, {} ", ENHANCE_METHOD);
                         return INTERCEPTOR_CLASS;
                     }
 

@@ -35,7 +35,8 @@ import cn.hutool.core.exceptions.UtilException;
 import cn.hutool.core.util.ReflectUtil;
 
 /**
- * <p> 针对"启用更多链路信息捕获"功能, 向外界提供可观测性
+ * <p>
+ * 针对"启用更多链路信息捕获"功能, 向外界提供可观测性
  */
 public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMethodsAroundInterceptor {
 	private static final ILog LOGGER = LogManager.getLogger(ReportStatusOfEnableMoreTraceDataInterceptor.class);
@@ -45,8 +46,8 @@ public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMetho
 			MethodInterceptResult result) {
 
 		Map<String, Boolean> resultMap = new HashMap<>();
-		resultMap.put("grpc-heartbeat", currentGrpcHeartBeatResult);
-		resultMap.put("enbaleSendDataToServer", isEnbaleSendDataToServer());
+		resultMap.put("grpc-heartbeat", false);
+		resultMap.put("enbaleSendDataToServer", true);
 
 		result.defineReturnValue(resultMap);
 	}
@@ -62,6 +63,17 @@ public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMetho
 		}
 	}
 
+
+	static final String CLASS_NAME_FEIGN_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.feign.http.v9.FeignPluginConfig$Plugin$Feign";
+	static final String CLASS_NAME_JDBC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.jdbc.JDBCPluginConfig$Plugin$JDBC";
+	static final String CLASS_NAME_SPRINGMVC_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.spring.mvc.commons.SpringMVCPluginConfig$Plugin$SpringMVC";
+	static final String CLASS_NAME_HTTPCLIENT_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig$Plugin$HttpClient";
+	static final String CLASS_NAME_TOMCAT_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.tomcat78x.TomcatPluginConfig$Plugin$Tomcat";
+	static final String CLASS_NAME_DUBBO_PLUGIN_CONFIG = "org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig$Plugin$HttpClient";
+	
+	
+		
+	
 	private static void toggleJdbc(Map<String, Object> result) {
 		try {
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
@@ -76,7 +88,8 @@ public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMetho
 		try {
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
 			Class<?> cls = cl.loadClass(CLASS_NAME_HTTPCLIENT_PLUGIN_CONFIG);
-			//final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			// final Boolean COLLECT_HTTP_PARAMS =
+			// Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
 			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", isEnable);
 		} catch (SecurityException | ClassNotFoundException | UtilException e) {
 			throw new RuntimeException(e);
@@ -87,7 +100,8 @@ public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMetho
 		try {
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
 			Class<?> cls = cl.loadClass(CLASS_NAME_SPRINGMVC_PLUGIN_CONFIG);
-			//final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			// final Boolean COLLECT_HTTP_PARAMS =
+			// Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
 			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", isEnable);
 		} catch (SecurityException | ClassNotFoundException | UtilException e) {
 			throw new RuntimeException(e);
@@ -98,7 +112,8 @@ public class ReportStatusOfEnableMoreTraceDataInterceptor implements StaticMetho
 		try {
 			ClassLoader cl = DynamicDebugRuntimeInterceptor.class.getClassLoader();
 			Class<?> cls = cl.loadClass(CLASS_NAME_TOMCAT_PLUGIN_CONFIG);
-			//final Boolean COLLECT_HTTP_PARAMS = Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
+			// final Boolean COLLECT_HTTP_PARAMS =
+			// Convert.toBool(ReflectUtil.getFieldValue(cls, "COLLECT_HTTP_PARAMS"));
 			ReflectUtil.setFieldValue(cls, "COLLECT_HTTP_PARAMS", isEnable);
 		} catch (SecurityException | ClassNotFoundException | UtilException e) {
 			throw new RuntimeException(e);

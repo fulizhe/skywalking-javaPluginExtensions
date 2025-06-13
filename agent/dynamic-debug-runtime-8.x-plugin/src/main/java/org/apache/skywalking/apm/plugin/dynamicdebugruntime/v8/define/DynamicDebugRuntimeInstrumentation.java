@@ -1,34 +1,35 @@
 package org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.define;
 
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
+
+import org.apache.skywalking.apm.agent.core.logging.api.ILog;
+import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassStaticMethodsEnhancePluginDefine;
 import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
 import org.apache.skywalking.apm.agent.core.plugin.match.NameMatch;
-
 import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
 import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
-
-import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
-import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesNoArguments;
 /**
  * Refer To {@code TraceContextActivation}
  * <p>
  */
 public class DynamicDebugRuntimeInstrumentation extends ClassStaticMethodsEnhancePluginDefine {
 
-    private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWUtils";
+    private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.trace.SWDebugUtils";
     private static final String ENHANCE_METHOD = "toggleDebug";
-	private static final String ENHANCE_METHOD_2 = "getAllStatus";    
     
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicDebugRuntimeInterceptor";
-    private static final String INTERCEPTOR_CLASS_2 = "org.apache.skywalking.apm.plugin.dynamicdebugruntime.v8.DynamicDebugRuntimeInterceptor";
     
+	private static final ILog LOGGER = LogManager.getLogger(DynamicDebugRuntimeInstrumentation.class);
 
     /**
      * @return the target class, which needs active.
      */
     @Override
     protected ClassMatch enhanceClass() {
+		LOGGER.warn("### enhanceClass-dynamic-debug, {} ", ENHANCE_CLASS);
+    	
         return NameMatch.byName(ENHANCE_CLASS);
     }
 
@@ -42,7 +43,8 @@ public class DynamicDebugRuntimeInstrumentation extends ClassStaticMethodsEnhanc
             new StaticMethodsInterceptPoint() {
                 @Override
                 public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                    return named(ENHANCE_METHOD).and(takesNoArguments());
+            		LOGGER.warn("### getMethodsMatcher-dynamic-debug, {} ", ENHANCE_CLASS);                	
+                    return named(ENHANCE_METHOD);//.and(takesNoArguments());
                 }
 
                 @Override
