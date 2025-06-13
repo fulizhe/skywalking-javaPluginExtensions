@@ -1,28 +1,20 @@
-package org.apache.skywalking.apm.toolkit.trace;
+package org.apache.skywalking.apm.toolkit;
 
 import java.util.Collections;
 import java.util.Map;
 
 /**
- * Refer To {@code TraceContext}
+ * <p> Refer To {@code TraceContext}
+ * <p> 他奶奶地，这个类千万不能定义在 org.apache.skywalking.apm.agent.core.XXX 目录下. 浪费我一上午.
+ * 
  * @author LQ
  *
  */
-public class SWLogFileReporterUtils {
-	/**
-	 * 开启/关闭 SW Agent向Server推送信息
-	 * @author LQ
-	 * @return 操作完成后的状态描述信息. 为true代表操作成功
-	 */	
-	public static Object toggleAgentPushDataToServer(boolean isEnable) {
-		return false;
-	}	
-	
-	/**
-	 * 向外界报告内部状态
-	 */	
-	public static Map<String, Boolean> getAllStatus() {
-		return Collections.emptyMap();
+public class SWLogfileReporterUtils2222222222222 {
+
+	static {
+		// 静态代码块，会在类加载时执行
+		System.out.println("### SWLogfileReporterUtils class loaded222222.");
 	}
 
 	public static void enableReport(Map<String, Object> config) {
@@ -30,11 +22,9 @@ public class SWLogFileReporterUtils {
 		// 1. 对于哪些请求进行捕获. 基于request的Spel进行判断
 		// 2. 日志存放根目录. / 直接存入缓存, 借鉴druid
 		// 3.
-		return false;
 	}
 
 	public static void disableReport(Map<String, Object> config) {
-		return false;
 	}
 
 	/**
