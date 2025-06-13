@@ -35,7 +35,8 @@ import cn.hutool.json.JSONUtil;
  * {@code DyanmicEnabledTraceSegmentServiceClient}
  */
 @OverrideImplementor(TraceSegmentServiceClient.class)
-public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient implements BootService, IConsumer<TraceSegment>, TracingContextListener {
+public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
+		implements BootService, IConsumer<TraceSegment>, TracingContextListener {
 
 	private static final ILog LOGGER = LogManager.getLogger(LogFileTraceSegmentServiceClient.class);
 
@@ -48,15 +49,15 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient 
 
 	private int maxLogSize = 1000;
 	// 借鉴自Druid的JdbcDataSourceStat
-	private final LinkedHashMap<String, LogCollection> logfileStatMap;
+	private final LinkedHashMap<String, Map<String, Object>> logfileStatMap;
 
 	public LogFileTraceSegmentServiceClient() {
 		this.enable = new AtomicBoolean(true);
 
-		logfileStatMap = new LinkedHashMap<String, LogCollection>(16, 0.75f, false) {
+		logfileStatMap = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
 			private static final long serialVersionUID = 1L;
 
-			protected boolean removeEldestEntry(Map.Entry<String, LogCollection> eldest) {
+			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
 				boolean remove = (size() > maxLogSize);
 
 				if (remove) {
@@ -87,7 +88,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient 
 		return enable.get();
 	}
 
-	public Map<String, LogCollection> getLogfileStatMap() {
+	public Map<String, Map<String, Object>> getLogfileStatMap() {
 		return logfileStatMap;
 	}
 
@@ -135,7 +136,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient 
 					Config.Agent.SERVICE_NAME, data.size());
 			return;
 		}
-		
+
 		LOGGER.info(
 				"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
 				Config.Agent.SERVICE_NAME, isEnbaleLogfileReporter(), data.size(), logfileStatMap.size());
@@ -186,7 +187,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient 
 			log.setSpans(spanInfoList);
 			logList.add(log);
 		}
-		logfileStatMap.put(globalTraceid, new LogCollection(logList));
+		logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 //		LOGGER.info("### consume-SegmentObjectList【{}】: {}", data.get(0).getTraceSegmentId(),
 //				JSONUtil.toJsonStr(collect));
 	}

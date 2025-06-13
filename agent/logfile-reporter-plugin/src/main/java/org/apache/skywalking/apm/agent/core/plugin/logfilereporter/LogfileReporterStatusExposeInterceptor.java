@@ -19,6 +19,7 @@ package org.apache.skywalking.apm.agent.core.plugin.logfilereporter;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
