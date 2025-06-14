@@ -1,5 +1,10 @@
 # 项目说明
 
+agent侧搜集到的监控数据, 默认应该发送到oap的. 本plugin将之截获本保存到本地cache里. 魔改以适应单体项目快速使用.
+
+1. 监控数据的缓存实现参考Druid里的<code>JdbcDataSourceStat</code>.
+2. 
+
 # 参考
 
 1. [Office Site - submit the agent collected data to the backend](https://skywalking.apache.org/docs/skywalking-java/v9.3.0/en/setup/service-agent/java-agent/advanced-reporters/) -- The advanced report provides an alternative way to submit the agent collected data to the backend. All of them are in the optional-reporter-plugins folder
