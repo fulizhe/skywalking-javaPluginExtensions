@@ -6,9 +6,9 @@ public class LogFileReporterPluginConfig {
 
     public static class Plugin {
         @PluginConfig(root = LogFileReporterPluginConfig.class)
-        public static class LogFile {
+        public static class LogFileReporter {
 
-            public static String TOPIC_SEGMENT = "skywalking-segments-logfile";
+            public static Integer MAX_LOG_SIZE = 1000;
 
         }
     }

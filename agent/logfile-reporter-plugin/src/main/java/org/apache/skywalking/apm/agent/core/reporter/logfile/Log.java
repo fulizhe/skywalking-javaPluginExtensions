@@ -1,6 +1,7 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -52,6 +53,38 @@ public class Log {
     }
     public void setSpans(List<SpanInfo> spans) {
         this.spans = spans;
+    }
+
+    /**
+     * 将Log对象转换为Map，便于序列化或外部系统使用
+     */
+    public Map<String, Object> toMap() {
+        Map<String, Object> map = new java.util.HashMap<>();
+        map.put("traceId", this.traceId);
+        map.put("traceSegmentId", this.traceSegmentId);
+        map.put("service", this.service);
+        map.put("serviceInstance", this.serviceInstance);
+        map.put("isSizeLimited", this.isSizeLimited);
+
+        // 处理spans
+        List<Map<String, Object>> spanMaps = new java.util.ArrayList<>();
+        if (this.spans != null) {
+            for (SpanInfo span : this.spans) {
+                Map<String, Object> spanMap = new java.util.HashMap<>();
+                spanMap.put("spanId", span.getSpanId());
+                spanMap.put("operationName", span.getOperationName());
+                spanMap.put("startTime", span.getStartTime());
+                spanMap.put("endTime", span.getEndTime());
+                spanMap.put("spanType", span.getSpanType());
+                spanMap.put("spanLayer", span.getSpanLayer());
+                spanMap.put("componentId", span.getComponentId());
+                spanMap.put("isError", span.getIsError());
+                spanMaps.add(spanMap);
+            }
+        }
+        map.put("spans", spanMaps);
+
+        return map;
     }
 
     @Override

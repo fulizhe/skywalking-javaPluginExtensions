@@ -22,34 +22,12 @@ public class LogCollection {
 	}
 
 	public Map<String, Object> toMap() {
+		// 优化：直接复用Log对象的toMap方法，提升代码复用性和可读性
 		Map<String, Object> map = new HashMap<>();
-		// 将每个Log对象转换为Map，再放入logs的List中
 		List<Map<String, Object>> logMaps = new ArrayList<>();
 		for (Log log : logs) {
-			Map<String, Object> logMap = new java.util.HashMap<>();
-			logMap.put("traceId", log.getTraceId());
-			logMap.put("traceSegmentId", log.getTraceSegmentId());
-			logMap.put("service", log.getService());
-			logMap.put("serviceInstance", log.getServiceInstance());
-			logMap.put("isSizeLimited", log.getIsSizeLimited());
-			// 处理spans
-			List<Map<String, Object>> spanMaps = new ArrayList<>();
-			if (log.getSpans() != null) {
-				for (Log.SpanInfo span : log.getSpans()) {
-					Map<String, Object> spanMap = new java.util.HashMap<>();
-					spanMap.put("spanId", span.getSpanId());
-					spanMap.put("operationName", span.getOperationName());
-					spanMap.put("startTime", span.getStartTime());
-					spanMap.put("endTime", span.getEndTime());
-					spanMap.put("spanType", span.getSpanType());
-					spanMap.put("spanLayer", span.getSpanLayer());
-					spanMap.put("componentId", span.getComponentId());
-					spanMap.put("isError", span.getIsError());
-					spanMaps.add(spanMap);
-				}
-			}
-			logMap.put("spans", spanMaps);
-			logMaps.add(logMap);
+			// 直接调用Log的toMap方法，避免重复造轮子
+			logMaps.add(log.toMap());
 		}
 		map.put("logs", logMaps);
 		return map;

@@ -38,7 +38,6 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	private static final ILog LOGGER = LogManager.getLogger(LogFileTraceSegmentServiceClient.class);
 
-	private String topic;
 	// private Producer<byte[]> producer;
 
 	private volatile DataCarrier<TraceSegment> carrier;
@@ -57,14 +56,12 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
 				boolean remove = (size() > maxLogSize);
-
-				if (remove) {
-					Object sqlStat = eldest.getValue();
-					// if (sqlStat.getRunningCount() > 0 || sqlStat.getExecuteCount() > 0) {
-					// skipSqlCount.incrementAndGet();
-					// }
-				}
-
+//				if (remove) {
+//					Object sqlStat = eldest.getValue();
+//					// if (sqlStat.getRunningCount() > 0 || sqlStat.getExecuteCount() > 0) {
+//					// skipSqlCount.incrementAndGet();
+//					// }
+//				}
 				return remove;
 			}
 		};
@@ -96,9 +93,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	public void prepare() {
 //        PulsarProducerManager producerManager = ServiceManager.INSTANCE.findService(PulsarProducerManager.class);
 //        producerManager.addListener(this);
-		topic = LogFileReporterPluginConfig.Plugin.LogFile.TOPIC_SEGMENT;
+		maxLogSize = LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE != null
+				? LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE
+				: maxLogSize;
 
-		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - {}", topic);
+		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - maxLogSize is [ {} ]", maxLogSize);
 
 	}
 
@@ -121,12 +120,13 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	@Override
 	public void consume(final List<TraceSegment> data) {
-		// 触发时机：由 DataCarrier（数据传输队列）批量消费时触发。DataCarrier 会把队列里的 TraceSegment 批量取出，调用 consume(List<TraceSegment> data)。
+		// 触发时机：由 DataCarrier（数据传输队列）批量消费时触发。DataCarrier 会把队列里的 TraceSegment 批量取出，调用
+		// consume(List<TraceSegment> data)。
 		// 你可以在这里做“批量 TraceSegment 的统一处理”，比如：批量序列化、写日志、落盘、上报等。
 
 		if (!isEnbaleLogfileReporter()) {
 			LOGGER.info(
-					"### disable the logfile-reporter [ {} ] which save data to log-file. the collection size of data is [ {} ]",
+					"###consume. disable the logfile-reporter [ {} ] which save data to log-file. the collection size of data is [ {} ]",
 					Config.Agent.SERVICE_NAME, data.size());
 			return;
 		}
@@ -154,11 +154,14 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// 300，可动态配置），超过上限之后，就不再添加 Span了；这是一个内存保护措施。
 		// 将 SegmentObject 转换为自定义的 Log 对象，并存入缓存，供外部读取
 		final List<SegmentObject> collect = data.stream().map(TraceSegment::transform).collect(Collectors.toList());
-		final String globalTraceid = collect.get(0).getTraceId();
-		final List<Log> logList = new ArrayList<>();
+		// final String globalTraceid = collect.get(0).getTraceId();
+		// final List<Log> logList = new ArrayList<>();
 		for (SegmentObject segment : collect) {
 			Log log = new Log();
 			// 假设 Log 类有对应的 setter 方法，或者构造方法
+			// 1. traceId：全局唯一，标识一次完整的分布式调用。
+			// 2. traceSegmentId：局部唯一，标识某个服务/线程/进程中的一个调用片段。
+			// 3. 一个 traceId 下可以有多个 traceSegmentId，它们通过“引用关系”串联成完整的调用链。
 			log.setTraceId(segment.getTraceId());
 			log.setTraceSegmentId(segment.getTraceSegmentId());
 			log.setService(segment.getService());
@@ -179,9 +182,33 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				spanInfoList.add(spanInfo);
 			}
 			log.setSpans(spanInfoList);
-			logList.add(log);
+			// logList.add(log);
+
+			final String globalTraceid = log.getTraceId();
+			// 这里是traceId一样的放到一起
+			// 先判断当前traceId是否已存在于logfileStatMap中，如果存在则合并logList，否则直接放入
+			if (logfileStatMap.containsKey(globalTraceid)) {
+				// 已有该traceId，合并log
+				Object obj = logfileStatMap.get(globalTraceid);
+				if (obj instanceof Map) {
+					Map<String, Object> map = (Map<String, Object>) obj;
+					Object logsObj = map.get("logs");
+					if (logsObj instanceof List) {
+						List<Map<String, Object>> logs = (List<Map<String, Object>>) logsObj;
+						// 将当前log对象转为map并加入
+						logs.add(log.toMap());
+					}
+				}
+			} else {
+				// 没有该traceId，直接put一个新的LogCollection
+				logfileStatMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
+					{
+						add(log);
+					}
+				}).toMap());
+			}
 		}
-		logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
+		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 	}
 
 	@Override
@@ -196,8 +223,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	@Override
 	public void afterFinished(final TraceSegment traceSegment) {
-		// afterFinished(final TraceSegment traceSegment) 方法会在每个 TraceSegment 完成（即一次完整的链路追踪数据采集结束）时被 SkyWalking Agent 回调。
-		// 原理是：SkyWalking 的核心链路追踪逻辑（如 TracingContext）在采集完一段 Trace 后，会遍历注册的 TracingContextListener，依次调用其 afterFinished 方法，把刚刚完成的 TraceSegment 传递给监听者，实现自定义处理（如上报、落盘等）。
+		// afterFinished(final TraceSegment traceSegment) 方法会在每个 TraceSegment
+		// 完成（即一次完整的链路追踪数据采集结束）时被 SkyWalking Agent 回调。
+		// 原理是：SkyWalking 的核心链路追踪逻辑（如 TracingContext）在采集完一段 Trace 后，会遍历注册的
+		// TracingContextListener，依次调用其 afterFinished 方法，把刚刚完成的 TraceSegment
+		// 传递给监听者，实现自定义处理（如上报、落盘等）。
 		// 你可以在这里做“单条 TraceSegment 完成后的自定义处理”，比如：把它放到队列、缓存、异步处理等。
 		// 这样可以解耦采集与后续处理逻辑。
 		if (LOGGER.isDebugEnable()) {
@@ -208,10 +238,41 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			LOGGER.debug("Trace[TraceId={}] is ignored.", traceSegment.getTraceSegmentId());
 			return;
 		}
-		carrier.produce(traceSegment);
 
-		// FIXME 这里啥时候回调？
-//		LOGGER.info("### afterFinished-SegmentObject: {}", traceSegment.toString());
+		if (!isEnbaleLogfileReporter()) {
+			LOGGER.info("### afterFinished. disable the logfile-reporter [ {} ] which save data to log-file.",
+					Config.Agent.SERVICE_NAME);
+			return;
+		}
+		carrier.produce(traceSegment);
+//
+//		// =====================================================================
+//		final SegmentObject segment = traceSegment.transform();
+//		Log log = new Log();
+//		// 假设 Log 类有对应的 setter 方法，或者构造方法
+//		log.setTraceId(segment.getTraceId());
+//		log.setTraceSegmentId(segment.getTraceSegmentId());
+//		log.setService(segment.getService());
+//		log.setServiceInstance(segment.getServiceInstance());
+//		log.setIsSizeLimited(segment.getIsSizeLimited());
+//
+//		List<Log.SpanInfo> spanInfoList = new ArrayList<>();
+//		for (SpanObject span : segment.getSpansList()) {
+//			Log.SpanInfo spanInfo = new Log.SpanInfo();
+//			spanInfo.setSpanId(span.getSpanId());
+//			spanInfo.setOperationName(span.getOperationName());
+//			spanInfo.setStartTime(span.getStartTime());
+//			spanInfo.setEndTime(span.getEndTime());
+//			spanInfo.setSpanType(span.getSpanType().toString());
+//			spanInfo.setSpanLayer(span.getSpanLayer().toString());
+//			spanInfo.setComponentId(span.getComponentId());
+//			spanInfo.setIsError(span.getIsError());
+//			spanInfoList.add(spanInfo);
+//		}
+//		log.setSpans(spanInfoList);
+//
+//		final String globalTraceid = segment.getTraceId();
+//		logfileStatMap.put(globalTraceid, log.toMap());
 	}
 
 	@Override
