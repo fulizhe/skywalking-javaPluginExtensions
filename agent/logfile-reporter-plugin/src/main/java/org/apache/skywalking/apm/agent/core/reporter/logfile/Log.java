@@ -79,6 +79,8 @@ public class Log {
                 spanMap.put("spanLayer", span.getSpanLayer());
                 spanMap.put("componentId", span.getComponentId());
                 spanMap.put("isError", span.getIsError());
+                spanMap.put("logsCount", span.getLogsCount());
+                spanMap.put("tagList", span.getTagList());
                 spanMaps.add(spanMap);
             }
         }
@@ -111,6 +113,8 @@ public class Log {
         private String spanLayer;
         private int componentId;
         private boolean isError;
+        private int logsCount;
+        private List<Map<String, Object>> tagList;
 
         // Getter方法
         public int getSpanId() {
@@ -136,7 +140,13 @@ public class Log {
         }
         public boolean getIsError() {
             return isError;
+        }        
+        public int getLogsCount() {
+        	return logsCount;
         }
+		public List<Map<String, Object>> getTagList() {
+			return tagList;
+		}        
 
         // Setter方法
         public void setSpanId(int spanId) {
@@ -163,6 +173,12 @@ public class Log {
         public void setIsError(boolean isError) {
             this.isError = isError;
         }
+		public void setLogCount(int logsCount) {
+			this.logsCount = logsCount;
+		}
+		public void setTagList(List<Map<String, Object>> tagList) {
+			this.tagList = tagList;
+		}        
 
         @Override
         public String toString() {
@@ -177,5 +193,6 @@ public class Log {
                     ", isError=" + isError +
                     '}';
         }
+
     }
 }

@@ -4,6 +4,7 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.BUFFER_SIZ
 import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SIZE;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
+import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 
@@ -131,10 +133,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			return;
 		}
 
-		LOGGER.info(
-				"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
-				Config.Agent.SERVICE_NAME, isEnbaleLogfileReporter(), data.size(), logfileStatMap.size());
-
+		if (LOGGER.isDebugEnable()) {
+			LOGGER.info(
+					"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
+					Config.Agent.SERVICE_NAME, isEnbaleLogfileReporter(), data.size(), logfileStatMap.size());
+		}
 		// 《SW原理 - 基本概念 （ TraceSegment ）》
 		// 1. 一个trace由多个tracesegment构成
 		// 2. 一个Tracesegemnt记录了一个请求在一个线程中的执行流程
@@ -179,6 +182,20 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				spanInfo.setSpanLayer(span.getSpanLayer().toString());
 				spanInfo.setComponentId(span.getComponentId());
 				spanInfo.setIsError(span.getIsError());
+				// 增加logCount字段和tag集合的处理，便于后续序列化和展示
+				// 假设SpanObject有getLogCount()和getTagsList()方法
+				spanInfo.setLogCount(span.getLogsCount());
+				// 处理tag集合，假设tag为键值对结构
+				List<Map<String, Object>> tagList = new ArrayList<>();
+				if (span.getTagsList() != null) {
+					for (KeyStringValuePair tag : span.getTagsList()) {
+						Map<String, Object> tagMap = new HashMap<>();
+						tagMap.put("tag-key", tag.getKey());
+						tagMap.put("tag-value", tag.getValue());
+						tagList.add(tagMap);
+					}
+				}
+				spanInfo.setTagList(tagList);
 				spanInfoList.add(spanInfo);
 			}
 			log.setSpans(spanInfoList);
