@@ -24,6 +24,7 @@ import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
+import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
@@ -182,9 +183,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				spanInfo.setSpanLayer(span.getSpanLayer().toString());
 				spanInfo.setComponentId(span.getComponentId());
 				spanInfo.setIsError(span.getIsError());
-				// 增加logCount字段和tag集合的处理，便于后续序列化和展示
-				// 假设SpanObject有getLogCount()和getTagsList()方法
-				spanInfo.setLogCount(span.getLogsCount());
+				spanInfo.setLogList(span.getLogsList().stream().map(l -> TextFormat.printToString(l)).collect(Collectors.toList()));
 				// 处理tag集合，假设tag为键值对结构
 				List<Map<String, Object>> tagList = new ArrayList<>();
 				if (span.getTagsList() != null) {
