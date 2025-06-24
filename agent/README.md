@@ -9,6 +9,7 @@ Skywalking Java Agent插件
 3. [dynamic-debug-runtime](./dynamic-debug-runtime-8.x-plugin)
 4. [dynamic-enable-runtime](./dynamic-enable-runtime-8.x-plugin)
 5. [sqlite](./sqlite-3.x-plugin)
+5. [logfile-reporter](./logfile-reporter-plugin)
 
 
 #### 参考
