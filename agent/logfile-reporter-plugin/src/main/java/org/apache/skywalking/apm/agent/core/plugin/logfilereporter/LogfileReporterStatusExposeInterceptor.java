@@ -19,7 +19,6 @@ package org.apache.skywalking.apm.agent.core.plugin.logfilereporter;
 
 import java.lang.reflect.Method;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
@@ -51,10 +50,12 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 				.findService(TraceSegmentServiceClient.class);
 		final Object logfileStatMap = ReflectUtil.invoke(client, "getLogfileStatMap");
 		final Object enable = ReflectUtil.invoke(client, "isEnbaleLogfileReporter");
-
+		final Object maxLogSize = ReflectUtil.getFieldValue(client, "maxLogSize");
+		
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
 		resultMap.put("enbaleLogfileReporter", enable);
+		resultMap.put("maxLogSize", maxLogSize);
 
 		result.defineReturnValue(resultMap);
 	}
