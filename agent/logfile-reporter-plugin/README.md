@@ -14,6 +14,12 @@ agent侧搜集到的监控数据, 默认应该发送到oap的. 本plugin将之�
 3. 《SW - java-agent》
 4. 《SW - 实战 - 起步(BladeX示例)》
 
+# 配置项
+
+```shell
+-Dskywalking.plugin.logfilereporter.max_log_size=2000
+```
+
 # 关联项目
 
 1. 《sb-skywalking》
