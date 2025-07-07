@@ -27,6 +27,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.network.logging.v3.LogData;
+import org.apache.skywalking.apm.network.logging.v3.LogData.Builder;
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 
 @OverrideImplementor(LogReportServiceClient.class)
@@ -37,7 +38,7 @@ public class DynamicEnabledLogReportServiceClient extends LogReportServiceClient
 
 	@Override
 	public void prepare() throws Throwable {
-		//ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
+		// ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
 		super.prepare();
 	}
 
@@ -50,8 +51,27 @@ public class DynamicEnabledLogReportServiceClient extends LogReportServiceClient
 		dyanmicEnabledTraceSegmentServiceClientConfigWatcher = findService.getConfigWatcher();
 	}
 
+	// ====================== 8.8
+//	@Override
+//	public void consume(List<LogData> arg0) {
+//		if (CollectionUtil.isEmpty(arg0)) {
+//			return;
+//		}
+//
+//		if (!dyanmicEnabledTraceSegmentServiceClientConfigWatcher.isEnbaleSendDataToServer()) {
+//			LOGGER.debug("### disable push log data to server, the collection size of log data is [ {} ]", arg0);
+//			return;
+//		}
+//
+//		// 其实在8.8.x中, 已经实现了基于 GRPCChannelStatus 的判断. 但是我们还是在上面加上我们的配置判断
+//		super.consume(arg0);
+//		
+//		this.consume(null);
+//	}
+
+	// ====================== 9.4
 	@Override
-	public void consume(List<LogData> arg0) {
+	public void consume(List<Builder> arg0) {
 		if (CollectionUtil.isEmpty(arg0)) {
 			return;
 		}
@@ -61,7 +81,6 @@ public class DynamicEnabledLogReportServiceClient extends LogReportServiceClient
 			return;
 		}
 
-		// 其实在8.8.x中, 已经实现了基于 GRPCChannelStatus 的判断. 但是我们还是在上面加上我们的配置判断
 		super.consume(arg0);
 	}
 
