@@ -23,6 +23,7 @@ import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
 import org.apache.skywalking.apm.agent.core.context.ContextManager;
+import org.apache.skywalking.apm.agent.core.jvm.JVMMetricsSender;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
@@ -43,19 +44,31 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 	@Override
 	public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
 			MethodInterceptResult result) {
-		
+
 		LOGGER.info("### Status Expose");
 
-		TraceSegmentServiceClient client = (TraceSegmentServiceClient) ServiceManager.INSTANCE
+		final TraceSegmentServiceClient client = (TraceSegmentServiceClient) ServiceManager.INSTANCE
 				.findService(TraceSegmentServiceClient.class);
+		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型
 		final Object logfileStatMap = ReflectUtil.invoke(client, "getLogfileStatMap");
 		final Object enable = ReflectUtil.invoke(client, "isEnbaleLogfileReporter");
 		final Object maxLogSize = ReflectUtil.getFieldValue(client, "maxLogSize");
-		
+
+		final JVMMetricsSender sender = (JVMMetricsSender) ServiceManager.INSTANCE
+				.findService(JVMMetricsSender.class);
+		// 增加日志输出，确保sender对象已成功获取
+		if (sender == null) {
+			LOGGER.warn("### JVMMetricsLocalSender 获取失败, sender为null");
+		} else {
+			LOGGER.info("### JVMMetricsLocalSender 获取成功: {}", sender.getClass().getName());
+		}
+
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
 		resultMap.put("enbaleLogfileReporter", enable);
 		resultMap.put("maxLogSize", maxLogSize);
+		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型JVMMetricsLocalSender
+		resultMap.put("jvm", ReflectUtil.invoke(sender, "getMetrics"));
 
 		result.defineReturnValue(resultMap);
 	}
