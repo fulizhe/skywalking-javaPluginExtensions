@@ -12,11 +12,13 @@ import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.jvm.JVMMetricsSender;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
+import org.apache.skywalking.apm.network.language.agent.v3.Class;
 import org.apache.skywalking.apm.network.language.agent.v3.GC;
 import org.apache.skywalking.apm.network.language.agent.v3.JVMMetric;
 import org.apache.skywalking.apm.network.language.agent.v3.JVMMetricCollection;
 import org.apache.skywalking.apm.network.language.agent.v3.Memory;
 import org.apache.skywalking.apm.network.language.agent.v3.MemoryPool;
+import org.apache.skywalking.apm.network.language.agent.v3.Thread;
 
 /**
  * <p>
@@ -126,6 +128,26 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 						gcList.add(gcMap);
 					}
 					m.put("gc", gcList);
+					
+					// 以 thread 和 clazz 为key，分别存储线程和类相关的指标，便于前端展示和结构化处理
+					Thread thread = metric.getThread();
+					Map<String, Object> threadMap = new java.util.HashMap<>();
+					threadMap.put("daemon", thread.getDaemonCount()); // 守护线程数
+					threadMap.put("live", thread.getLiveCount());     // 活跃线程数
+					threadMap.put("peak", thread.getPeakCount());     // 峰值线程数
+					threadMap.put("blocked", thread.getBlockedStateThreadCount());           // blocked状态线程数
+					threadMap.put("runnable", thread.getRunnableStateThreadCount());         // runnable状态线程数
+					threadMap.put("timed_waiting", thread.getTimedWaitingStateThreadCount()); // timed_waiting状态线程数
+					threadMap.put("waiting", thread.getWaitingStateThreadCount());           // waiting状态线程数
+					m.put("thread", threadMap);
+
+					Class clazz = metric.getClazz();
+					Map<String, Object> clazzMap = new java.util.HashMap<>();
+					clazzMap.put("loaded", clazz.getLoadedClassCount());           // 当前已加载类数量
+					clazzMap.put("total_loaded", clazz.getTotalLoadedClassCount()); // 累计加载类数量
+					clazzMap.put("total_unloaded", clazz.getTotalUnloadedClassCount()); // 累计卸载类数量
+					m.put("clazz", clazzMap);
+					
 					metricsList.add(m);
 				}
 				metricMap.put("metrics", metricsList);
