@@ -28,6 +28,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
+import org.apache.skywalking.apm.agent.core.remote.ServiceManagementClient;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 
 import cn.hutool.core.util.ReflectUtil;
@@ -47,6 +48,7 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 
 		LOGGER.info("### Status Expose");
 
+		// 1. =================================================================
 		final TraceSegmentServiceClient client = (TraceSegmentServiceClient) ServiceManager.INSTANCE
 				.findService(TraceSegmentServiceClient.class);
 		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型
@@ -54,6 +56,7 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		final Object enable = ReflectUtil.invoke(client, "isEnbaleLogfileReporter");
 		final Object maxLogSize = ReflectUtil.getFieldValue(client, "maxLogSize");
 
+		// 2. =================================================================
 		final JVMMetricsSender sender = (JVMMetricsSender) ServiceManager.INSTANCE
 				.findService(JVMMetricsSender.class);
 		// 增加日志输出，确保sender对象已成功获取
@@ -63,12 +66,23 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 			LOGGER.info("### JVMMetricsLocalSender 获取成功: {}", sender.getClass().getName());
 		}
 
+		// 3. =================================================================
+		final ServiceManagementClient client2 = (ServiceManagementClient) ServiceManager.INSTANCE
+				.findService(ServiceManagementClient.class);
+		// 增加日志输出，确保client2对象已成功获取
+		if (client2 == null) {
+			LOGGER.warn("### ServiceManagementClient 获取失败, sender为null");
+		} else {
+			LOGGER.info("### ServiceManagementClient 获取成功: {}", client2.getClass().getName());
+		}
+		// 4. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
-		resultMap.put("enbaleLogfileReporter", enable);
+		resultMap.put("enableLogfileReporter", enable);
 		resultMap.put("maxLogSize", maxLogSize);
 		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型JVMMetricsLocalSender
 		resultMap.put("jvm", ReflectUtil.invoke(sender, "getMetrics"));
+		resultMap.put("instanceProperties", ReflectUtil.invoke(client2, "getInstanceProperties"));
 
 		result.defineReturnValue(resultMap);
 	}
