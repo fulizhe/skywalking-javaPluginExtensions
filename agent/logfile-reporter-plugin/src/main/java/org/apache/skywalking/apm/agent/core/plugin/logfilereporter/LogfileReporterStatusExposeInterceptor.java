@@ -26,6 +26,7 @@ import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.jvm.JVMMetricsSender;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
+import org.apache.skywalking.apm.agent.core.meter.MeterSender;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
 import org.apache.skywalking.apm.agent.core.remote.ServiceManagementClient;
@@ -75,6 +76,17 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		} else {
 			LOGGER.info("### ServiceManagementClient 获取成功: {}", client2.getClass().getName());
 		}
+		
+		// 3. =================================================================
+		final MeterSender sender2 = (MeterSender) ServiceManager.INSTANCE
+				.findService(MeterSender.class);
+		// 增加日志输出，确保client2对象已成功获取
+		if (sender2 == null) {
+			LOGGER.warn("### MeterLocalSender 获取失败, sender为null");
+		} else {
+			LOGGER.info("### MeterLocalSender 获取成功: {}", sender2.getClass().getName());
+		}		
+		
 		// 4. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
@@ -83,6 +95,7 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型JVMMetricsLocalSender
 		resultMap.put("jvm", ReflectUtil.invoke(sender, "getMetrics"));
 		resultMap.put("instanceProperties", ReflectUtil.invoke(client2, "getInstanceProperties"));
+		resultMap.put("meterData", ReflectUtil.invoke(sender2, "getMeterDatas"));
 
 		result.defineReturnValue(resultMap);
 	}
