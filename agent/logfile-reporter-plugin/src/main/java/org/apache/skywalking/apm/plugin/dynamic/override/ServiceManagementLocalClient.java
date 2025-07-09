@@ -35,7 +35,7 @@ import org.apache.skywalking.apm.network.management.v3.ManagementServiceGrpc;
 
 /**
  * <p>
- * 收集到的JVM Metrics数据不再发送给OAP侧, 而是保存到本地.
+ * 
  * <p>
  * <p>
  * Refer To {@code DisableJVMService}
