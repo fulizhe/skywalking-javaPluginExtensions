@@ -18,3 +18,5 @@ org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileTraceSegmentService
 org.apache.skywalking.apm.plugin.dynamic.override.JVMMetricsLocalSender
 org.apache.skywalking.apm.plugin.dynamic.override.ServiceManagementLocalClient
 org.apache.skywalking.apm.plugin.dynamic.override.MeterLocalSender
+org.apache.skywalking.apm.plugin.dynamic.override.LogReportServiceLocalClient
+org.apache.skywalking.apm.plugin.dynamic.override.ProfileSnapshotLocalSender

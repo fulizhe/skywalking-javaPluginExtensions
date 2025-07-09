@@ -13,7 +13,7 @@ EventReportServiceClient    # 上报启动/停止事件
 ~~JVMMetricsSender            # JVM Metrics~~
 
 # 参考
-可以通过查看`kafka-reporter-plugin`这个组件下的类型来快速确定哪些类型可以被考虑
+可以通过查看[`kafka-reporter-plugin`](https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaJVMMetricsSender.java)这个组件下的类型来快速确定哪些类型可以被考虑
 似乎基本都覆盖了
 
 # TODO

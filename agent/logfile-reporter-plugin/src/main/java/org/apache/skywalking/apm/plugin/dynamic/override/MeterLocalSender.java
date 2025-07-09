@@ -21,12 +21,14 @@ import org.apache.skywalking.apm.network.language.agent.v3.MeterDataCollection;
  * <p>
  * Refer To {@code KafkaMeterSender}
  * <p>
+ *
+ *  <p> https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-meter/ 【application-toolkit-meter组件】</p>
  */
 @OverrideImplementor(MeterSender.class)
 public class MeterLocalSender extends MeterSender {
 	private static final ILog LOGGER = LogManager.getLogger(MeterLocalSender.class);
 
-// 借鉴自Druid的JdbcDataSourceStat
+	// 借鉴自Druid的JdbcDataSourceStat
 	private LinkedHashMap<String, Map<String, Object>> meterDataCache;
 
 	@Override
@@ -35,7 +37,7 @@ public class MeterLocalSender extends MeterSender {
 			private static final long serialVersionUID = 1L;
 
 			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-				return (size() > 1000);
+				return (size() > 500);
 
 			}
 		};

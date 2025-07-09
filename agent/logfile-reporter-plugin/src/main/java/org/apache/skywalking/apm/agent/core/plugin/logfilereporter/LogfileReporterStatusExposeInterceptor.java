@@ -29,6 +29,8 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.meter.MeterSender;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
+import org.apache.skywalking.apm.agent.core.profile.ProfileSnapshotSender;
+import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.remote.ServiceManagementClient;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 
@@ -85,9 +87,27 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 			LOGGER.warn("### MeterLocalSender 获取失败, sender为null");
 		} else {
 			LOGGER.info("### MeterLocalSender 获取成功: {}", sender2.getClass().getName());
-		}		
-		
+		}
 		// 4. =================================================================
+		final ProfileSnapshotSender sender3 = (ProfileSnapshotSender) ServiceManager.INSTANCE
+				.findService(ProfileSnapshotSender.class);
+		// 增加日志输出，确保client2对象已成功获取
+		if (sender2 == null) {
+			LOGGER.warn("### ProfileSnapshotSender 获取失败, sender为null");
+		} else {
+			LOGGER.info("### ProfileSnapshotSender 获取成功: {}", sender3.getClass().getName());
+		}
+
+		// 5. =================================================================
+		final LogReportServiceClient client3 = (LogReportServiceClient) ServiceManager.INSTANCE
+				.findService(LogReportServiceClient.class);
+		// 增加日志输出，确保client2对象已成功获取
+		if (sender2 == null) {
+			LOGGER.warn("### LogReportServiceClient 获取失败, client为null");
+		} else {
+			LOGGER.info("### LogReportServiceClient 获取成功: {}", client3.getClass().getName());
+		}
+		// 6. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
 		resultMap.put("enableLogfileReporter", enable);
@@ -96,6 +116,8 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		resultMap.put("jvm", ReflectUtil.invoke(sender, "getMetrics"));
 		resultMap.put("instanceProperties", ReflectUtil.invoke(client2, "getInstanceProperties"));
 		resultMap.put("meterData", ReflectUtil.invoke(sender2, "getMeterDatas"));
+		resultMap.put("logData", ReflectUtil.invoke(client3, "getLogDatas"));
+		resultMap.put("profileSnapshotData", ReflectUtil.invoke(sender3, "getProfileSnapshotDatas"));
 
 		result.defineReturnValue(resultMap);
 	}
