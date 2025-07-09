@@ -37,7 +37,7 @@ import org.apache.skywalking.apm.network.logging.v3.LogDataBody;
  * <p>
  * <p>
  * Refer To {@code KafkaLogReporterServiceClient}
- * Refer To {@link https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaLogReporterServiceClient.java}
+ * Refer To {@link <a href="https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaLogReporterServiceClient.java">...</a>}
  * <p>
  *
  *     <p>

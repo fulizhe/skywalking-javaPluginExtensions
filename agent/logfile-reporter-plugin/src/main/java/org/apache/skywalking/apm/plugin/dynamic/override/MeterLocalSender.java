@@ -16,13 +16,13 @@ import org.apache.skywalking.apm.network.language.agent.v3.MeterDataCollection;
 
 /**
  * <p>
- * 
+ *
  * <p>
  * <p>
  * Refer To {@code KafkaMeterSender}
  * <p>
  *
- *  <p> https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-meter/ 【application-toolkit-meter组件】</p>
+ *  <p> <a href="https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-meter/">...</a> 【application-toolkit-meter组件】</p>
  */
 @OverrideImplementor(MeterSender.class)
 public class MeterLocalSender extends MeterSender {

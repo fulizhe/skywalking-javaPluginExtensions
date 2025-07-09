@@ -35,10 +35,11 @@ import org.apache.skywalking.apm.network.management.v3.ManagementServiceGrpc;
 
 /**
  * <p>
- * 
+ *
  * <p>
  * <p>
  * Refer To {@code DisableJVMService}
+ * {@link  <a href="https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaServiceManagementServiceClient.java">...</a>}
  * <p>
  */
 @OverrideImplementor(ServiceManagementClient.class)

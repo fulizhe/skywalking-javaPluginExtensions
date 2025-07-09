@@ -36,7 +36,7 @@ import org.apache.skywalking.apm.network.language.profile.v3.ThreadStack;
  * <p>
  * <p>
  * Refer To {@code KafkaProfileSnapshotSender}
- * Refer To {@link https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaProfileSnapshotSender.java}
+ * Refer To {@link <a href="https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaProfileSnapshotSender.java">...</a>}
  * <p>
  */
 @OverrideImplementor(ProfileSnapshotSender.class)
