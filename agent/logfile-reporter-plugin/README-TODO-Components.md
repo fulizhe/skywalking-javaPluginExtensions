@@ -8,7 +8,7 @@ LogReportServiceClient      # 日志信息
 
 EventReportServiceClient    # 上报启动/停止事件
 
-MeterSender                 # send Metrics data of meter system
+~~MeterSender                 # send Metrics data of meter system~~
 
 ~~JVMMetricsSender            # JVM Metrics~~
 
