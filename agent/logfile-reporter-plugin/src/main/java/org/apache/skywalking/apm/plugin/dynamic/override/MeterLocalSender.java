@@ -60,7 +60,6 @@ public class MeterLocalSender extends MeterSender {
 			}
 			builder.addMeterData(meterData);
 		});
-		builder.build().toByteArray();
 
 		// 将MeterDataCollection中的数据转换为Map并存入meterDataCache
 		List<org.apache.skywalking.apm.network.language.agent.v3.MeterData> meterDataList = builder.build()

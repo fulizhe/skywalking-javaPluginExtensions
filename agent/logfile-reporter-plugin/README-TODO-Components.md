@@ -22,3 +22,6 @@ ProfileTaskChannelService
 ProfileSnapshotSender               # 
 AsyncProfilerTaskExecutionService   # 使用 AsyncProfilerDataSender 
 AsyncProfilerDataSender
+
+数据库监控
+Threadpool监控
