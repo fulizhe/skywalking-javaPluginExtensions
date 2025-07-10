@@ -4,8 +4,10 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * <p> Refer To {@code TraceContext}
- * <p> 他奶奶地，这个类千万不能定义在 org.apache.skywalking.apm.agent.core.XXX 目录下. 浪费我一上午.
+ * <p>
+ * Refer To {@code TraceContext}
+ * <p>
+ * 他奶奶地，这个类千万不能定义在 org.apache.skywalking.apm.agent.core.XXX 目录下. 浪费我一上午.
  * 
  * @author LQ
  *
@@ -34,6 +36,20 @@ public class SWLogfileReporterUtils2222222222222 {
 		// 1. 缓存里的配置键值对(用户过往传入的)
 		// 2. 缓存里记录的日志(根据用户配置, 由sw捕获的)
 		// 3. 这里试着把缓存传出去，能不能让外面直接操作
+		return Collections.emptyMap();
+	}
+
+	/**
+	 * 性能剖析
+	 */
+	public static Map<String, Object> startProfile(Map<String, Object> params) {
+		return Collections.emptyMap();
+	}
+
+	/**
+	 * 性能剖析
+	 */
+	public static Map<String, Object> getProfileDatas() {
 		return Collections.emptyMap();
 	}
 }

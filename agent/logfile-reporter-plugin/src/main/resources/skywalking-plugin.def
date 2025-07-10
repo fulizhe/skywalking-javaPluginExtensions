@@ -14,4 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-logfile-reporter-enable-runtime-8.x=org.apache.skywalking.apm.agent.core.plugin.logfilereporter.define.LogfileReporterEnableRuntimeInstrumentation
+logfile-reporter-enable-runtime-9.x=org.apache.skywalking.apm.agent.core.plugin.logfilereporter.define.LogfileReporterEnableRuntimeInstrumentation
+local-profile-runtime-9.x=org.apache.skywalking.apm.agent.core.plugin.localprofile.define.LocalProfileRuntimeInstrumentation

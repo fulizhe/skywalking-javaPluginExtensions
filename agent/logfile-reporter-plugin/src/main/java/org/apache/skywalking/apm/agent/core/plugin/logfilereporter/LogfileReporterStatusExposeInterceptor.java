@@ -62,51 +62,18 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		// 2. =================================================================
 		final JVMMetricsSender sender = (JVMMetricsSender) ServiceManager.INSTANCE
 				.findService(JVMMetricsSender.class);
-		// 增加日志输出，确保sender对象已成功获取
-		if (sender == null) {
-			LOGGER.warn("### JVMMetricsLocalSender 获取失败, sender为null");
-		} else {
-			LOGGER.info("### JVMMetricsLocalSender 获取成功: {}", sender.getClass().getName());
-		}
-
 		// 3. =================================================================
 		final ServiceManagementClient client2 = (ServiceManagementClient) ServiceManager.INSTANCE
 				.findService(ServiceManagementClient.class);
-		// 增加日志输出，确保client2对象已成功获取
-		if (client2 == null) {
-			LOGGER.warn("### ServiceManagementClient 获取失败, sender为null");
-		} else {
-			LOGGER.info("### ServiceManagementClient 获取成功: {}", client2.getClass().getName());
-		}
-		
 		// 3. =================================================================
 		final MeterSender sender2 = (MeterSender) ServiceManager.INSTANCE
 				.findService(MeterSender.class);
-		// 增加日志输出，确保client2对象已成功获取
-		if (sender2 == null) {
-			LOGGER.warn("### MeterLocalSender 获取失败, sender为null");
-		} else {
-			LOGGER.info("### MeterLocalSender 获取成功: {}", sender2.getClass().getName());
-		}
 		// 4. =================================================================
 		final ProfileSnapshotSender sender3 = (ProfileSnapshotSender) ServiceManager.INSTANCE
 				.findService(ProfileSnapshotSender.class);
-		// 增加日志输出，确保client2对象已成功获取
-		if (sender2 == null) {
-			LOGGER.warn("### ProfileSnapshotSender 获取失败, sender为null");
-		} else {
-			LOGGER.info("### ProfileSnapshotSender 获取成功: {}", sender3.getClass().getName());
-		}
-
 		// 5. =================================================================
 		final LogReportServiceClient client3 = (LogReportServiceClient) ServiceManager.INSTANCE
 				.findService(LogReportServiceClient.class);
-		// 增加日志输出，确保client2对象已成功获取
-		if (sender2 == null) {
-			LOGGER.warn("### LogReportServiceClient 获取失败, client为null");
-		} else {
-			LOGGER.info("### LogReportServiceClient 获取成功: {}", client3.getClass().getName());
-		}
 		// 6. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", logfileStatMap);
