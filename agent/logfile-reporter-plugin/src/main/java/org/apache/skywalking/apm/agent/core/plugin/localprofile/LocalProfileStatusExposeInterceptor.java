@@ -88,17 +88,12 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 			final ThreadStack stack = transform.getStack();
 
 			// 从transform对象中获取信息，填入map
-			String taskId = transform.getTaskId();
-			String traceSegmentId = transform.getTraceSegmentId();
 			Map<String, Object> map = new HashMap<>();
 			map.put("taskId", transform.getTaskId());
 			map.put("traceSegmentId", transform.getTraceSegmentId());
 			map.put("time", transform.getTime());
 			map.put("sequence", transform.getSequence());
-			// 将stackList转换为List<Map>，每个元素为一帧的详细信息
-			List<Map<String, Object>> stackMapList = new ArrayList<>();
-			ThreadStack stackList = transform.getStack();
-			List<String> codeSignaturesList = new ArrayList<>(stackList.getCodeSignaturesList());
+			List<String> codeSignaturesList = new ArrayList<>(transform.getStack().getCodeSignaturesList());
 			map.put("stack", codeSignaturesList);
 
 			cache.put(IdUtil.fastSimpleUUID(), map);
