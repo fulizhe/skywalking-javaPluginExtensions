@@ -29,8 +29,6 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
-import org.apache.skywalking.apm.agent.core.profile.ProfileTask;
-import org.apache.skywalking.apm.network.language.profile.v3.ProfileTaskFinishReport;
 import org.apache.skywalking.apm.network.trace.component.command.ProfileTaskCommand;
 
 import cn.hutool.core.convert.Convert;
@@ -49,6 +47,9 @@ import cn.hutool.core.util.StrUtil;
 public class LocalPorfileCallInterceptor implements StaticMethodsAroundInterceptor {
 	private static final ILog LOGGER = LogManager.getLogger(LocalPorfileCallInterceptor.class);
 
+	// ProfileTaskCommandExecutor
+	// ProfileTaskExecutionService 其中的 profileTaskList 字段
+	
 	@Override
 	public void beforeMethod(Class clazz, Method method, Object[] allArguments, Class<?>[] parameterTypes,
 			MethodInterceptResult result) {

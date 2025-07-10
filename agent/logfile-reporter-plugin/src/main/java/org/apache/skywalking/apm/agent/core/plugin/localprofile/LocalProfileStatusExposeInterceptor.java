@@ -31,7 +31,9 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.StaticMethodsAroundInterceptor;
+import org.apache.skywalking.apm.agent.core.profile.ProfileTask;
 import org.apache.skywalking.apm.agent.core.profile.ProfileTaskChannelService;
+import org.apache.skywalking.apm.agent.core.profile.ProfileTaskExecutionService;
 import org.apache.skywalking.apm.agent.core.profile.TracingThreadSnapshot;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadSnapshot;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadStack;
@@ -79,7 +81,7 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 		snapshotQueue.drainTo(temp);
 
 		// 将TracingThreadSnapshot对象转换为Map，并存入cache
-		cache.clear();
+		//cache.clear();
 		for (Object obj : temp) {
 			final TracingThreadSnapshot snapshot = (TracingThreadSnapshot) obj;
 			final ThreadSnapshot transform = snapshot.transform();
@@ -102,10 +104,31 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 			cache.put(IdUtil.fastSimpleUUID(), map);
 
 		}
-
+		
+		// 2. =================================================================
+		// ProfileTaskCommandExecutor
+		// ProfileTaskExecutionService 其中的 profileTaskList 字段
+		final ProfileTaskExecutionService service = (ProfileTaskExecutionService) ServiceManager.INSTANCE
+				.findService(ProfileTaskExecutionService.class);
+		List<ProfileTask> profileTaskList = (List<ProfileTask>) ReflectUtil.getFieldValue(service, "profileTaskList");
+		List<Map<String, Object>> lst = CollUtil.newArrayList();
+		for (ProfileTask profileTask : profileTaskList) {
+			Map<String, Object> map = new HashMap<>();
+			map.put("taskId", profileTask.getTaskId());
+			map.put("createTime(", profileTask.getCreateTime());
+			map.put("duration", profileTask.getDuration());
+			map.put("firstSpanOPName", profileTask.getFirstSpanOPName());
+			map.put("maxSamplingCoun", profileTask.getMaxSamplingCount());
+			map.put("minDurationThreshold", profileTask.getMinDurationThreshold());
+			map.put("startTime", profileTask.getStartTime());
+			map.put("threadDumpPeriod", profileTask.getThreadDumpPeriod());
+			lst.add(map);
+		}
 		// 6. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
 		resultMap.put("data", cache);
+		resultMap.put("profileTasks", lst);
+
 
 		result.defineReturnValue(resultMap);
 	}
