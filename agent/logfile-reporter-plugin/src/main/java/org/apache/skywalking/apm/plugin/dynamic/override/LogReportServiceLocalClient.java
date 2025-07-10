@@ -54,6 +54,8 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
 
     @Override
     public void prepare() {
+    	LOGGER.info("### prepare: {}", this.getClass().getName());
+    	
         logDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
             private static final long serialVersionUID = 1L;
 
