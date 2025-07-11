@@ -87,7 +87,7 @@ public class LocalPorfileCallInterceptor implements StaticMethodsAroundIntercept
 		// 典型值: 通常设置为 100 到 500。
 		//  "ProfileTaskExecutionService : check command error, cannot process this profile task. reason: max sampling count must less than 10" 
 		final int maxSamplingCount = MapUtil.getInt(methodParams, "maxSamplingCount", 9);
-		final long startTime = System.currentTimeMillis();
+		final long startTime = System.currentTimeMillis() + 5000; // 延后5秒启动剖析profiling。在源码 ProfileTaskExecutionService.addProfileTask(...)被使用
 		final long createTime = System.currentTimeMillis() + 1;
 		ProfileTaskCommand command = new ProfileTaskCommand(serialNumber, taskId, endpointName, duration,
 				minDurationThreshold, dumpPeriod, maxSamplingCount, startTime, createTime);
