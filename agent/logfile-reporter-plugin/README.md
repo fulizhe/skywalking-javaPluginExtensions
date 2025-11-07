@@ -1,6 +1,6 @@
 # 项目说明
 
-agent侧搜集到的监控数据, 默认应该发送到oap的. 本plugin将之截获本保存到本地cache里. 魔改以适应单体项目快速使用.
+agent侧搜集到的监控数据, 默认应该发送到oap的. 本plugin将之截获并保存到本地cache里. 魔改以适应单体项目快速使用.
 
 1. 监控数据的缓存实现参考Druid里的<code>JdbcDataSourceStat</code>.
 2. 
