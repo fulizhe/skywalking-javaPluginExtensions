@@ -1,6 +1,7 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.Map;
@@ -22,11 +23,14 @@ import org.apache.skywalking.apm.network.language.agent.v3.Thread;
 
 /**
  * <p>
- * 收集到的JVM Metrics数据不再发送给OAP侧, 而是保存到本地.
+ * JVMMetricsSender 的本地实现：
+ * 收集到的 JVM Metrics 数据不再通过网络发送给 OAP 端，
+ * 而是转换成结构化数据后缓存在本地内存（基于 {@link LinkedHashMap} 的有界 LRU 缓存），
+ * 供日志上报 / 前端展示等组件按需读取。
+ * </p>
  * <p>
- * <p>
- * Refer To {@code DisableJVMService}
- * <p>
+ * Refer to {@code DisableJVMService}
+ * </p>
  */
 @OverrideImplementor(JVMMetricsSender.class)
 public class JVMMetricsLocalSender extends JVMMetricsSender implements BootService, Runnable {
@@ -35,22 +39,24 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	private LinkedBlockingQueue<JVMMetric> queue;
 
 	private int maxMetricsDataSize = 1000;
-	// 借鉴自Druid的JdbcDataSourceStat
-	private LinkedHashMap<String, Map<String, Object>> jvmMetricsDataCache;
+	// 借鉴自Druid的JdbcDataSourceStat，使用同步包装保证并发访问安全
+	private Map<String, Map<String, Object>> jvmMetricsDataCache;
 
 	@Override
 	public void prepare() {
 		queue = new LinkedBlockingQueue<>(Config.Jvm.BUFFER_SIZE);
 		// ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
 
-		jvmMetricsDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-			private static final long serialVersionUID = 1L;
+		jvmMetricsDataCache = Collections.synchronizedMap(
+				new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
+					private static final long serialVersionUID = 1L;
 
-			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-				return (size() > maxMetricsDataSize);
+					@Override
+					protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
+						return (size() > maxMetricsDataSize);
 
-			}
-		};
+					}
+				});
 	}
 
 	@Override
@@ -59,7 +65,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	}
 
 	public Collection<Map<String, Object>> getMetrics() {
-		return jvmMetricsDataCache.values();
+		// 返回快照，避免调用方在遍历时与写线程并发修改导致异常
+		synchronized (jvmMetricsDataCache) {
+			return new java.util.ArrayList<>(jvmMetricsDataCache.values());
+		}
 	}
 
 	public void offer(JVMMetric metric) {
@@ -157,7 +166,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 			}
 		} catch (Throwable t) {
-			LOGGER.error(t, "send JVM metrics to Collector fail.");
+			LOGGER.error(t, "collect JVM metrics to local cache fail.");
 			// ServiceManager.INSTANCE.findService(GRPCChannelManager.class).reportError(t);
 		}
 
