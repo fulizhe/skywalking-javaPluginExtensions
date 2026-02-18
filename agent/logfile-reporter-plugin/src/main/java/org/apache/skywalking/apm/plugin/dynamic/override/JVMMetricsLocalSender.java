@@ -10,6 +10,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import org.apache.skywalking.apm.agent.core.boot.BootService;
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.conf.Config;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 import org.apache.skywalking.apm.agent.core.jvm.JVMMetricsSender;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
@@ -38,7 +39,8 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 	private LinkedBlockingQueue<JVMMetric> queue;
 
-	private int maxMetricsDataSize = 1000;
+	/** 本地 JVM 指标缓存条数上限，由 {@link LogFileReporterPluginConfig.Plugin#JvmMetricsLocal} 配置，默认 1000 */
+	private int maxMetricsDataSize;
 	// 借鉴自Druid的JdbcDataSourceStat，使用同步包装保证并发访问安全
 	private Map<String, Map<String, Object>> jvmMetricsDataCache;
 
@@ -47,14 +49,17 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		queue = new LinkedBlockingQueue<>(Config.Jvm.BUFFER_SIZE);
 		// ServiceManager.INSTANCE.findService(GRPCChannelManager.class).addChannelListener(this);
 
+		Integer configured = LogFileReporterPluginConfig.Plugin.JvmMetricsLocal.MAX_METRICS_DATA_SIZE;
+		this.maxMetricsDataSize = (configured != null && configured > 0) ? configured : 1000;
+
+		final int maxSize = this.maxMetricsDataSize;
 		jvmMetricsDataCache = Collections.synchronizedMap(
 				new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
 					private static final long serialVersionUID = 1L;
 
 					@Override
 					protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-						return (size() > maxMetricsDataSize);
-
+						return size() > maxSize;
 					}
 				});
 	}
