@@ -56,7 +56,7 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 				.findService(TraceSegmentServiceClient.class);
 		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型
 		final Object logfileStatMap = ReflectUtil.invoke(client, "getLogfileStatMap");
-		final Object enable = ReflectUtil.invoke(client, "isEnbaleLogfileReporter");
+		final Object enable = ReflectUtil.invoke(client, "isEnableLogfileReporter");
 		final Object maxLogSize = ReflectUtil.getFieldValue(client, "maxLogSize");
 
 		// 2. =================================================================

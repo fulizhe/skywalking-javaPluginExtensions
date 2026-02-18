@@ -4,6 +4,7 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.BUFFER_SIZ
 import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SIZE;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,9 +39,13 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 
 /**
  * <p>
- * A tracing segment data reporter.
+ * TraceSegmentServiceClient 的本地实现：
+ * 收集到的 TraceSegment 数据不再通过网络发送给 OAP，而是转成 Log/Map 后写入本地有界 LRU 缓存，
+ * 供状态暴露、日志上报等组件按需读取。
+ * </p>
  * <p>
- * {@code DyanmicEnabledTraceSegmentServiceClient}
+ * Refer to {@code DynamicEnabledTraceSegmentServiceClient}
+ * </p>
  */
 @OverrideImplementor(TraceSegmentServiceClient.class)
 public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
@@ -54,27 +59,13 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	private final AtomicBoolean enable;
 
-	private int maxLogSize = 1000;
-	// 借鉴自Druid的JdbcDataSourceStat
-	private final LinkedHashMap<String, Map<String, Object>> logfileStatMap;
+	/** 本地 Trace 日志缓存条数上限，由 {@link LogFileReporterPluginConfig.Plugin.LogFileReporter} 配置，默认 1000 */
+	private int maxLogSize;
+	/** 借鉴自 Druid 的 JdbcDataSourceStat，使用同步包装保证并发访问安全；在 prepare() 中初始化 */
+	private Map<String, Map<String, Object>> logfileStatMap;
 
 	public LogFileTraceSegmentServiceClient() {
 		this.enable = new AtomicBoolean(true);
-
-		logfileStatMap = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-			private static final long serialVersionUID = 1L;
-
-			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-				boolean remove = (size() > maxLogSize);
-//				if (remove) {
-//					Object sqlStat = eldest.getValue();
-//					// if (sqlStat.getRunningCount() > 0 || sqlStat.getExecuteCount() > 0) {
-//					// skipSqlCount.incrementAndGet();
-//					// }
-//				}
-				return remove;
-			}
-		};
 	}
 
 	// ==================================== @
@@ -86,29 +77,44 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 		enable.getAndSet(e);
 		LOGGER.warn("### [ {} ] current logfile-reporter-enable status is [ {} ]", Config.Agent.SERVICE_NAME,
-				isEnbaleLogfileReporter());
+				isEnableLogfileReporter());
 	}
 
-	public boolean isEnbaleLogfileReporter() {
+	public boolean isEnableLogfileReporter() {
 		return enable.get();
 	}
 
+	/**
+	 * 返回当前缓存的快照，调用方不应修改。避免与消费线程并发修改导致 CME 或读到半写状态。
+	 */
 	public Map<String, Map<String, Object>> getLogfileStatMap() {
-		return logfileStatMap;
+		if (logfileStatMap == null) {
+			return new HashMap<>();
+		}
+		synchronized (logfileStatMap) {
+			return new HashMap<>(logfileStatMap);
+		}
 	}
 
 	// ==================================== @Override
 
 	@Override
 	public void prepare() {
-//        PulsarProducerManager producerManager = ServiceManager.INSTANCE.findService(PulsarProducerManager.class);
-//        producerManager.addListener(this);
-		maxLogSize = LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE != null
-				? LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE
-				: maxLogSize;
+		Integer configured = LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE;
+		this.maxLogSize = (configured != null && configured > 0) ? configured : 1000;
+
+		final int maxSize = this.maxLogSize;
+		logfileStatMap = Collections.synchronizedMap(
+				new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
+					private static final long serialVersionUID = 1L;
+
+					@Override
+					protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
+						return size() > maxSize;
+					}
+				});
 
 		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - maxLogSize is [ {} ]", maxLogSize);
-
 	}
 
 	@Override
@@ -137,7 +143,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 		// TODO 处理profile. 参考基类的consume方法
 
-		if (!isEnbaleLogfileReporter()) {
+		if (!isEnableLogfileReporter()) {
 			LOGGER.info(
 					"###consume. disable the logfile-reporter [ {} ] which save data to log-file. the collection size of data is [ {} ]",
 					Config.Agent.SERVICE_NAME, data.size());
@@ -145,9 +151,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		}
 
 		if (LOGGER.isDebugEnable()) {
-			LOGGER.info(
+			LOGGER.debug(
 					"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
-					Config.Agent.SERVICE_NAME, isEnbaleLogfileReporter(), data.size(), logfileStatMap.size());
+					Config.Agent.SERVICE_NAME, isEnableLogfileReporter(), data.size(), logfileStatMap.size());
 		}
 		// 《SW原理 - 基本概念 （ TraceSegment ）》
 		// 1. 一个trace由多个tracesegment构成
@@ -171,75 +177,111 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// final String globalTraceid = collect.get(0).getTraceId();
 		// final List<Log> logList = new ArrayList<>();
 		for (SegmentObject segment : collect) {
-			Log log = new Log();
 			// 假设 Log 类有对应的 setter 方法，或者构造方法
 			// 1. traceId：全局唯一，标识一次完整的分布式调用。
 			// 2. traceSegmentId：局部唯一，标识某个服务/线程/进程中的一个调用片段。
 			// 3. 一个 traceId 下可以有多个 traceSegmentId，它们通过“引用关系”串联成完整的调用链。
-			log.setTraceId(segment.getTraceId());
-			log.setTraceSegmentId(segment.getTraceSegmentId());
-			log.setService(segment.getService());
-			log.setServiceInstance(segment.getServiceInstance());
-			log.setIsSizeLimited(segment.getIsSizeLimited());
-
-			List<Log.SpanInfo> spanInfoList = new ArrayList<>();
-			for (SpanObject span : segment.getSpansList()) {
-				Log.SpanInfo spanInfo = new Log.SpanInfo();
-				spanInfo.setSpanId(span.getSpanId());
-				spanInfo.setOperationName(span.getOperationName());
-				spanInfo.setStartTime(span.getStartTime());
-				spanInfo.setEndTime(span.getEndTime());
-				spanInfo.setSpanType(span.getSpanType().toString());
-				spanInfo.setSpanLayer(span.getSpanLayer().toString());
-				spanInfo.setComponentId(span.getComponentId());
-				spanInfo.setIsError(span.getIsError());
-				spanInfo.setLogList(span.getLogsList().stream().map(l -> TextFormat.printToString(l)).collect(Collectors.toList()));
-				// 处理tag集合，假设tag为键值对结构
-				List<Map<String, Object>> tagList = new ArrayList<>();
-				if (span.getTagsList() != null) {
-					for (KeyStringValuePair tag : span.getTagsList()) {
-						Map<String, Object> tagMap = new HashMap<>();
-						tagMap.put("tag-key", tag.getKey());
-						tagMap.put("tag-value", tag.getValue());
-						tagList.add(tagMap);
-					}
-				}
-				spanInfo.setTagList(tagList);
-				spanInfoList.add(spanInfo);
-			}
-			log.setSpans(spanInfoList);
+			Log log = segmentToLog(segment);
 			// logList.add(log);
 
-			final String globalTraceid = log.getTraceId();
 			// 这里是traceId一样的放到一起
 			// 先判断当前traceId是否已存在于logfileStatMap中，如果存在则合并logList，否则直接放入
-			if (logfileStatMap.containsKey(globalTraceid)) {
+			mergeLogIntoStatMap(logfileStatMap, log);
+		}
+		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
+	}
+
+	/** 单条 SegmentObject → Log，含 spans、tags 等，便于单测与复用。 */
+	private Log segmentToLog(SegmentObject segment) {
+		Log log = new Log();
+		log.setTraceId(segment.getTraceId());
+		log.setTraceSegmentId(segment.getTraceSegmentId());
+		log.setService(segment.getService());
+		log.setServiceInstance(segment.getServiceInstance());
+		log.setIsSizeLimited(segment.getIsSizeLimited());
+		List<Log.SpanInfo> spanInfoList = new ArrayList<>();
+		for (SpanObject span : segment.getSpansList()) {
+			spanInfoList.add(spanToSpanInfo(span));
+		}
+		log.setSpans(spanInfoList);
+		return log;
+	}
+
+	/** 单条 SpanObject → Log.SpanInfo，便于单测与复用。 */
+	private Log.SpanInfo spanToSpanInfo(SpanObject span) {
+		Log.SpanInfo spanInfo = new Log.SpanInfo();
+		spanInfo.setSpanId(span.getSpanId());
+		spanInfo.setOperationName(span.getOperationName());
+		spanInfo.setStartTime(span.getStartTime());
+		spanInfo.setEndTime(span.getEndTime());
+		spanInfo.setSpanType(span.getSpanType().toString());
+		spanInfo.setSpanLayer(span.getSpanLayer().toString());
+		spanInfo.setComponentId(span.getComponentId());
+		spanInfo.setIsError(span.getIsError());
+		spanInfo.setLogList(span.getLogsList().stream().map(TextFormat::printToString).collect(Collectors.toList()));
+		// 处理tag集合，假设tag为键值对结构
+		spanInfo.setTagList(tagsToTagList(span.getTagsList()));
+		return spanInfo;
+	}
+
+	/** tags 转为 List<Map<String, Object>>，便于单测与复用。 */
+	private List<Map<String, Object>> tagsToTagList(List<KeyStringValuePair> tags) {
+		List<Map<String, Object>> tagList = new ArrayList<>();
+		if (tags != null) {
+			for (KeyStringValuePair tag : tags) {
+				Map<String, Object> tagMap = new HashMap<>();
+				tagMap.put("tag-key", tag.getKey());
+				tagMap.put("tag-value", tag.getValue());
+				tagList.add(tagMap);
+			}
+		}
+		return tagList;
+	}
+
+	/**
+	 * 按 traceId 合并：已有则追加到 logs 列表，否则 put 新 LogCollection.toMap()。
+	 * 整段逻辑在 statMap 上同步，保证同一 traceId 的并发合并不会丢 segment 或结构错乱。
+	 * <p>
+	 * <b>性能影响：</b>
+	 * <ul>
+	 * <li>锁本身开销很小：无争用时 synchronized 成本极低，临界区内仅做 map 查写与 list 追加，持锁时间极短。</li>
+	 * <li>消费侧仅单线程：DataCarrier 通常只配 1 个消费者，不存在多个消费线程争用同一把锁。</li>
+	 * <li>可能争用点：{@link #getLogfileStatMap()} 内部也会对同一 map 做 synchronized 拷贝快照，
+	 * 若在合并过程中有线程调用 getLogfileStatMap()，会短暂互斥等待；反之亦然。在「单消费者 + 状态接口调用不频繁」的前提下影响可忽略。</li>
+	 * <li>若后续出现状态接口响应变慢或 trace 堆积，可考虑缩小临界区或改用 {@code ConcurrentHashMap#compute} 等细粒度并发结构。</li>
+	 * </ul>
+	 * </p>
+	 */
+	private void mergeLogIntoStatMap(Map<String, Map<String, Object>> statMap, Log log) {
+		final String globalTraceid = log.getTraceId();
+		synchronized (statMap) {
+			if (statMap.containsKey(globalTraceid)) {
 				// 已有该traceId，合并log
-				Object obj = logfileStatMap.get(globalTraceid);
+				Object obj = statMap.get(globalTraceid);
 				if (obj instanceof Map) {
 					Map<String, Object> map = (Map<String, Object>) obj;
 					Object logsObj = map.get("logs");
 					if (logsObj instanceof List) {
+						@SuppressWarnings("unchecked")
 						List<Map<String, Object>> logs = (List<Map<String, Object>>) logsObj;
 						// 将当前log对象转为map并加入
 						logs.add(log.toMap());
 					}
 				}
 			} else {
-				// 没有该traceId，直接put一个新的LogCollection
-				logfileStatMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
+				// 没有该traceId，直接put一个新的LogCollection.toMap()
+				statMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
 					{
 						add(log);
 					}
 				}).toMap());
 			}
 		}
-		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 	}
 
 	@Override
 	public void onError(final List<TraceSegment> data, final Throwable t) {
-		LOGGER.error(t, "Try to send {} trace segments to collector, with unexpected exception.", data.size());
+		LOGGER.error(t, "Consume trace segments to local cache failed, batch size: {}.", data.size());
 	}
 
 	@Override
@@ -265,7 +307,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			return;
 		}
 
-		if (!isEnbaleLogfileReporter()) {
+		if (!isEnableLogfileReporter()) {
 			LOGGER.info("### afterFinished. disable the logfile-reporter [ {} ] which save data to log-file.",
 					Config.Agent.SERVICE_NAME);
 			return;
@@ -301,9 +343,16 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 //		logfileStatMap.put(globalTraceid, log.toMap());
 	}
 
+	/**
+	 * 本地实现无需从 Properties 初始化，保留空实现以满足接口约定。
+	 * 在 debug 模式下输出传入的配置项，便于扩展时快速确认可用 key。
+	 */
 	@Override
-	public void init(Properties arg0) {
-		// TODO Auto-generated method stub
-
+	public void init(Properties prop) {
+		if (prop != null && !prop.isEmpty()) {
+			for (String name : prop.stringPropertyNames()) {
+				LOGGER.info("### init property: {} = {}", name, prop.getProperty(name));
+			}
+		}
 	}
 }
