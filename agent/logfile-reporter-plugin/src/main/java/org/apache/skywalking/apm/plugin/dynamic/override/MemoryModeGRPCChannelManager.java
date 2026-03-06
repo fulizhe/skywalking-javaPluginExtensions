@@ -6,8 +6,6 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.GRPCChannelManager;
 import org.apache.skywalking.apm.dependencies.io.grpc.Channel;
 
-import cn.hutool.core.util.ReflectUtil;
-
 // 【关键】告诉 Agent 用这个类替换原生的 GRPCChannelManager
 /**
  * {@link https://github.com/apache/skywalking-java/blob/e0de83f6ba49f20c166f6820440f6aa926a3fc0f/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/remote/GRPCChannelManager.java}
@@ -27,12 +25,42 @@ public class MemoryModeGRPCChannelManager extends GRPCChannelManager {
 		// 【关键】覆盖原生的 boot 方法
 		// 原生代码在这里会创建 ScheduledFuture (runnable) 来不断重连
 		// 我们这里留空，什么都不做，彻底掐断 gRPC 连接和线程池的创建源头
-		LOGGER.info("[MemoryMode] GRPCChannelManager has been disabled. No network threads will be created.");
+		LOGGER.info("### [MemoryMode] GRPCChannelManager has been disabled. No network threads will be created.");
 		
 		// 这里在GRPCChannelManager源码中会读取配置项 collector.backend_service, 如果发现为空则"Agent will not uplink any data."
 		// 源码参见顶部的类注释上给出的链接地址
 		
-		ReflectUtil.setFieldValue(this, "reconnect", false);
+		/*
+		Caused by: java.lang.ClassNotFoundException: Can't find cn.hutool.core.util.ReflectUtil
+			at org.apache.skywalking.apm.agent.core.plugin.loader.AgentClassLoader.findClass(AgentClassLoader.java:117)
+			at java.lang.ClassLoader.loadClass(ClassLoader.java:424)
+			at java.lang.ClassLoader.loadClass(ClassLoader.java:357)
+		*/
+		// ReflectUtil.setFieldValue(this, "reconnect", false);
+		modify();
+	}
+	
+	private void modify() {		
+		java.lang.reflect.Field field = null;
+		try {
+			field = GRPCChannelManager.class.getDeclaredField("reconnect");
+			field.setAccessible(true);
+
+			// 先读取修改前的值
+			Object beforeValueObj = field.get(this);
+			boolean beforeValue = (beforeValueObj instanceof Boolean) ? (Boolean) beforeValueObj : false;
+			LOGGER.info("### [MemoryMode] [Check] Before reflection, 'reconnect' = {}", beforeValue);
+
+			// 修改
+			field.set(this, false);
+
+			// 再读取修改后的值
+			Object afterValueObj = field.get(this);
+			boolean afterValue = (afterValueObj instanceof Boolean) ? (Boolean) afterValueObj : false;
+			LOGGER.info("### [MemoryMode] [Check] After reflection, 'reconnect' = {}", afterValue);
+		} catch (NoSuchFieldException | IllegalAccessException e) {
+			LOGGER.error("Failed to access or set 'reconnect' field via reflection.", e);
+		}		
 	}
 
 	@Override
