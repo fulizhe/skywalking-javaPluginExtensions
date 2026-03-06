@@ -20,3 +20,6 @@ org.apache.skywalking.apm.plugin.dynamic.override.ServiceManagementLocalClient
 org.apache.skywalking.apm.plugin.dynamic.override.MeterLocalSender
 org.apache.skywalking.apm.plugin.dynamic.override.LogReportServiceLocalClient
 org.apache.skywalking.apm.plugin.dynamic.override.ProfileSnapshotLocalSender
+org.apache.skywalking.apm.plugin.dynamic.override.MemoryModeGRPCChannelManager
+org.apache.skywalking.apm.plugin.dynamic.override.NoOpCommandService
+org.apache.skywalking.apm.plugin.dynamic.override.NoOpConfigurationDiscoveryService

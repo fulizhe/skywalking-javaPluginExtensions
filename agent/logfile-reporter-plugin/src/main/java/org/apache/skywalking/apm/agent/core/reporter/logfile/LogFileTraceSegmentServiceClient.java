@@ -10,29 +10,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.apache.skywalking.apm.agent.core.boot.BootService;
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
-import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
-import org.apache.skywalking.apm.agent.core.commands.CommandService;
 import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.context.TracingContext;
 import org.apache.skywalking.apm.agent.core.context.TracingContextListener;
 import org.apache.skywalking.apm.agent.core.context.trace.TraceSegment;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
-import org.apache.skywalking.apm.agent.core.remote.GRPCChannelManager;
-import org.apache.skywalking.apm.agent.core.remote.GRPCStreamServiceStatus;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
-import org.apache.skywalking.apm.dependencies.io.grpc.stub.StreamObserver;
-import org.apache.skywalking.apm.network.common.v3.Commands;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
@@ -186,7 +179,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 			// 这里是traceId一样的放到一起
 			// 先判断当前traceId是否已存在于logfileStatMap中，如果存在则合并logList，否则直接放入
-			mergeLogIntoStatMap(logfileStatMap, log);
+			mergeLogIntoStatMap(log);
 		}
 		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 	}
@@ -252,8 +245,10 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 * </ul>
 	 * </p>
 	 */
-	private void mergeLogIntoStatMap(Map<String, Map<String, Object>> statMap, Log log) {
+	private void mergeLogIntoStatMap(Log log) {
 		final String globalTraceid = log.getTraceId();
+		
+		final Map<String, Map<String, Object>> statMap = logfileStatMap;
 		synchronized (statMap) {
 			if (statMap.containsKey(globalTraceid)) {
 				// 已有该traceId，合并log
