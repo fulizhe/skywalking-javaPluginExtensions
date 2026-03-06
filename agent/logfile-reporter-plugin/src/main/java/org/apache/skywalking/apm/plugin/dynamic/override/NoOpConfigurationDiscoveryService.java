@@ -5,7 +5,6 @@ import org.apache.skywalking.apm.agent.core.conf.dynamic.AgentConfigChangeWatche
 import org.apache.skywalking.apm.agent.core.conf.dynamic.ConfigurationDiscoveryService;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
-import org.apache.skywalking.apm.agent.core.profile.ProfileTaskChannelService;
 import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.network.trace.component.command.ConfigurationDiscoveryCommand;
 
@@ -18,7 +17,7 @@ import org.apache.skywalking.apm.network.trace.component.command.ConfigurationDi
 	分析：从 OAP 拉取动态配置。
 	操作：❌ 消除。 
  */
-@OverrideImplementor(ProfileTaskChannelService.class)
+@OverrideImplementor(ConfigurationDiscoveryService.class)
 public class NoOpConfigurationDiscoveryService extends ConfigurationDiscoveryService {
 
 	private static final ILog LOGGER = LogManager.getLogger(NoOpConfigurationDiscoveryService.class);
