@@ -26,6 +26,7 @@ import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
+import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.logging.v3.LogData;
@@ -130,5 +131,10 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
             String cacheKey = logDataObj.getService() + "_" + logDataObj.getTimestamp();
             logDataCache.put(cacheKey, logDataMap);
         }
+    }
+
+    @Override
+    public void statusChanged(GRPCChannelStatus status) {
+        LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
     }
 }

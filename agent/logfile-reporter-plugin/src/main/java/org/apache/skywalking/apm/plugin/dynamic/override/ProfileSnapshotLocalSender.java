@@ -26,6 +26,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.profile.ProfileSnapshotSender;
 import org.apache.skywalking.apm.agent.core.profile.TracingThreadSnapshot;
+import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.ProtocolStringList;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadSnapshot;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadStack;
@@ -103,5 +104,9 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
             profileSnapshotDataCache.put(cacheKey, snapshotMap);
 
         }
+    }
+    @Override
+    public void statusChanged(GRPCChannelStatus status) {
+        LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
     }
 }

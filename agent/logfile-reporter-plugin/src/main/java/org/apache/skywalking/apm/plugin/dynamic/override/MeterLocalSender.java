@@ -147,7 +147,7 @@ public class MeterLocalSender extends MeterSender {
 	}
 
 	@Override
-	public void statusChanged(final GRPCChannelStatus status) {
-		LOGGER.debug("### statusChanged 【 {} 】", status);
+	public void statusChanged(GRPCChannelStatus status) {
+		LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
 	}
 }
