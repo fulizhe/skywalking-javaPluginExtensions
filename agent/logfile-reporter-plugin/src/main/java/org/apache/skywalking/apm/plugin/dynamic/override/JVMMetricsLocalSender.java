@@ -10,6 +10,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import org.apache.skywalking.apm.agent.core.boot.BootService;
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
 import org.apache.skywalking.apm.agent.core.conf.Config;
+import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 import org.apache.skywalking.apm.agent.core.jvm.JVMMetricsSender;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
@@ -32,6 +33,8 @@ import org.apache.skywalking.apm.network.language.agent.v3.Thread;
  * <p>
  * Refer to {@code DisableJVMService}
  * </p>
+ *
+ *<a href=" https://github.com/apache/skywalking-java/blob/main/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/jvm/JVMMetricsSender.jav">...</a>a
  */
 @OverrideImplementor(JVMMetricsSender.class)
 public class JVMMetricsLocalSender extends JVMMetricsSender implements BootService, Runnable {
@@ -230,5 +233,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	@Override
 	public void shutdown() {
 
+	}
+
+	@Override
+	public void statusChanged(GRPCChannelStatus status) {
+		LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
 	}
 }
