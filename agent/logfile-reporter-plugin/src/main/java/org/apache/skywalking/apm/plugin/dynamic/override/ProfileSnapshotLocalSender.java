@@ -66,6 +66,11 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
         return new java.util.ArrayList<>(profileSnapshotDataCache.values());
     }
 
+    /**
+     * 核心拦截方法
+     * 原生逻辑是将 snapshot 放入 DataCarrier，然后由 Consumer 线程发送 gRPC
+     * 我们直接在这里截胡
+     */
     @Override
     public void send(final List<TracingThreadSnapshot> buffer) {
 
