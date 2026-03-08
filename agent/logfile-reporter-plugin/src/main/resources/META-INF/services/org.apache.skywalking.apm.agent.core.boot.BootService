@@ -23,3 +23,5 @@ org.apache.skywalking.apm.plugin.dynamic.override.ProfileSnapshotLocalSender
 org.apache.skywalking.apm.plugin.dynamic.override.MemoryModeGRPCChannelManager
 org.apache.skywalking.apm.plugin.dynamic.override.NoOpCommandService
 org.apache.skywalking.apm.plugin.dynamic.override.NoOpConfigurationDiscoveryService
+org.apache.skywalking.apm.plugin.dynamic.override.NoOpAsyncProfilerTaskChannelService
+org.apache.skywalking.apm.plugin.dynamic.override.NoOpProfileTaskChannelService

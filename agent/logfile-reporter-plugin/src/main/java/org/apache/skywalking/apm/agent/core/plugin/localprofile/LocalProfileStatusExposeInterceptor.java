@@ -79,7 +79,10 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 
 		// 6. =================================================================
 		Map<String, Object> resultMap = new HashMap<>();
+		//agent采集到的profile数据. 其会被"ProfileSendSnapshotService"线程周期性清空, 这里被我们的ProfileSnapshotLocalSender拦截
+		// 所以这里面的数据总是空的, 建议去 LogfileReporterStatusExposeInterceptor 中查看, 这里保留仅供参考
 		resultMap.put("data", cache);
+		// 用户配置的profile task列表
 		resultMap.put("profileTasks", lst);
 
 

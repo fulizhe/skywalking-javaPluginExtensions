@@ -40,7 +40,7 @@ public class NoOpConfigurationDiscoveryService extends ConfigurationDiscoverySer
 	}
 
 	@Override
-	public void statusChanged(GRPCChannelStatus arg0) {
+	public void statusChanged(GRPCChannelStatus status) {
 		LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
 	}
 

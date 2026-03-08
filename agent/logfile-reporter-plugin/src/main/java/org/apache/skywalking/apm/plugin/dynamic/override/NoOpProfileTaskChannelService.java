@@ -10,8 +10,7 @@ import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 /**
  * {@link https://github.com/apache/skywalking-java/blob/f750006020249d29a21cae63ae50da67f182c6ab/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/profile/ProfileTaskChannelService.java}
  *
- *  必须禁用ProfileTaskChannelService，否则其内部的异步任务会把收集的profile数据消费掉，导致我们无法获取到数据。
- *  
+ *
  *  C. 性能剖析相关 (Profile)
      * 线程名: SkywalkingAgent-7-ProfileGetTaskService-0
      * 线程名: SkywalkingAgent-8-ProfileSendSnapshotService-0
@@ -26,11 +25,37 @@ public class NoOpProfileTaskChannelService extends ProfileTaskChannelService {
 	
     @Override public void prepare() {}
     @Override public void boot() {
-    	LOGGER.info("### ProfileTaskChannelService has been disabled. ");
+        // 1. 这里需要. 主要是需要ProfileSendSnapshotService这个线程来回调 ProfileSnapshotSender, 进而可以回调到我们的ProfileSnapshotLocalSender
+    	super.boot();
+
+        stopGetTaskListFuture();
     }
+
+    private void stopGetTaskListFuture(){
+        try {
+            // 通过反射获取 getTaskListFuture
+            java.lang.reflect.Field futureField = ProfileTaskChannelService.class.getDeclaredField("getTaskListFuture");
+            futureField.setAccessible(true);
+            Object getTaskListFuture = futureField.get(this);
+
+            // 检查是否为 Future 类型并尝试停止
+            if (getTaskListFuture instanceof java.util.concurrent.Future) {
+                ((java.util.concurrent.Future<?>) getTaskListFuture).cancel(true);
+                LOGGER.info("### Successfully stopped getTaskListFuture.");
+            } else {
+                LOGGER.warn("### getTaskListFuture is not of type Future.");
+            }
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            LOGGER.error("### Failed to access getTaskListFuture via reflection.", e);
+        }
+    }
+
     @Override public void onComplete() {}
     @Override public void shutdown() {super.shutdown();}
-    @Override public void run() {}
+    @Override public void run() {
+         // 2. 这里不需要, 因为我们没有OAP要通信了, 也就没有任务调度了
+        // NO OP
+    }
 
     @Override
     public void statusChanged(GRPCChannelStatus status) {
