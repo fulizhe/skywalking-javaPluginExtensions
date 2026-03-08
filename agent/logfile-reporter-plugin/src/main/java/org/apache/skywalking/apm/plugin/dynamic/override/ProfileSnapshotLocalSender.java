@@ -81,7 +81,7 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
                              object.getTaskId(), object.getSequence(), object.getTraceSegmentId()
                 );
             }
-
+            
             // 将ThreadSnapshot对象转换为Map，便于外部简单使用
             final Map<String, Object> snapshotMap = new HashMap<>();
             snapshotMap.put("taskId", object.getTaskId());

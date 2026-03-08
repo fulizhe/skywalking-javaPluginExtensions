@@ -72,6 +72,21 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 		LOGGER.info("### Status Expose222");
 
 		// 1. =================================================================
+		refreshCache();
+		
+		// 2. =================================================================
+		final List<Map<String, Object>> lst = profileTasks();
+
+		// 6. =================================================================
+		Map<String, Object> resultMap = new HashMap<>();
+		resultMap.put("data", cache);
+		resultMap.put("profileTasks", lst);
+
+
+		result.defineReturnValue(resultMap);
+	}
+
+	private void refreshCache(){
 		final ProfileTaskChannelService client = (ProfileTaskChannelService) ServiceManager.INSTANCE
 				.findService(ProfileTaskChannelService.class);
 		// 这里必须使用反射来获取, 不要尝试进行类型转换为真实类型
@@ -99,13 +114,15 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 			cache.put(IdUtil.fastSimpleUUID(), map);
 
 		}
-		
-		// 2. =================================================================
+	}
+
+	private List<Map<String, Object>> profileTasks(){
 		// ProfileTaskCommandExecutor
 		// ProfileTaskExecutionService 其中的 profileTaskList 字段
 		final ProfileTaskExecutionService service = (ProfileTaskExecutionService) ServiceManager.INSTANCE
 				.findService(ProfileTaskExecutionService.class);
 		List<ProfileTask> profileTaskList = (List<ProfileTask>) ReflectUtil.getFieldValue(service, "profileTaskList");
+
 		List<Map<String, Object>> lst = CollUtil.newArrayList();
 		for (ProfileTask profileTask : profileTaskList) {
 			Map<String, Object> map = new HashMap<>();
@@ -119,13 +136,8 @@ public class LocalProfileStatusExposeInterceptor implements StaticMethodsAroundI
 			map.put("threadDumpPeriod", profileTask.getThreadDumpPeriod());
 			lst.add(map);
 		}
-		// 6. =================================================================
-		Map<String, Object> resultMap = new HashMap<>();
-		resultMap.put("data", cache);
-		resultMap.put("profileTasks", lst);
 
-
-		result.defineReturnValue(resultMap);
+		return lst;
 	}
 
 	@Override

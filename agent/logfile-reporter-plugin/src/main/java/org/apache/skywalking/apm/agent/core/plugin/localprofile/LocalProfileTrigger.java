@@ -1,4 +1,4 @@
-package org.apache.skywalking.apm.toolkit;
+package org.apache.skywalking.apm.agent.core.plugin.localprofile;
 
 import org.apache.skywalking.apm.agent.core.boot.ServiceManager;
 import org.apache.skywalking.apm.agent.core.profile.ProfileTask;
@@ -7,7 +7,7 @@ import org.apache.skywalking.apm.agent.core.profile.ProfileTaskExecutionService;
 import java.util.Collections;
 import java.util.UUID;
 
-public class LocalProfileTrigger {
+class LocalProfileTrigger {
 
     /**
      * 手动触发一个 Profile 任务

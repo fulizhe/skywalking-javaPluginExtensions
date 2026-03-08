@@ -62,9 +62,13 @@ public class LocalPorfileCallInterceptor implements StaticMethodsAroundIntercept
 		LOGGER.info("### start profile [ {} ] by [ {} ]", Config.Agent.SERVICE_NAME, methodParams);
 		LOGGER.info("============================================================");
 
-		final CommandExecutorService service = (CommandExecutorService) ServiceManager.INSTANCE
-				.findService(CommandExecutorService.class);
+		final ProfileTaskCommand profileTaskCommand = generateProfileCommand(methodParams);
+		triggerProfileTask(profileTaskCommand);
 
+		result.defineReturnValue(null);
+	}
+
+	private ProfileTaskCommand generateProfileCommand(Map<String, Object> methodParams){
 		final String serialNumber = IdUtil.fastSimpleUUID();
 		// 唯一标识一个 Profile 任务的 ID。 SkyWalking 使用 taskId 来区分不同的 Profile 任务。
 		final String taskId = StrUtil.format("profile-task-{}-{}",
@@ -85,12 +89,21 @@ public class LocalPorfileCallInterceptor implements StaticMethodsAroundIntercept
 		final int dumpPeriod = MapUtil.getInt(methodParams, "dumpPeriod", 1000);
 		// 每个方法调用栈的最大采样数量。 用于限制 Profile 数据的总量，防止 Agent 内存溢出。
 		// 典型值: 通常设置为 100 到 500。
-		//  "ProfileTaskExecutionService : check command error, cannot process this profile task. reason: max sampling count must less than 10" 
+		//  "ProfileTaskExecutionService : check command error, cannot process this profile task. reason: max sampling count must less than 10"
 		final int maxSamplingCount = MapUtil.getInt(methodParams, "maxSamplingCount", 9);
 		final long startTime = System.currentTimeMillis() + 5000; // 延后5秒启动剖析profiling。在源码 ProfileTaskExecutionService.addProfileTask(...)被使用
 		final long createTime = System.currentTimeMillis() + 1;
-		ProfileTaskCommand command = new ProfileTaskCommand(serialNumber, taskId, endpointName, duration,
+
+		return new ProfileTaskCommand(serialNumber, taskId, endpointName, duration,
 				minDurationThreshold, dumpPeriod, maxSamplingCount, startTime, createTime);
+	}
+
+	private void triggerProfileTask(ProfileTaskCommand command) {
+		// 1. 构建 ProfileTask 对象
+		// 注意：ProfileTask 的构造函数或 Setter 可能是非 public 的，
+		// 如果是 private，你需要用反射去设值。
+		// SkyWalking 版本不同，字段略有差异，以下以 8.x/9.x 为例
+
 		// ProfileTaskCommandExecutor 中执行; 最终在 ProfileTaskExecutionService执行profile,
 		// 使用ProfileTaskChannelService将结果发给OAP
 		// 真正的profile逻辑位于: ProfileThread.java, ThreadProfiler.java
@@ -98,12 +111,13 @@ public class LocalPorfileCallInterceptor implements StaticMethodsAroundIntercept
 		// 1. ProfileTaskChannelService.addProfilingSnapshot(...) #
 		// ProfileThread中回调这个方法将profile结果收集起来
 		try {
+			final CommandExecutorService service = (CommandExecutorService) ServiceManager.INSTANCE
+					.findService(CommandExecutorService.class);
+			LOGGER.info("### trigger profile task, command: {}", command.getEndpointName());
 			service.execute(command);
 		} catch (CommandExecutionException e) {
 			LOGGER.error(e.getMessage(), e);
 		}
-
-		result.defineReturnValue(null);
 	}
 
 	@Override
