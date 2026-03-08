@@ -45,6 +45,11 @@ public class NoOpProfileTaskChannelService extends ProfileTaskChannelService {
             } else {
                 LOGGER.warn("### getTaskListFuture is not of type Future.");
             }
+
+            // 将字段值设置为 null
+            futureField.set(this, null);
+            LOGGER.info("### Successfully set getTaskListFuture to null.");
+
         } catch (NoSuchFieldException | IllegalAccessException e) {
             LOGGER.error("### Failed to access getTaskListFuture via reflection.", e);
         }
