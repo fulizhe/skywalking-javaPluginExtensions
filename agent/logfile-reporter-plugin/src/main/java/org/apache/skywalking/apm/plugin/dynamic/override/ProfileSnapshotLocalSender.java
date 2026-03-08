@@ -46,6 +46,7 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 
     // 借鉴自Druid的JdbcDataSourceStat
     private LinkedHashMap<String, Map<String, Object>> profileSnapshotDataCache;
+    
     @Override
     public void prepare() {
         profileSnapshotDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
@@ -76,13 +77,11 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 
         for (TracingThreadSnapshot snapshot : buffer) {
             final ThreadSnapshot object = snapshot.transform();
-            if (LOGGER.isDebugEnable()) {
-                LOGGER.debug("Thread snapshot reporting, topic: {}, taskId: {}, sequence:{}, traceId: {}",
-                             object.getTaskId(), object.getSequence(), object.getTraceSegmentId()
+            if (LOGGER.isInfoEnable()) {
+                LOGGER.info("### Thread snapshot reporting, topic: {}, taskId: {}, sequence:{}, traceId: {}. statckCodeSignatures size: {}",
+                        object.getTaskId(), object.getSequence(), object.getTraceSegmentId(), object.getStack().getCodeSignaturesList().size()
                 );
             }
-
-            // TODO 这里需要输出日志, 确认问题. 实际前端看到数据始终只有一条
 
             // 将ThreadSnapshot对象转换为Map，便于外部简单使用
             final Map<String, Object> snapshotMap = new HashMap<>();
@@ -95,7 +94,7 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
                 final ThreadStack stack = object.getStack();
                 final ProtocolStringList codeSignaturesList = stack.getCodeSignaturesList();
                 // 将自定义类型 ProtocolStringList 转换为普通的 List<String>
-                List<String> codeSignatures =  codeSignaturesList.stream().map(String::valueOf).collect(Collectors.toList());
+                List<String> codeSignatures = codeSignaturesList.stream().map(String::valueOf).collect(Collectors.toList());
                 // 将 stack 信息转换为 Map，便于外部简单使用
                 Map<String, Object> stackMap = new HashMap<>();
                 stackMap.put("codeSignatures", codeSignatures);
@@ -112,6 +111,7 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 
         }
     }
+
     @Override
     public void statusChanged(GRPCChannelStatus status) {
         LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
