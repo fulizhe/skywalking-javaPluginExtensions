@@ -81,7 +81,9 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
                              object.getTaskId(), object.getSequence(), object.getTraceSegmentId()
                 );
             }
-            
+
+            // TODO 这里需要输出日志, 确认问题. 实际前端看到数据始终只有一条
+
             // 将ThreadSnapshot对象转换为Map，便于外部简单使用
             final Map<String, Object> snapshotMap = new HashMap<>();
             snapshotMap.put("taskId", object.getTaskId());
