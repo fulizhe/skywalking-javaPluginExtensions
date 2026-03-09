@@ -1,7 +1,6 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import org.apache.skywalking.apm.agent.core.boot.OverrideImplementor;
-import org.apache.skywalking.apm.agent.core.commands.CommandService;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.profile.ProfileTaskChannelService;

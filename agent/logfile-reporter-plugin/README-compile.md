@@ -17,7 +17,7 @@ cat D:\apps\apache-skywalking-java-agent-9.4.0\logs\skywalking-api.log | findstr
 
 ```
 
-# 编译(公司内环境)
+# 编译
 
 ```shell
 $env:path="D:\apps\java\jdk1.8.0_92-64\bin;$env:path"

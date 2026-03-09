@@ -42,78 +42,79 @@ import org.apache.skywalking.apm.network.language.profile.v3.ThreadStack;
  */
 @OverrideImplementor(ProfileSnapshotSender.class)
 public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
-    private static final ILog LOGGER = LogManager.getLogger(ProfileSnapshotLocalSender.class);
+	private static final ILog LOGGER = LogManager.getLogger(ProfileSnapshotLocalSender.class);
 
-    // 借鉴自Druid的JdbcDataSourceStat
-    private LinkedHashMap<String, Map<String, Object>> profileSnapshotDataCache;
-    
-    @Override
-    public void prepare() {
-        profileSnapshotDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-            private static final long serialVersionUID = 1L;
+	// 借鉴自Druid的JdbcDataSourceStat
+	private LinkedHashMap<String, Map<String, Object>> profileSnapshotDataCache;
 
-            protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-                return (size() > 500);
+	@Override
+	public void prepare() {
+		profileSnapshotDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
+			private static final long serialVersionUID = 1L;
 
-            }
-        };
-    }
+			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
+				return (size() > 500);
 
-    @Override
-    public void boot() {
-    }
+			}
+		};
+	}
 
-    public List<Map<String, Object>> getProfileSnapshotDatas() {
-        return new java.util.ArrayList<>(profileSnapshotDataCache.values());
-    }
+	@Override
+	public void boot() {
+	}
 
-    /**
-     * 核心拦截方法
-     * 原生逻辑是将 snapshot 放入 DataCarrier，然后由 Consumer 线程发送 gRPC
-     * 我们直接在这里截胡
-     */
-    @Override
-    public void send(final List<TracingThreadSnapshot> buffer) {
+	public List<Map<String, Object>> getProfileSnapshotDatas() {
+		return new java.util.ArrayList<>(profileSnapshotDataCache.values());
+	}
 
-        for (TracingThreadSnapshot snapshot : buffer) {
-            final ThreadSnapshot object = snapshot.transform();
-            if (LOGGER.isInfoEnable()) {
-                LOGGER.info("### Thread snapshot reporting, topic: {}, taskId: {}, sequence:{}, traceId: {}. statckCodeSignatures size: {}",
-                        object.getTaskId(), object.getSequence(), object.getTraceSegmentId(), object.getStack().getCodeSignaturesList().size()
-                );
-            }
+	/**
+	 * 核心拦截方法
+	 * 原生逻辑是将 snapshot 放入 DataCarrier，然后由 Consumer 线程发送 gRPC
+	 * 我们直接在这里截胡
+	 */
+	@Override
+	public void send(final List<TracingThreadSnapshot> buffer) {
 
-            // 将ThreadSnapshot对象转换为Map，便于外部简单使用
-            final Map<String, Object> snapshotMap = new HashMap<>();
-            snapshotMap.put("taskId", object.getTaskId());
-            snapshotMap.put("sequence", object.getSequence());
-            snapshotMap.put("traceSegmentId", object.getTraceSegmentId());
-            snapshotMap.put("time", object.getTime());
-            // 将自定义类型stack转换为Map，便于外部简单使用
-            if (object.getStack() != null) {
-                final ThreadStack stack = object.getStack();
-                final ProtocolStringList codeSignaturesList = stack.getCodeSignaturesList();
-                // 将自定义类型 ProtocolStringList 转换为普通的 List<String>
-                List<String> codeSignatures = codeSignaturesList.stream().map(String::valueOf).collect(Collectors.toList());
-                // 将 stack 信息转换为 Map，便于外部简单使用
-                Map<String, Object> stackMap = new HashMap<>();
-                stackMap.put("codeSignatures", codeSignatures);
-                snapshotMap.put("stack", stackMap);
-            } else {
-                snapshotMap.put("stack", null);
-            }
+		for (TracingThreadSnapshot snapshot : buffer) {
+			final ThreadSnapshot object = snapshot.transform();
+			if (LOGGER.isInfoEnable()) {
+				LOGGER.info(
+						"### Thread snapshot reporting, time: {}, taskId: {}, sequence:{}, traceId: {}. statckCodeSignatures size: {}",
+						object.getTime(), object.getTaskId(), object.getSequence(), object.getTraceSegmentId(),
+						object.getStack().getCodeSignaturesList().size());
+			}
 
+			// 将ThreadSnapshot对象转换为Map，便于外部简单使用
+			final Map<String, Object> snapshotMap = new HashMap<>();
+			snapshotMap.put("taskId", object.getTaskId());
+			snapshotMap.put("sequence", object.getSequence());
+			snapshotMap.put("traceSegmentId", object.getTraceSegmentId());
+			snapshotMap.put("time", object.getTime());
+			// 将自定义类型stack转换为Map，便于外部简单使用
+			if (object.getStack() != null) {
+				final ThreadStack stack = object.getStack();
+				final ProtocolStringList codeSignaturesList = stack.getCodeSignaturesList();
+				// 将自定义类型 ProtocolStringList 转换为普通的 List<String>
+				List<String> codeSignatures = codeSignaturesList.stream().map(String::valueOf)
+						.collect(Collectors.toList());
+				// 将 stack 信息转换为 Map，便于外部简单使用
+				Map<String, Object> stackMap = new HashMap<>();
+				stackMap.put("codeSignatures", codeSignatures);
+				snapshotMap.put("stack", stackMap);
+			} else {
+				snapshotMap.put("stack", null);
+			}
 
-            // 注意：如果ThreadSnapshot有复杂类型字段，可能需要进一步转换为Map或其他可序列化格式
-            // 以taskId+sequence作为唯一key存入缓存
-            String cacheKey = object.getTaskId() + "_" + object.getSequence();
-            profileSnapshotDataCache.put(cacheKey, snapshotMap);
+			// 注意：如果ThreadSnapshot有复杂类型字段，可能需要进一步转换为Map或其他可序列化格式
+			// 以taskId+sequence作为唯一key存入缓存
+			String cacheKey = object.getTaskId() + "_" + object.getSequence();
+			profileSnapshotDataCache.put(cacheKey, snapshotMap);
 
-        }
-    }
+		}
+	}
 
-    @Override
-    public void statusChanged(GRPCChannelStatus status) {
-        LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
-    }
+	@Override
+	public void statusChanged(GRPCChannelStatus status) {
+		LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
+	}
 }
