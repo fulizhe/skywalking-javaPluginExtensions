@@ -59,6 +59,7 @@ public class NoOpProfileTaskChannelService extends ProfileTaskChannelService {
     @Override public void run() {
          // 2. 这里不需要, 因为我们没有OAP要通信了, 也就没有任务调度了
         // NO OP
+    	LOGGER.warn("### getTaskListFuture executed. logic is empty");
     }
 
     @Override

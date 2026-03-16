@@ -108,6 +108,8 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 			// 注意：如果ThreadSnapshot有复杂类型字段，可能需要进一步转换为Map或其他可序列化格式
 			// 以taskId+sequence作为唯一key存入缓存
 			String cacheKey = object.getTaskId() + "_" + object.getSequence();
+			// 上面这个, 在我们的场景下对于同一个Task, key相同, 于是出现覆盖效果
+			cacheKey = object.getTraceSegmentId();
 			profileSnapshotDataCache.put(cacheKey, snapshotMap);
 
 		}
