@@ -108,6 +108,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				});
 
 		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - maxLogSize is [ {} ]", maxLogSize);
+		
+		// 本agent脱离OAP, 所以不需要监听GRPC
+		//super.prepare();
 	}
 
 	@Override
