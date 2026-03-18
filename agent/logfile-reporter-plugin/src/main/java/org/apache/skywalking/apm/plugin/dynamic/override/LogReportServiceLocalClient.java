@@ -43,7 +43,7 @@ import org.apache.skywalking.apm.network.logging.v3.LogDataBody;
  *
  *     <p>
  *         这里需要让Skywalking集成日志框架. 例如：https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-logback-1.x/
- *         集成完毕之后，我们通过日志框架写入的日志将被本类发送给OAP端
+ *         集成完毕之后，我们通过日志框架写入的日志将被本类发送给OAP端, 不过被我们魔改后的agent将是存放在内存中(最新1000条)
  *     </p>
  */
 @OverrideImplementor(LogReportServiceClient.class)
@@ -65,6 +65,9 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
 
             }
         };
+        
+        // 本agent脱离OAP, 所以不需要监听GRPC
+        //super.prepare();
     }
 
     public List<Map<String, Object>> getLogDatas() {
