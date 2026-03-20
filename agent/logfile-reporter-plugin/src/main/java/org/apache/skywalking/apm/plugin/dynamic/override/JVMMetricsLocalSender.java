@@ -1,9 +1,9 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.Deque;
 import java.util.LinkedList;
+import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -27,7 +27,7 @@ import org.apache.skywalking.apm.network.language.agent.v3.Thread;
  * <p>
  * JVMMetricsSender 的本地实现：
  * 收集到的 JVM Metrics 数据不再通过网络发送给 OAP 端，
- * 而是转换成结构化数据后缓存在本地内存（基于 {@link LinkedHashMap} 的有界 LRU 缓存），
+ * 而是转换成结构化数据后缓存在本地内存（基于有界队列，仅保留最近 N 条），
  * 供日志上报 / 前端展示等组件按需读取。
  * </p>
  * <p>
@@ -44,8 +44,12 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 	/** 本地 JVM 指标缓存条数上限，由 {@link LogFileReporterPluginConfig.Plugin#JvmMetricsLocal} 配置，默认 1000 */
 	private int maxMetricsDataSize;
-	// 借鉴自Druid的JdbcDataSourceStat，使用同步包装保证并发访问安全
-	private Map<String, Map<String, Object>> jvmMetricsDataCache;
+	/**
+	 * JVM 指标本地有界缓存，仅保留最近 N 条。
+	 * 使用 Deque 避免 LinkedHashMap （参考自: Druid中的 JdbcDataSourceStat）仅为 removeEldestEntry 的额外语义和开销。
+	 */
+	private final Object metricsCacheLock = new Object();
+	private Deque<java.util.Map<String, Object>> jvmMetricsDataCache;
 
 	@Override
 	public void prepare() {
@@ -55,16 +59,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		Integer configured = LogFileReporterPluginConfig.Plugin.JvmMetricsLocal.MAX_METRICS_DATA_SIZE;
 		this.maxMetricsDataSize = (configured != null && configured > 0) ? configured : 1000;
 
-		final int maxSize = this.maxMetricsDataSize;
-		jvmMetricsDataCache = Collections.synchronizedMap(
-				new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-					private static final long serialVersionUID = 1L;
-
-					@Override
-					protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-						return size() > maxSize;
-					}
-				});
+		jvmMetricsDataCache = new ArrayDeque<>(this.maxMetricsDataSize);
 	}
 
 	@Override
@@ -72,10 +67,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 	}
 
-	public Collection<Map<String, Object>> getMetrics() {
+	public Collection<java.util.Map<String, Object>> getMetrics() {
 		// 返回快照，避免调用方在遍历时与写线程并发修改导致异常
-		synchronized (jvmMetricsDataCache) {
-			return new java.util.ArrayList<>(jvmMetricsDataCache.values());
+		synchronized (metricsCacheLock) {
+			return new java.util.ArrayList<>(jvmMetricsDataCache);
 		}
 	}
 
@@ -94,7 +89,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 			if (!buffer.isEmpty()) {
 				JVMMetricCollection jvmMetricCollection = buildJVMMetricCollection(buffer);
 				Map<String, Object> metricMap = buildMetricCollectionMap(jvmMetricCollection);
-				cacheMetrics(jvmMetricCollection, metricMap);
+				cacheMetrics(metricMap);
 			}
 		} catch (Throwable t) {
 			LOGGER.error(t, "collect JVM metrics to local cache fail.");
@@ -126,12 +121,12 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	/**
 	 * 将 JVMMetricCollection 转换为结构化 Map，便于本地缓存与下游消费。
 	 */
-	private Map<String, Object> buildMetricCollectionMap(JVMMetricCollection jvmMetricCollection) {
-		final Map<String, Object> metricMap = new java.util.HashMap<>();
+	private java.util.Map<String, Object> buildMetricCollectionMap(JVMMetricCollection jvmMetricCollection) {
+		final java.util.Map<String, Object> metricMap = new java.util.HashMap<>();
 		metricMap.put("service", jvmMetricCollection.getService());
 		metricMap.put("serviceInstance", jvmMetricCollection.getServiceInstance());
 
-		final java.util.List<Map<String, Object>> metricsList = new java.util.ArrayList<>();
+		final java.util.List<java.util.Map<String, Object>> metricsList = new java.util.ArrayList<>();
 		for (JVMMetric metric : jvmMetricCollection.getMetricsList()) {
 			metricsList.add(buildSingleMetricMap(metric));
 		}
@@ -142,8 +137,8 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	/**
 	 * 单条 JVMMetric 的结构化转换逻辑，方便单元测试覆盖。
 	 */
-	private Map<String, Object> buildSingleMetricMap(JVMMetric metric) {
-		Map<String, Object> m = new java.util.HashMap<>();
+	private java.util.Map<String, Object> buildSingleMetricMap(JVMMetric metric) {
+		java.util.Map<String, Object> m = new java.util.HashMap<>();
 		m.put("time", metric.getTime());
 		m.put("cpu", metric.getCpu().getUsagePercent());
 
@@ -156,10 +151,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		return m;
 	}
 
-	private java.util.List<Map<String, Object>> buildMemoryList(JVMMetric metric) {
-		java.util.List<Map<String, Object>> memoryList = new java.util.ArrayList<>();
+	private java.util.List<java.util.Map<String, Object>> buildMemoryList(JVMMetric metric) {
+		java.util.List<java.util.Map<String, Object>> memoryList = new java.util.ArrayList<>();
 		for (Memory memory : metric.getMemoryList()) {
-			Map<String, Object> memMap = new java.util.HashMap<>();
+			java.util.Map<String, Object> memMap = new java.util.HashMap<>();
 			memMap.put("isHeap", memory.getIsHeap());
 			memMap.put("init", memory.getInit());
 			memMap.put("max", memory.getMax());
@@ -170,10 +165,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		return memoryList;
 	}
 
-	private java.util.List<Map<String, Object>> buildMemoryPoolList(JVMMetric metric) {
-		java.util.List<Map<String, Object>> memoryPoolList = new java.util.ArrayList<>();
+	private java.util.List<java.util.Map<String, Object>> buildMemoryPoolList(JVMMetric metric) {
+		java.util.List<java.util.Map<String, Object>> memoryPoolList = new java.util.ArrayList<>();
 		for (MemoryPool pool : metric.getMemoryPoolList()) {
-			Map<String, Object> poolMap = new java.util.HashMap<>();
+			java.util.Map<String, Object> poolMap = new java.util.HashMap<>();
 			poolMap.put("type", pool.getType());
 			poolMap.put("init", pool.getInit());
 			poolMap.put("max", pool.getMax());
@@ -184,10 +179,10 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		return memoryPoolList;
 	}
 
-	private java.util.List<Map<String, Object>> buildGcList(JVMMetric metric) {
-		java.util.List<Map<String, Object>> gcList = new java.util.ArrayList<>();
+	private java.util.List<java.util.Map<String, Object>> buildGcList(JVMMetric metric) {
+		java.util.List<java.util.Map<String, Object>> gcList = new java.util.ArrayList<>();
 		for (GC gc : metric.getGcList()) {
-			Map<String, Object> gcMap = new java.util.HashMap<>();
+			java.util.Map<String, Object> gcMap = new java.util.HashMap<>();
 			gcMap.put("phrase", gc.getPhase().name());
 			gcMap.put("count", gc.getCount());
 			gcMap.put("time", gc.getTime());
@@ -196,8 +191,8 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		return gcList;
 	}
 
-	private Map<String, Object> buildThreadMap(Thread thread) {
-		Map<String, Object> threadMap = new java.util.HashMap<>();
+	private java.util.Map<String, Object> buildThreadMap(Thread thread) {
+		java.util.Map<String, Object> threadMap = new java.util.HashMap<>();
 		threadMap.put("daemon", thread.getDaemonCount()); // 守护线程数
 		threadMap.put("live", thread.getLiveCount());     // 活跃线程数
 		threadMap.put("peak", thread.getPeakCount());     // 峰值线程数
@@ -208,8 +203,8 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		return threadMap;
 	}
 
-	private Map<String, Object> buildClassMap(Class clazz) {
-		Map<String, Object> clazzMap = new java.util.HashMap<>();
+	private java.util.Map<String, Object> buildClassMap(Class clazz) {
+		java.util.Map<String, Object> clazzMap = new java.util.HashMap<>();
 		clazzMap.put("loaded", clazz.getLoadedClassCount());           // 当前已加载类数量
 		clazzMap.put("total_loaded", clazz.getTotalLoadedClassCount()); // 累计加载类数量
 		clazzMap.put("total_unloaded", clazz.getTotalUnloadedClassCount()); // 累计卸载类数量
@@ -217,12 +212,15 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	}
 
 	/**
-	 * 按当前策略生成缓存 key 并写入本地 LRU Map。
+	 * 将最新指标写入本地有界缓存，超出上限时淘汰最老数据。
 	 */
-	private void cacheMetrics(JVMMetricCollection jvmMetricCollection, Map<String, Object> metricMap) {
-		// 以时间戳+实例名作为key，保证唯一性
-		String cacheKey = jvmMetricCollection.getServiceInstance() + "_" + System.currentTimeMillis();
-		jvmMetricsDataCache.put(cacheKey, metricMap);
+	private void cacheMetrics(java.util.Map<String, Object> metricMap) {
+		synchronized (metricsCacheLock) {
+			while (jvmMetricsDataCache.size() >= maxMetricsDataSize) {
+				jvmMetricsDataCache.pollFirst();
+			}
+			jvmMetricsDataCache.offerLast(metricMap);
+		}
 	}
 
 	@Override
