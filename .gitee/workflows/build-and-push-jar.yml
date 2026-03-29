@@ -1,0 +1,50 @@
+name: Build JAR and Push to Artifact Repo
+
+on:
+  push:
+    branches:
+      - main    # 或你使用的默认分支，如 master
+    paths:
+      - 'agent/logfile-reporter-plugin/**'  # 只有该子目录变更才触发，提升效率
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+
+      - name: Navigate to Subdirectory and Build JAR
+        working-directory: ./agent/logfile-reporter-plugin
+        run: |
+          chmod +x mvnw  # 如果是 Maven Wrapper
+          ./mvnw clean package -DskipTests
+          # 或者使用 mvn: mvn clean package -DskipTests
+
+      - name: Check if JAR was built
+        run: |
+          ls -la ./agent/logfile-reporter-plugin/target/*.jar
+          if [ ! -f "./agent/logfile-reporter-plugin/target/*.jar" ]; then
+            echo "❌ JAR file not found!"
+            exit 1
+          fi
+
+      - name: Publish JAR to Gitee Package Registry
+        run: |
+          curl -X POST -u "${{ secrets.GITEE_TOKEN }}:x-oauth-basic" \
+            -F "file=@./agent/logfile-reporter-plugin/target/logfile-reporter-plugin-1.0.0.jar" \
+            "https://gitee.com/api/v5/packages/maven/lqzkcx3/skywalking-javaPluginExtensions/versions/1.0.0" 
+        fi
+
+      - name: ✅ Success Message
+        run: |
+          echo "🎉 JAR built and pushed successfully!"
