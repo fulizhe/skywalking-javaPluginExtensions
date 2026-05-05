@@ -15,6 +15,9 @@ Skywalking Java Agent插件 和 OAP端的扩展。
 
 ```
 
+https://help.gitee.com/repository/settings/sync-between-gitee-github#%E5%A6%82%E4%BD%95%E7%94%B3%E8%AF%B7-github-%E7%A7%81%E4%BA%BA%E4%BB%A4%E7%89%8C 【如何申请 GitHub 私人令牌？】
+
+
 ##### 方案二（未启用）
 ```shell
 # 使用 GitHub Actions + Gitee Mirror （待选）
