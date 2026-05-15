@@ -33,12 +33,13 @@ import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
  * Refer to {@code DisableJVMService}
  * </p>
  *
- *<a href=" https://github.com/apache/skywalking-java/blob/main/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/jvm/JVMMetricsSender.jav">...</a>a
+ *<a href=" https://github.com/apache/skywalking-java/blob/main/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/jvm/JVMMetricsSender.java">...</a>a
  */
 @OverrideImplementor(JVMMetricsSender.class)
 public class JVMMetricsLocalSender extends JVMMetricsSender implements BootService, Runnable {
 	private static final ILog LOGGER = LogManager.getLogger(JVMMetricsLocalSender.class);
 
+	// jvmMetricsDataCache不能替代它：一个是采集暂存，一个是转换后的历史缓存。
 	private LinkedBlockingQueue<JVMMetric> queue;
 
 	/** 本地 JVM 指标缓存条数上限，由 {@link LogFileReporterPluginConfig.Plugin#JvmMetricsLocal} 配置，默认 1000 */
