@@ -1,9 +1,7 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import java.util.Collection;
-import java.util.Deque;
 import java.util.LinkedList;
-import java.util.ArrayDeque;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -22,6 +20,7 @@ import org.apache.skywalking.apm.network.language.agent.v3.JVMMetricCollection;
 import org.apache.skywalking.apm.network.language.agent.v3.Memory;
 import org.apache.skywalking.apm.network.language.agent.v3.MemoryPool;
 import org.apache.skywalking.apm.network.language.agent.v3.Thread;
+import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
  * <p>
@@ -48,10 +47,9 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	 * JVM 指标本地有界缓存，仅保留最近 N 条。
 	 * 使用 Deque 避免 LinkedHashMap （参考自: Druid中的 JdbcDataSourceStat）仅为 removeEldestEntry 的额外语义和开销。
 	 */
-	private final Object metricsCacheLock = new Object();
 	// TODO 参考 KafkaJVMMetricsSender.java 使用 BlockingQueue 来处理
 	// https://github.com/apache/skywalking-java/blob/e0e8b3c8c304735991e057d431910ed1f4a57cdd/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaJVMMetricsSender.java
-	private Deque<java.util.Map<String, Object>> jvmMetricsDataCache;
+	private CircularBlockingQueue<java.util.Map<String, Object>> jvmMetricsDataCache;
 
 	@Override
 	public void prepare() {
@@ -61,7 +59,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		Integer configured = LogFileReporterPluginConfig.Plugin.JvmMetricsLocal.MAX_METRICS_DATA_SIZE;
 		this.maxMetricsDataSize = (configured != null && configured > 0) ? configured : 1000;
 
-		jvmMetricsDataCache = new ArrayDeque<>(this.maxMetricsDataSize);
+		jvmMetricsDataCache = new CircularBlockingQueue<>(this.maxMetricsDataSize);
 	}
 
 	@Override
@@ -71,9 +69,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 	public Collection<java.util.Map<String, Object>> getMetrics() {
 		// 返回快照，避免调用方在遍历时与写线程并发修改导致异常
-		synchronized (metricsCacheLock) {
-			return new java.util.ArrayList<>(jvmMetricsDataCache);
-		}
+		return new java.util.ArrayList<>(jvmMetricsDataCache);
 	}
 	
 	@Override
@@ -91,8 +87,9 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 			LinkedList<JVMMetric> buffer = drainQueueToBuffer();
 			if (!buffer.isEmpty()) {
 				JVMMetricCollection jvmMetricCollection = buildJVMMetricCollection(buffer);
-				Map<String, Object> metricMap = buildMetricCollectionMap(jvmMetricCollection);
-				cacheMetrics(metricMap);
+				Map<String, Object> metricMap = buildMetricCollectionMap(jvmMetricCollection);				
+				// 将最新指标写入本地有界缓存，超出上限时淘汰最老数据。				 	
+				jvmMetricsDataCache.add(metricMap);
 			}
 		} catch (Throwable t) {
 			LOGGER.error(t, "collect JVM metrics to local cache fail.");
@@ -212,18 +209,6 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 		clazzMap.put("total_loaded", clazz.getTotalLoadedClassCount()); // 累计加载类数量
 		clazzMap.put("total_unloaded", clazz.getTotalUnloadedClassCount()); // 累计卸载类数量
 		return clazzMap;
-	}
-
-	/**
-	 * 将最新指标写入本地有界缓存，超出上限时淘汰最老数据。
-	 */
-	private void cacheMetrics(java.util.Map<String, Object> metricMap) {
-		synchronized (metricsCacheLock) {
-			while (jvmMetricsDataCache.size() >= maxMetricsDataSize) {
-				jvmMetricsDataCache.pollFirst();
-			}
-			jvmMetricsDataCache.offerLast(metricMap);
-		}
 	}
 
 	@Override
