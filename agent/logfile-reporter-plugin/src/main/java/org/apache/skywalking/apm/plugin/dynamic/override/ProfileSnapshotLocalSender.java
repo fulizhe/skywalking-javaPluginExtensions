@@ -30,6 +30,7 @@ import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.ProtocolStringList;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadSnapshot;
 import org.apache.skywalking.apm.network.language.profile.v3.ThreadStack;
+import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
  * <p>
@@ -45,18 +46,11 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 	private static final ILog LOGGER = LogManager.getLogger(ProfileSnapshotLocalSender.class);
 
 	// 借鉴自Druid的JdbcDataSourceStat
-	private LinkedHashMap<String, Map<String, Object>> profileSnapshotDataCache;
+	private CircularBlockingQueue<Map<String, Object>> profileSnapshotDataCache;
 
 	@Override
 	public void prepare() {
-		profileSnapshotDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-			private static final long serialVersionUID = 1L;
-
-			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-				return (size() > 500);
-
-			}
-		};
+		profileSnapshotDataCache = new CircularBlockingQueue<>(500);
 	}
 
 	@Override
@@ -64,7 +58,7 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 	}
 
 	public List<Map<String, Object>> getProfileSnapshotDatas() {
-		return new java.util.ArrayList<>(profileSnapshotDataCache.values());
+		return new java.util.ArrayList<>(profileSnapshotDataCache);
 	}
 
 	/**
@@ -107,10 +101,8 @@ public class ProfileSnapshotLocalSender extends ProfileSnapshotSender {
 
 			// 注意：如果ThreadSnapshot有复杂类型字段，可能需要进一步转换为Map或其他可序列化格式
 			// 以taskId+sequence作为唯一key存入缓存
-			String cacheKey = object.getTaskId() + "_" + object.getSequence();
 			// 上面这个, 在我们的场景下对于同一个Task, key相同, 于是出现覆盖效果
-			cacheKey = object.getTraceSegmentId();
-			profileSnapshotDataCache.put(cacheKey, snapshotMap);
+			profileSnapshotDataCache.add(snapshotMap);
 
 		}
 	}

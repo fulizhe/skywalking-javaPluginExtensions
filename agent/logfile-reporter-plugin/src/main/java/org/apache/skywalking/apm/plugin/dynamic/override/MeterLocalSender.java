@@ -1,6 +1,5 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +12,7 @@ import org.apache.skywalking.apm.agent.core.meter.MeterSender;
 import org.apache.skywalking.apm.agent.core.meter.MeterService;
 import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
 import org.apache.skywalking.apm.network.language.agent.v3.MeterDataCollection;
+import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
  * <p>
@@ -29,18 +29,11 @@ public class MeterLocalSender extends MeterSender {
 	private static final ILog LOGGER = LogManager.getLogger(MeterLocalSender.class);
 
 	// 借鉴自Druid的JdbcDataSourceStat
-	private LinkedHashMap<String, Map<String, Object>> meterDataCache;
+	private CircularBlockingQueue<Map<String, Object>> meterDataCache;
 
 	@Override
 	public void prepare() {
-		meterDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-			private static final long serialVersionUID = 1L;
-
-			protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-				return (size() > 500);
-
-			}
-		};
+		meterDataCache = new CircularBlockingQueue<>(500);
 		
 		// 本agent脱离OAP, 所以不需要监听GRPC
 		//super.prepare();
@@ -52,7 +45,7 @@ public class MeterLocalSender extends MeterSender {
 
 	public List<Map<String, Object>> getMeterDatas() {
 		// 将Collection转换为List，便于前端或调用方处理
-		return new java.util.ArrayList<>(meterDataCache.values());
+		return new java.util.ArrayList<>(meterDataCache);
 	}
 
 	@Override
@@ -134,8 +127,7 @@ public class MeterLocalSender extends MeterSender {
 				break;
 			}
 			// 以实例名+时间戳作为key，保证唯一性
-			String cacheKey = meterData.getServiceInstance() + "_" + System.currentTimeMillis();
-			meterDataCache.put(cacheKey, meterMap);
+			meterDataCache.add(meterMap);
 		}
 	}
 

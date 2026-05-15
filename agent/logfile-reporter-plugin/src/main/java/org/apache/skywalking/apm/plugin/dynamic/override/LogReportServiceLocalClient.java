@@ -18,7 +18,6 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,6 +30,7 @@ import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.logging.v3.LogData;
 import org.apache.skywalking.apm.network.logging.v3.LogDataBody;
+import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
  * <p>
@@ -50,28 +50,20 @@ import org.apache.skywalking.apm.network.logging.v3.LogDataBody;
 public class LogReportServiceLocalClient extends LogReportServiceClient {
     private static final ILog LOGGER = LogManager.getLogger(LogReportServiceLocalClient.class);
 
-    // 借鉴自Druid的JdbcDataSourceStat
-    private LinkedHashMap<String, Map<String, Object>> logDataCache;
+    private CircularBlockingQueue<Map<String, Object>> logDataCache;
 
     @Override
     public void prepare() {
     	LOGGER.info("### prepare: {}", this.getClass().getName());
     	
-        logDataCache = new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-            private static final long serialVersionUID = 1L;
-
-            protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-                return (size() > 1000);
-
-            }
-        };
+        logDataCache = new CircularBlockingQueue<>(1000);
         
         // 本agent脱离OAP, 所以不需要监听GRPC
         //super.prepare();
     }
 
     public List<Map<String, Object>> getLogDatas() {
-        return new java.util.ArrayList<>(logDataCache.values());
+        return new java.util.ArrayList<>(logDataCache);
     }
 
     @Override
@@ -130,9 +122,7 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
             logDataMap.put("traceContext", logDataObj.getTraceContext().toString());
             logDataMap.put("layer", logDataObj.getLayer());
 
-            // 以 service + timestamp 作为唯一key存入缓存
-            String cacheKey = logDataObj.getService() + "_" + logDataObj.getTimestamp();
-            logDataCache.put(cacheKey, logDataMap);
+            logDataCache.add(logDataMap);
         }
     }
 
