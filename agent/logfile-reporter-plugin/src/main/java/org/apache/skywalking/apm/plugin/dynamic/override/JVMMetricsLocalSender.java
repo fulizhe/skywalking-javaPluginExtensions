@@ -49,6 +49,8 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 	 * 使用 Deque 避免 LinkedHashMap （参考自: Druid中的 JdbcDataSourceStat）仅为 removeEldestEntry 的额外语义和开销。
 	 */
 	private final Object metricsCacheLock = new Object();
+	// TODO 参考 KafkaJVMMetricsSender.java 使用 BlockingQueue 来处理
+	// https://github.com/apache/skywalking-java/blob/e0e8b3c8c304735991e057d431910ed1f4a57cdd/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaJVMMetricsSender.java
 	private Deque<java.util.Map<String, Object>> jvmMetricsDataCache;
 
 	@Override
@@ -64,7 +66,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 	@Override
 	public void boot() {
-
+		//NONE
 	}
 
 	public Collection<java.util.Map<String, Object>> getMetrics() {
@@ -73,8 +75,9 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 			return new java.util.ArrayList<>(jvmMetricsDataCache);
 		}
 	}
-
-	public void offer(JVMMetric metric) {
+	
+	@Override
+	public void offer(JVMMetric metric) {		
 		// drop last message and re-deliver
 		if (!queue.offer(metric)) {
 			queue.poll();

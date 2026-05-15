@@ -39,6 +39,8 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
  * <p>
  * Refer to {@code DynamicEnabledTraceSegmentServiceClient}
  * </p>
+ * <p> {@link https://github.com/apache/skywalking-java/blob/e0e8b3c8c304735991e057d431910ed1f4a57cdd/apm-sniffer/apm-agent-core/src/main/java/org/apache/skywalking/apm/agent/core/remote/TraceSegmentServiceClient.java}
+ * 
  */
 @OverrideImplementor(TraceSegmentServiceClient.class)
 public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
