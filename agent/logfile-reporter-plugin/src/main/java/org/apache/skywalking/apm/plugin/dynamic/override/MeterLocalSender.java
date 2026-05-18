@@ -1,5 +1,7 @@
 package org.apache.skywalking.apm.plugin.dynamic.override;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -11,7 +13,12 @@ import org.apache.skywalking.apm.agent.core.meter.MeterId;
 import org.apache.skywalking.apm.agent.core.meter.MeterSender;
 import org.apache.skywalking.apm.agent.core.meter.MeterService;
 import org.apache.skywalking.apm.agent.core.remote.GRPCChannelStatus;
-import org.apache.skywalking.apm.network.language.agent.v3.MeterDataCollection;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
+import org.apache.skywalking.apm.network.language.agent.v3.Label;
+import org.apache.skywalking.apm.network.language.agent.v3.MeterBucketValue;
+import org.apache.skywalking.apm.network.language.agent.v3.MeterData;
+import org.apache.skywalking.apm.network.language.agent.v3.MeterHistogram;
+import org.apache.skywalking.apm.network.language.agent.v3.MeterSingleValue;
 import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
@@ -26,123 +33,118 @@ import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
  */
 @OverrideImplementor(MeterSender.class)
 public class MeterLocalSender extends MeterSender {
-	private static final ILog LOGGER = LogManager.getLogger(MeterLocalSender.class);
+    private static final ILog LOGGER = LogManager.getLogger(MeterLocalSender.class);
 
-	// 借鉴自Druid的JdbcDataSourceStat
-	private CircularBlockingQueue<Map<String, Object>> meterDataCache;
+    // 借鉴自Druid的JdbcDataSourceStat
+    private CircularBlockingQueue<Map<String, Object>> meterDataCache;
 
-	@Override
-	public void prepare() {
-		meterDataCache = new CircularBlockingQueue<>(500);
-		
-		// 本agent脱离OAP, 所以不需要监听GRPC
-		//super.prepare();
-	}
+    @Override
+    public void prepare() {
+        Integer configured = LogFileReporterPluginConfig.Plugin.MeterLocal.MAX_METER_DATA_SIZE;
+        final Integer maxMeterDataSize = (configured != null && configured > 0) ? configured : 1000;
+        this.meterDataCache = new CircularBlockingQueue<>(maxMeterDataSize);
 
-	@Override
-	public void boot() {
-	}
+        // 本agent脱离OAP, 所以不需要监听GRPC
+        //super.prepare();
+    }
 
-	public List<Map<String, Object>> getMeterDatas() {
-		// 将Collection转换为List，便于前端或调用方处理
-		return new java.util.ArrayList<>(meterDataCache);
-	}
+    @Override
+    public void boot() {
+    }
 
-	@Override
-	public void send(Map<MeterId, BaseMeter> meterMap2, MeterService meterService) {
+    public List<Map<String, Object>> getMeterDatas() {
+        // 将Collection转换为List，便于前端或调用方处理
+        return new ArrayList<>(meterDataCache);
+    }
 
-		MeterDataCollection.Builder builder = MeterDataCollection.newBuilder();
-		transform(meterMap2, meterData -> {
-			if (LOGGER.isDebugEnable()) {
-				LOGGER.debug("Meter data reporting, instance: {}", meterData.getServiceInstance());
-			}
-			builder.addMeterData(meterData);
-		});
+    @Override
+    public void send(Map<MeterId, BaseMeter> meterMap, MeterService meterService) {
+        transform(meterMap, meterData -> {
+            if (LOGGER.isDebugEnable()) {
+                LOGGER.debug("Meter data reporting, instance: {}", meterData.getServiceInstance());
+            }
+            // 将MeterData转换为Map并存入meterDataCache
+            meterDataCache.add(buildMeterDataMap(meterData));
+        });
+    }
 
-		// 将MeterDataCollection中的数据转换为Map并存入meterDataCache
-		List<org.apache.skywalking.apm.network.language.agent.v3.MeterData> meterDataList = builder.build()
-				.getMeterDataList();
-		for (org.apache.skywalking.apm.network.language.agent.v3.MeterData meterData : meterDataList) {
-			Map<String, Object> meterMap = new java.util.HashMap<>();
-			// 存储服务和实例信息
-			meterMap.put("service", meterData.getService());
-			meterMap.put("serviceInstance", meterData.getServiceInstance());
-			meterMap.put("timestamp", meterData.getTimestamp());
+    private Map<String, Object> buildMeterDataMap(MeterData meterData) {
+        Map<String, Object> result = new HashMap<>();
+        // 存储服务和实例信息
+        result.put("service", meterData.getService());
+        result.put("serviceInstance", meterData.getServiceInstance());
+        result.put("timestamp", meterData.getTimestamp());
 
-			// 存储指标类型
-			meterMap.put("type", meterData.getMetricCase().name());
-			// 存储指标详细数据
-			switch (meterData.getMetricCase()) {
-			case SINGLEVALUE:
-				Map<String, Object> singleValueMap = new java.util.HashMap<>();
-				singleValueMap.put("name", meterData.getSingleValue().getName());
-				singleValueMap.put("value", meterData.getSingleValue().getValue());
-				// 将labelsList转换为Map，便于前端处理
-				Map<String, String> labelsMap = new java.util.HashMap<>();
-				for (org.apache.skywalking.apm.network.language.agent.v3.Label label : meterData.getSingleValue()
-						.getLabelsList()) {
-					labelsMap.put(label.getName(), label.getValue());
-				}
-				singleValueMap.put("labels", labelsMap);
-				meterMap.put("singleValue", singleValueMap);
-				break;
-			case HISTOGRAM:
-				Map<String, Object> histogramMap = new java.util.HashMap<>();
-				histogramMap.put("name", meterData.getHistogram().getName());
-				// 将labelsList转换为Map，便于前端处理
-				Map<String, String> histogramLabelsMap = new java.util.HashMap<>();
-				for (org.apache.skywalking.apm.network.language.agent.v3.Label label : meterData.getHistogram()
-						.getLabelsList()) {
-					histogramLabelsMap.put(label.getName(), label.getValue());
-				}
-				histogramMap.put("labels", histogramLabelsMap);
+        // 存储指标类型
+        result.put("type", meterData.getMetricCase().name());
+        // 存储指标详细数据
+        switch (meterData.getMetricCase()) {
+        case SINGLEVALUE:
+            result.put("singleValue", buildSingleValueMap(meterData.getSingleValue()));
+            break;
+        case HISTOGRAM:
+            result.put("histogram", buildHistogramMap(meterData.getHistogram()));
+            break;
+        case METRIC_NOT_SET:
+        default:
+            // 其他类型暂不处理        	
+        	LOGGER.info("### Meter type: " + meterData.getMetricCase());
+            break;
+        }
+        return result;
+    }
 
-				// 将buckets（valuesList）转换为List<Map>，每个bucket包含value和count
-				java.util.List<Map<String, Object>> bucketsList = new java.util.ArrayList<>();
-				List<org.apache.skywalking.apm.network.language.agent.v3.MeterBucketValue> valuesList = meterData
-						.getHistogram().getValuesList();
+    private Map<String, Object> buildSingleValueMap(MeterSingleValue singleValue) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("name", singleValue.getName());
+        result.put("value", singleValue.getValue());
+        // 将labelsList转换为Map，便于前端处理
+        result.put("labels", buildLabelsMap(singleValue.getLabelsList()));
+        return result;
+    }
 
-				for (org.apache.skywalking.apm.network.language.agent.v3.MeterBucketValue bucket : valuesList) {
-					Map<String, Object> bucketMap = new java.util.HashMap<>();
-					bucketMap.put("bucket", bucket.getBucket());
-					bucketMap.put("count", bucket.getCount());
-					bucketMap.put("isNegativeInfinity", bucket.getIsNegativeInfinity());
-					bucketsList.add(bucketMap);
-				}
-				histogramMap.put("buckets", bucketsList);
-				meterMap.put("histogram", histogramMap);
-				break;
-			case METRIC_NOT_SET:
-//					Map<String, Object> minMaxAvgMap = new java.util.HashMap<>();
-//					minMaxAvgMap.put("name", meterData.getMinMaxAvg().getName());
-//					minMaxAvgMap.put("labels", meterData.getMinMaxAvg().getLabelsMap());
-//					minMaxAvgMap.put("min", meterData.getMinMaxAvg().getMin());
-//					minMaxAvgMap.put("max", meterData.getMinMaxAvg().getMax());
-//					minMaxAvgMap.put("avg", meterData.getMinMaxAvg().getAvg());
-//					minMaxAvgMap.put("count", meterData.getMinMaxAvg().getCount());
-//					meterMap.put("minMaxAvg", minMaxAvgMap);
-				break;
-			default:
-				// 其他类型暂不处理
-				break;
-			}
-			// 以实例名+时间戳作为key，保证唯一性
-			meterDataCache.add(meterMap);
-		}
-	}
+    private Map<String, Object> buildHistogramMap(MeterHistogram histogram) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("name", histogram.getName());
+        // 将labelsList转换为Map，便于前端处理
+        result.put("labels", buildLabelsMap(histogram.getLabelsList()));
+        // 将buckets（valuesList）转换为List<Map>，每个bucket包含value和count
+        result.put("buckets", buildBucketsList(histogram.getValuesList()));
+        return result;
+    }
 
-	@Override
-	public void onComplete() {
+    private Map<String, String> buildLabelsMap(List<Label> labels) {
+        Map<String, String> labelsMap = new HashMap<>();
+        for (Label label : labels) {
+            labelsMap.put(label.getName(), label.getValue());
+        }
+        return labelsMap;
+    }
 
-	}
+    private List<Map<String, Object>> buildBucketsList(List<MeterBucketValue> buckets) {
+        List<Map<String, Object>> bucketMaps = new ArrayList<>(buckets.size());
+        for (MeterBucketValue bucket : buckets) {
+            Map<String, Object> bucketMap = new HashMap<>();
+            bucketMap.put("bucket", bucket.getBucket());
+            bucketMap.put("count", bucket.getCount());
+            bucketMap.put("isNegativeInfinity", bucket.getIsNegativeInfinity());
+            bucketMaps.add(bucketMap);
+        }
+        return bucketMaps;
+    }
 
-	@Override
-	public void shutdown() {
+    @Override
+    public void onComplete() {
 
-	}
+    }
 
-	@Override
-	public void statusChanged(GRPCChannelStatus status) {
-		LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
-	}
+    @Override
+    public void shutdown() {
+
+    }
+
+    @Override
+    public void statusChanged(GRPCChannelStatus status) {
+        LOGGER.warn("### GRPC Disabled. Current GRPCChannelStatus is [ {} ]", status);
+    }
 }

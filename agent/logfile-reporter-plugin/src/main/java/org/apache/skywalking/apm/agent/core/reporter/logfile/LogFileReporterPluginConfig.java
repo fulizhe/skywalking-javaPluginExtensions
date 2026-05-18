@@ -20,5 +20,14 @@ public class LogFileReporterPluginConfig {
             public static Integer MAX_METRICS_DATA_SIZE = 1000;
 
         }
+
+        /** Meter 指标本地缓存相关配置（供 {@code MeterLocalSender} 使用） */
+        @PluginConfig(root = LogFileReporterPluginConfig.class)
+        public static class MeterLocal {
+
+            /** 本地缓存的 Meter 指标条数上限，超过后按 LRU 淘汰，默认 1000 */
+            public static Integer MAX_METER_DATA_SIZE = 1000;
+
+        }
     }
 }
