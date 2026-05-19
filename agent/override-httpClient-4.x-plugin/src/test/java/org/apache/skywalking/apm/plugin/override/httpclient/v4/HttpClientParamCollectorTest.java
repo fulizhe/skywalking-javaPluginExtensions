@@ -19,12 +19,15 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class HttpClientParamCollectorTest {
     private final boolean originalCollectSwitch = HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
+    private final boolean originalOverrideCollectSwitch = OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
     private final int originalThreshold = HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
 
     @After
     public void tearDown() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = originalCollectSwitch;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = originalThreshold;
+        HttpClientCollectionSwitch.toggleRuntimeCollect(false);
     }
 
     @Test
@@ -73,5 +76,22 @@ public class HttpClientParamCollectorTest {
         final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
 
         assertThat(tags.getParams().length(), is(16));
+    }
+
+    @Test
+    public void shouldEnableCollectionWhenOverrideSwitchIsTurnedOn() {
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+
+        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
+    }
+
+    @Test
+    public void shouldEnableCollectionWhenRuntimeSwitchIsTurnedOn() {
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        HttpClientCollectionSwitch.toggleRuntimeCollect(true);
+
+        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
     }
 }

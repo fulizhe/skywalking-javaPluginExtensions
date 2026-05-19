@@ -58,7 +58,7 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
             httpRequest.setHeader(next.getHeadKey(), next.getHeadValue());
         }
 
-        if (HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS) {
+        if (HttpClientCollectionSwitch.shouldCollect()) {
             collectHttpParam(httpRequest, span);
         }
     }
@@ -84,7 +84,7 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
                     span.errorOccurred();
                 }
                 final HttpRequest httpRequest = (HttpRequest) allArguments[1];
-                if (!HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS && span.isProfiling()) {
+                if (!HttpClientCollectionSwitch.shouldCollect() && span.isProfiling()) {
                     collectHttpParam(httpRequest, span);
                 }
             }

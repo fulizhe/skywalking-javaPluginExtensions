@@ -19,3 +19,4 @@ override-httpclient-4.x=org.apache.skywalking.apm.plugin.override.httpclient.v4.
 override-httpclient-4.x=org.apache.skywalking.apm.plugin.override.httpclient.v4.define.InternalHttpClientInstrumentation
 override-httpclient-4.x=org.apache.skywalking.apm.plugin.override.httpclient.v4.define.MinimalHttpClientInstrumentation
 override-httpclient-4.x=org.apache.skywalking.apm.plugin.override.httpclient.v4.define.DefaultRequestDirectorInstrumentation
+override-httpclient-4.x=org.apache.skywalking.apm.plugin.override.httpclient.v4.define.HttpClientParamRuntimeInstrumentation

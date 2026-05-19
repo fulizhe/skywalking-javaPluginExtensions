@@ -4,6 +4,17 @@ This module overrides SkyWalking 9.4.0 built-in `apm-httpClient-4.x-plugin`
 while keeping the original tracing behavior and enhancing request parameter
 collection.
 
+## Collection switch model
+
+This plugin keeps SkyWalking official config behavior unchanged and adds an
+independent switch of its own.
+
+Effective collection is enabled when any one of these is true:
+
+- official switch `plugin.httpclient.collect_http_params=true`
+- override switch `plugin.overridehttpclient.collect_http_params=true`
+- runtime switch enabled through `SWHttpClientCollectUtils`
+
 ## What it collects
 
 - Reuses the official switch:
@@ -29,6 +40,64 @@ Example:
 
 So when a user submits normal body fields together with uploaded files, both
 kinds of data are preserved.
+
+## Runtime control
+
+This module provides a runtime control entry modeled after the dynamic control
+pattern used elsewhere in this repository.
+
+Toolkit class:
+
+```java
+org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils
+```
+
+Available methods:
+
+```java
+SWHttpClientCollectUtils.enableCollect(Map<String, Object> config)
+SWHttpClientCollectUtils.disableCollect(Map<String, Object> config)
+SWHttpClientCollectUtils.statisticStatus()
+```
+
+Suggested usage:
+
+```java
+import org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils;
+
+Map<String, Object> result1 = (Map<String, Object>) SWHttpClientCollectUtils.enableCollect(Collections.emptyMap());
+Map<String, Object> result2 = (Map<String, Object>) SWHttpClientCollectUtils.statisticStatus();
+Map<String, Object> result3 = (Map<String, Object>) SWHttpClientCollectUtils.disableCollect(Collections.emptyMap());
+```
+
+Status response includes:
+
+- `officialCollectHttpParams`
+- `overrideCollectHttpParams`
+- `runtimeCollectHttpParams`
+- `effectiveCollectHttpParams`
+- `httpParamsLengthThreshold`
+
+Note:
+
+- the application should include the same toolkit class
+  `org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils`
+- the agent plugin intercepts these methods at runtime
+- this runtime switch is independent from SkyWalking official config
+
+## Override config
+
+New dedicated config item:
+
+```text
+skywalking.plugin.overridehttpclient.collect_http_params=true|false
+```
+
+Default:
+
+```text
+false
+```
 
 ## Deployment note
 
