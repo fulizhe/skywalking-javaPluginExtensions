@@ -3,7 +3,6 @@ package org.apache.skywalking.apm.plugin.override.httpclient.v4;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
-import org.apache.http.RequestLine;
 import org.apache.http.StatusLine;
 import org.apache.skywalking.apm.agent.core.context.CarrierItem;
 import org.apache.skywalking.apm.agent.core.context.ContextCarrier;
@@ -11,11 +10,12 @@ import org.apache.skywalking.apm.agent.core.context.ContextManager;
 import org.apache.skywalking.apm.agent.core.context.tag.Tags;
 import org.apache.skywalking.apm.agent.core.context.trace.AbstractSpan;
 import org.apache.skywalking.apm.agent.core.context.trace.SpanLayer;
+import org.apache.skywalking.apm.agent.core.logging.api.ILog;
+import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.EnhancedInstance;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.InstanceMethodsAroundInterceptor;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.MethodInterceptResult;
 import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
-import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
 
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
@@ -24,6 +24,7 @@ import java.net.URL;
 // SEE https://github.com/apache/skywalking-java/blob/e0e8b3c8c304735991e057d431910ed1f4a57cdd/apm-sniffer/apm-sdk-plugin/httpClient-4.x-plugin/src/main/java/org/apache/skywalking/apm/plugin/httpClient/v4/HttpClientExecuteInterceptor.java
 public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterceptor {
     private static final String ERROR_URI = "/_blank";
+    private static final ILog LOGGER = LogManager.getLogger(HttpClientExecuteInterceptor.class);
 
     @Override
     public void beforeMethod(final EnhancedInstance objInst,
@@ -42,9 +43,11 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         final String requestUrl = httpRequest.getRequestLine().getUri();
         final String requestUri = getRequestURI(requestUrl);
         final AbstractSpan span = ContextManager.createExitSpan(requestUri, contextCarrier, remotePeer);
+        final boolean shouldCollect = HttpClientCollectionSwitch.shouldCollect();
 
         if (ERROR_URI.equals(requestUri)) {
             span.errorOccurred();
+            LOGGER.warn("### Failed to resolve request URI for httpclient request, requestUrl={}", requestUrl);
         }
 
         span.setComponent(ComponentsDefine.HTTPCLIENT);
@@ -58,7 +61,13 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
             httpRequest.setHeader(next.getHeadKey(), next.getHeadValue());
         }
 
-        if (HttpClientCollectionSwitch.shouldCollect()) {
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Intercept httpclient request, method={}, uri={}, remotePeer={}, shouldCollect={}, official={}, override={}",
+                httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, shouldCollect,
+                HttpClientCollectionSwitch.isOfficialCollectEnabled(), HttpClientCollectionSwitch.isOverrideCollectEnabled());
+        }
+
+        if (shouldCollect) {
             collectHttpParam(httpRequest, span);
         }
     }
@@ -77,14 +86,21 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
             final HttpResponse response = (HttpResponse) ret;
             final StatusLine statusLine = response.getStatusLine();
             if (statusLine != null) {
+                final HttpRequest httpRequest = (HttpRequest) allArguments[1];
                 final int statusCode = statusLine.getStatusCode();
                 final AbstractSpan span = ContextManager.activeSpan();
                 Tags.HTTP_RESPONSE_STATUS_CODE.set(span, statusCode);
                 if (statusCode >= 400) {
                     span.errorOccurred();
+                    LOGGER.warn("### Httpclient request finished with error status, method={}, uri={}, statusCode={}",
+                        httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri(), statusCode);
+                } else if (LOGGER.isDebugEnable()) {
+                    LOGGER.debug("### Httpclient request finished, method={}, uri={}, statusCode={}",
+                        httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri(), statusCode);
                 }
-                final HttpRequest httpRequest = (HttpRequest) allArguments[1];
                 if (!HttpClientCollectionSwitch.shouldCollect() && span.isProfiling()) {
+                    LOGGER.info("### Collect httpclient params by profiling fallback, method={}, uri={}",
+                        httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri());
                     collectHttpParam(httpRequest, span);
                 }
             }
@@ -100,6 +116,8 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
                                       final Object[] allArguments,
                                       final Class<?>[] argumentsTypes,
                                       final Throwable t) {
+        LOGGER.error(t, "### Httpclient interceptor failed, method={}, request={}",
+            method == null ? null : method.getName(), allArguments != null && allArguments.length > 1 ? allArguments[1] : null);
         ContextManager.activeSpan().log(t);
     }
 
@@ -151,5 +169,14 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         if (collectedTags.getFiles() != null) {
             span.tag(Tags.ofKey(HttpClientParamCollector.TAG_KEY_HTTP_FILES), collectedTags.getFiles());
         }
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Collected httpclient request tags, method={}, uri={}, paramsLength={}, filesLength={}",
+                httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri(),
+                lengthOf(collectedTags.getParams()), lengthOf(collectedTags.getFiles()));
+        }
+    }
+
+    private int lengthOf(final String value) {
+        return value == null ? 0 : value.length();
     }
 }

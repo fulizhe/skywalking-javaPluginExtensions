@@ -12,11 +12,12 @@ import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.entity.SerializableEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.util.EntityUtils;
+import org.apache.skywalking.apm.agent.core.logging.api.ILog;
+import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
 import org.apache.skywalking.apm.util.StringUtil;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.Reader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -31,6 +32,7 @@ final class HttpClientParamCollector {
     static final String TAG_KEY_HTTP_FILES = "http.request.files";
 
     private static final int READ_BUFFER_SIZE = 256;
+    private static final ILog LOGGER = LogManager.getLogger(HttpClientParamCollector.class);
 
     private HttpClientParamCollector() {
     }
@@ -42,6 +44,10 @@ final class HttpClientParamCollector {
         collectQueryString(request, paramEntries);
         collectEntity(request, paramEntries, fileEntries);
 
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Httpclient param collection finished, requestType={}, paramEntryCount={}, fileEntryCount={}",
+                request == null ? null : request.getClass().getName(), paramEntries.size(), fileEntries.size());
+        }
         return new CollectedTags(joinEntries(paramEntries), joinEntries(fileEntries));
     }
 
@@ -156,7 +162,9 @@ final class HttpClientParamCollector {
                 collectMultipartPart(bodyPart, paramEntries, fileEntries);
             }
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("### Collect multipart httpclient entity failed, entityClass={}, contentType={}, contentLength={}",
+                entity.getClass().getName(), contentType, entity.getContentLength(), e);
             fileEntries.add(clipFileEntry("multipart", null, entity.getContentLength(), contentType));
             return true;
         }
@@ -172,7 +180,8 @@ final class HttpClientParamCollector {
                 final Method getEntity = entity.getClass().getDeclaredMethod("getEntity");
                 getEntity.setAccessible(true);
                 return getEntity.invoke(entity);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                LOGGER.warn("### Unwrap multipart entity failed, entityClass={}", className, e);
                 return null;
             }
         }
@@ -235,7 +244,8 @@ final class HttpClientParamCollector {
             }
             reader.close();
             return builder.toString();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("### Read multipart text body failed, contentBodyClass={}", className, e);
             return null;
         }
     }
@@ -251,7 +261,9 @@ final class HttpClientParamCollector {
                 }
             }
             return EntityUtils.toString(entity, charset);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("### Read httpclient entity as text failed, entityClass={}, contentType={}, repeatable={}",
+                entity.getClass().getName(), getContentTypeValue(entity), entity.isRepeatable(), e);
             return null;
         }
     }
@@ -261,7 +273,9 @@ final class HttpClientParamCollector {
             final Field fileField = FileEntity.class.getDeclaredField("file");
             fileField.setAccessible(true);
             return (File) fileField.get(entity);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOGGER.warn("### Extract file metadata from FileEntity failed, contentType={}, contentLength={}",
+                getContentTypeValue(entity), entity.getContentLength(), e);
             return null;
         }
     }

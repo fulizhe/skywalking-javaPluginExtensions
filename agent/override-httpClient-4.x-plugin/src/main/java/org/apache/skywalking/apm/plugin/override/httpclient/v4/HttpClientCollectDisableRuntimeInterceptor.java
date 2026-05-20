@@ -18,8 +18,8 @@ public class HttpClientCollectDisableRuntimeInterceptor implements StaticMethods
                              final Class<?>[] parameterTypes,
                              final MethodInterceptResult result) {
         HttpClientCollectionSwitch.toggleRuntimeCollect(false);
-        LOGGER.info("### Disable runtime httpclient parameter collection, params={}",
-            allArguments.length > 0 ? allArguments[0] : null);
+        LOGGER.info("### Disable runtime override httpclient parameter collection, params={}, status={}",
+            allArguments.length > 0 ? allArguments[0] : null, HttpClientCollectionSwitch.currentStatus());
         result.defineReturnValue(HttpClientCollectionSwitch.currentStatus());
     }
 

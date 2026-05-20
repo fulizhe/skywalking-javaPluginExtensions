@@ -7,13 +7,15 @@ collection.
 ## Collection switch model
 
 This plugin keeps SkyWalking official config behavior unchanged and adds an
-independent switch of its own.
+override config entry of its own.
 
-Effective collection is enabled when any one of these is true:
+Effective collection is enabled only when both of these are true:
 
 - official switch `plugin.httpclient.collect_http_params=true`
 - override switch `plugin.overridehttpclient.collect_http_params=true`
-- runtime switch enabled through `SWHttpClientCollectUtils`
+
+Runtime enable/disable through `SWHttpClientCollectUtils` updates the override
+switch, but effective collection still depends on the official switch being on.
 
 ## What it collects
 
@@ -74,7 +76,6 @@ Status response includes:
 
 - `officialCollectHttpParams`
 - `overrideCollectHttpParams`
-- `runtimeCollectHttpParams`
 - `effectiveCollectHttpParams`
 - `httpParamsLengthThreshold`
 
@@ -83,7 +84,10 @@ Note:
 - the application should include the same toolkit class
   `org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils`
 - the agent plugin intercepts these methods at runtime
-- this runtime switch is independent from SkyWalking official config
+- runtime enable/disable updates
+  `plugin.overridehttpclient.collect_http_params`
+- effective collection still requires
+  `plugin.httpclient.collect_http_params=true`
 
 ## Override config
 
@@ -104,23 +108,3 @@ false
 It is recommended to remove or rename the official
 `apm-httpClient-4.x-plugin-9.4.0.jar` before deployment, otherwise the same
 call may be enhanced twice.
-
-## Build commands
-
-Run tests:
-
-```bash
-mvn -q -pl override-httpClient-4.x-plugin -am clean test
-```
-
-Build final artifact:
-
-```bash
-mvn -q -pl override-httpClient-4.x-plugin -am package -DskipTests
-```
-
-Final artifact path:
-
-```text
-override-httpClient-4.x-plugin/target/overide-apm-httpClient-4.x-plugin-9.4.0.jar
-```

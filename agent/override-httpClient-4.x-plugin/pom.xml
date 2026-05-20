@@ -63,6 +63,6 @@
     </dependencies>
 
     <build>
-        <finalName>overide-apm-httpClient-4.x-plugin-${skywalking.version}</finalName>
+        <finalName>override-apm-httpclient-4.x-plugin-${skywalking.version}</finalName>
     </build>
 </project>
