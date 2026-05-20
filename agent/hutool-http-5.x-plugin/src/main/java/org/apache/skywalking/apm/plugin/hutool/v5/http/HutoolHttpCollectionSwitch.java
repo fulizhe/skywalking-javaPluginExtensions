@@ -12,6 +12,6 @@ final class HutoolHttpCollectionSwitch {
     }
 
     static boolean isOverrideCollectEnabled() {
-        return OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
+        return OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     }
 }

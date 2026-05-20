@@ -36,6 +36,7 @@ import org.apache.skywalking.apm.network.trace.component.ComponentsDefine;
 import java.lang.reflect.Method;
 import java.net.URI;
 
+//SEE https://github.com/apache/skywalking-java/blob/e0e8b3c8c304735991e057d431910ed1f4a57cdd/apm-sniffer/apm-sdk-plugin/hutool-plugins/hutool-http-5.x-plugin/src/main/java/org/apache/skywalking/apm/plugin/hutool/http/v5/HutoolHttpExecuteInterceptor.java
 public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterceptor {
     private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestInterceptor.class);
 

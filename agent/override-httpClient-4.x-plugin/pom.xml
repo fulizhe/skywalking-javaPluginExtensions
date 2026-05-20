@@ -60,6 +60,12 @@
             <version>${junit.version}</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.skywalking</groupId>
+            <artifactId>apm-agent-core</artifactId>
+            <version>${skywalking.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

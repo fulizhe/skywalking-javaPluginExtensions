@@ -93,16 +93,43 @@ Note:
 
 ## Override config
 
-New dedicated config item:
+Dedicated config item (SkyWalking maps
+`OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS`):
 
-```text
-skywalking.plugin.overridehttpclient.collect_http_params=true|false
+| Purpose | Config key | Default |
+|---------|------------|---------|
+| Query string collection (official) | `plugin.httpclient.collect_http_params` | `false` |
+| Request body / multipart collection (override) | `plugin.overridehttpclient.collect_http_params` | `false` |
+| Clip length (official, shared) | `plugin.http.http_params_length_threshold` | `1024` |
+
+### agent.config example
+
+Use keys **without** the `skywalking.` prefix inside `config/agent.config`:
+
+```properties
+# Query only
+plugin.httpclient.collect_http_params=true
+plugin.overridehttpclient.collect_http_params=false
+
+# Body only
+# plugin.httpclient.collect_http_params=false
+# plugin.overridehttpclient.collect_http_params=true
+
+# Both
+# plugin.httpclient.collect_http_params=true
+# plugin.overridehttpclient.collect_http_params=true
+
+plugin.http.http_params_length_threshold=1024
 ```
 
-Default:
+### JVM / system property example
 
-```text
-false
+Prefix with `skywalking.` when using `-D` or environment variables:
+
+```shell
+-Dskywalking.plugin.httpclient.collect_http_params=true
+-Dskywalking.plugin.overridehttpclient.collect_http_params=true
+-Dskywalking.plugin.http.http_params_length_threshold=1024
 ```
 
 ## Deployment note

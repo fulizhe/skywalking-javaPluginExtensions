@@ -15,13 +15,13 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class HutoolHttpParamCollectorTest {
     private final boolean originalCollectSwitch = HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
-    private final boolean originalOverrideCollectSwitch = OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
+    private final boolean originalOverrideCollectSwitch = OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     private final int originalThreshold = HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
 
     @After
     public void tearDown() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = originalCollectSwitch;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = originalThreshold;
     }
 
@@ -29,7 +29,7 @@ public class HutoolHttpParamCollectorTest {
     public void shouldCollectQueryAndFormBody() {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpRequest request = HttpRequest.post("http://127.0.0.1:8080/path?a=1&b=two")
             .form("x", "10")
             .form("y", "hello");
@@ -44,7 +44,7 @@ public class HutoolHttpParamCollectorTest {
     @Test
     public void shouldCollectMultipartFileSizeAndTextPart() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final File temp = File.createTempFile("hutool-http-", ".txt");
         final FileWriter writer = new FileWriter(temp);
         writer.write("abcdef");
@@ -66,7 +66,7 @@ public class HutoolHttpParamCollectorTest {
     @Test
     public void shouldClipLargeBodyValues() {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 16;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpRequest request = HttpRequest.post("http://127.0.0.1:8080/path")
             .body("0123456789abcdefghijklmnopqrstuvwxyz");
 
@@ -78,7 +78,7 @@ public class HutoolHttpParamCollectorTest {
     @Test
     public void shouldReportOfficialAndOverrideCollectionSwitches() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = false;
 
         assertThat(HutoolHttpCollectionSwitch.isOfficialCollectEnabled(), is(true));
         assertThat(HutoolHttpCollectionSwitch.isOverrideCollectEnabled(), is(false));
@@ -88,7 +88,7 @@ public class HutoolHttpParamCollectorTest {
     public void shouldCollectOnlyQueryWhenOnlyOfficialSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = false;
         final HttpRequest request = HttpRequest.post("http://127.0.0.1:8080/path?a=1&b=two")
             .form("x", "10")
             .form("y", "hello");
@@ -103,7 +103,7 @@ public class HutoolHttpParamCollectorTest {
     public void shouldCollectOnlyBodyWhenOnlyOverrideSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpRequest request = HttpRequest.post("http://127.0.0.1:8080/path?a=1&b=two")
             .form("x", "10")
             .form("y", "hello");

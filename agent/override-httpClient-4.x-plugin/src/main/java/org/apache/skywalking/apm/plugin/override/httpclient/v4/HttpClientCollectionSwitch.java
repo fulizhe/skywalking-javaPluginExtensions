@@ -18,12 +18,12 @@ final class HttpClientCollectionSwitch {
     }
 
     static boolean isOverrideCollectEnabled() {
-        return OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
+        return OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     }
 
     static void toggleRuntimeCollect(final boolean enabled) {
-        final boolean previous = OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = enabled;
+        final boolean previous = OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = enabled;
         LOGGER.info(
                 "### Override httpclient body collection switch updated, previous={}, current={}, officialEnabled={}",
                 previous, enabled, isOfficialCollectEnabled());
