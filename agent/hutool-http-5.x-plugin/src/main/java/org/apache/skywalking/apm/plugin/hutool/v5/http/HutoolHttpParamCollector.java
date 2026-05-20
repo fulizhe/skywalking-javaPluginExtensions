@@ -1,0 +1,270 @@
+package org.apache.skywalking.apm.plugin.hutool.v5.http;
+
+import cn.hutool.core.io.resource.Resource;
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.core.util.URLUtil;
+import cn.hutool.http.HttpRequest;
+import org.apache.skywalking.apm.agent.core.logging.api.ILog;
+import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
+import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
+import org.apache.skywalking.apm.util.StringUtil;
+
+import java.io.File;
+import java.lang.reflect.Field;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+final class HutoolHttpParamCollector {
+    static final String TAG_KEY_HTTP_PARAMS = "http.request.params";
+    static final String TAG_KEY_HTTP_FILES = "http.request.files";
+
+    private static final ILog LOGGER = LogManager.getLogger(HutoolHttpParamCollector.class);
+
+    private HutoolHttpParamCollector() {
+    }
+
+    static CollectedTags collect(final HttpRequest request) {
+        final List<String> paramEntries = new ArrayList<String>();
+        final List<String> fileEntries = new ArrayList<String>();
+        final boolean officialCollectEnabled = HutoolHttpCollectionSwitch.isOfficialCollectEnabled();
+        final boolean overrideCollectEnabled = HutoolHttpCollectionSwitch.isOverrideCollectEnabled();
+
+        if (officialCollectEnabled) {
+            collectQueryString(request, paramEntries);
+        }
+        if (overrideCollectEnabled) {
+            collectBody(request, paramEntries, fileEntries);
+        }
+
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug(
+                "### Hutool http param collection finished, requestType={}, officialEnabled={}, overrideEnabled={}, paramEntryCount={}, fileEntryCount={}",
+                request == null ? null : request.getClass().getName(), officialCollectEnabled, overrideCollectEnabled,
+                paramEntries.size(), fileEntries.size());
+        }
+        return new CollectedTags(joinEntries(paramEntries), joinEntries(fileEntries));
+    }
+
+    private static void collectQueryString(final HttpRequest request, final List<String> paramEntries) {
+        final URI uri = URLUtil.toURI(request.getUrl());
+        if (uri == null || StringUtil.isEmpty(uri.getQuery())) {
+            return;
+        }
+        paramEntries.add(clip("query=" + uri.getQuery()));
+    }
+
+    private static void collectBody(final HttpRequest request,
+                                    final List<String> paramEntries,
+                                    final List<String> fileEntries) {
+        final Map<String, Object> form = request.form();
+        if (form != null && !form.isEmpty()) {
+            final Map<String, ? extends Object> fileForm = request.fileForm();
+            if (fileForm == null || fileForm.isEmpty()) {
+                collectFormUrlEncoded(form, paramEntries);
+                return;
+            }
+            collectMultipart(form, fileForm, paramEntries, fileEntries);
+            return;
+        }
+
+        final byte[] bodyBytes = extractBodyBytes(request);
+        if (bodyBytes == null || bodyBytes.length == 0) {
+            return;
+        }
+
+        final String contentType = request.header("Content-Type");
+        if (shouldTreatAsText(contentType)) {
+            final String text = new String(bodyBytes, resolveCharset(request));
+            if (StringUtil.isNotEmpty(text)) {
+                paramEntries.add(clip("body=" + text));
+                return;
+            }
+        }
+
+        fileEntries.add(clipFileEntry("body", null, bodyBytes.length, contentType));
+    }
+
+    private static void collectFormUrlEncoded(final Map<String, Object> form, final List<String> paramEntries) {
+        final StringBuilder builder = new StringBuilder("form=");
+        boolean hasContent = false;
+        for (Map.Entry<String, Object> entry : form.entrySet()) {
+            if (entry.getValue() == null) {
+                continue;
+            }
+            if (hasContent) {
+                builder.append('&');
+            }
+            builder.append(entry.getKey()).append('=').append(entry.getValue());
+            hasContent = true;
+        }
+        if (hasContent) {
+            paramEntries.add(clip(builder.toString()));
+        }
+    }
+
+    private static void collectMultipart(final Map<String, Object> form,
+                                         final Map<String, ? extends Object> fileForm,
+                                         final List<String> paramEntries,
+                                         final List<String> fileEntries) {
+        for (Map.Entry<String, Object> entry : form.entrySet()) {
+            if (entry.getValue() == null) {
+                continue;
+            }
+            if (fileForm != null && fileForm.containsKey(entry.getKey())) {
+                collectFileValue(entry.getKey(), entry.getValue(), fileEntries);
+                continue;
+            }
+            paramEntries.add(clip(entry.getKey() + "=" + entry.getValue()));
+        }
+    }
+
+    private static void collectFileValue(final String fieldName,
+                                         final Object value,
+                                         final List<String> fileEntries) {
+        if (value instanceof Resource) {
+            final Resource resource = (Resource) value;
+            fileEntries.add(clipFileEntry(fieldName, resource.getName(), sizeOf(resource),
+                guessContentType(resource.getName())));
+            return;
+        }
+        if (value instanceof File) {
+            final File file = (File) value;
+            fileEntries.add(clipFileEntry(fieldName, file.getName(), file.length(), guessContentType(file.getName())));
+            return;
+        }
+        if (value instanceof File[]) {
+            final File[] files = (File[]) value;
+            for (File file : files) {
+                if (file != null) {
+                    fileEntries.add(clipFileEntry(fieldName, file.getName(), file.length(),
+                        guessContentType(file.getName())));
+                }
+            }
+            return;
+        }
+        if (value instanceof byte[]) {
+            fileEntries.add(clipFileEntry(fieldName, null, ((byte[]) value).length, null));
+            return;
+        }
+        fileEntries.add(clipFileEntry(fieldName, null, -1, null));
+    }
+
+    private static byte[] extractBodyBytes(final HttpRequest request) {
+        try {
+            final Field bodyBytesField = request.getClass().getSuperclass().getDeclaredField("bodyBytes");
+            bodyBytesField.setAccessible(true);
+            return (byte[]) bodyBytesField.get(request);
+        } catch (Exception e) {
+            LOGGER.warn("### Extract hutool http body bytes failed, requestType={}",
+                request.getClass().getName(), e);
+            return null;
+        }
+    }
+
+    private static Charset resolveCharset(final HttpRequest request) {
+        final String charset = request.charset();
+        if (StrUtil.isBlank(charset)) {
+            return StandardCharsets.UTF_8;
+        }
+        try {
+            return Charset.forName(charset);
+        } catch (Exception ignored) {
+            return StandardCharsets.UTF_8;
+        }
+    }
+
+    private static boolean shouldTreatAsText(final String contentType) {
+        if (StringUtil.isEmpty(contentType)) {
+            return true;
+        }
+        final String lowerCase = contentType.toLowerCase();
+        return lowerCase.contains("text/")
+            || lowerCase.contains("application/json")
+            || lowerCase.contains("application/xml")
+            || lowerCase.contains("application/x-www-form-urlencoded")
+            || lowerCase.contains("application/javascript")
+            || lowerCase.contains("application/graphql");
+    }
+
+    private static long sizeOf(final Resource resource) {
+        try {
+            final URL url = resource.getUrl();
+            if (url != null && "file".equalsIgnoreCase(url.getProtocol())) {
+                return new File(url.toURI()).length();
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            return resource.readBytes().length;
+        } catch (Exception e) {
+            LOGGER.warn("### Read hutool resource bytes failed, resourceName={}", resource.getName(), e);
+            return -1;
+        }
+    }
+
+    private static String guessContentType(final String filename) {
+        return filename == null ? null : URLConnection.guessContentTypeFromName(filename);
+    }
+
+    private static String clipFileEntry(final String fieldName,
+                                        final String filename,
+                                        final long size,
+                                        final String contentType) {
+        return clip(fieldName + "={filename=" + nullSafe(filename)
+            + ",size=" + size
+            + ",contentType=" + nullSafe(contentType) + "}");
+    }
+
+    private static String joinEntries(final List<String> entries) {
+        if (entries.isEmpty()) {
+            return null;
+        }
+        final StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < entries.size(); i++) {
+            if (i > 0) {
+                builder.append('&');
+            }
+            builder.append(entries.get(i));
+        }
+        return clip(builder.toString());
+    }
+
+    private static String clip(final String value) {
+        if (value == null) {
+            return null;
+        }
+        final int threshold = HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
+        if (threshold > 0 && value.length() > threshold) {
+            return StringUtil.cut(value, threshold);
+        }
+        return value;
+    }
+
+    private static String nullSafe(final String value) {
+        return value == null ? "" : value;
+    }
+
+    static final class CollectedTags {
+        private final String params;
+        private final String files;
+
+        private CollectedTags(final String params, final String files) {
+            this.params = params;
+            this.files = files;
+        }
+
+        String getParams() {
+            return params;
+        }
+
+        String getFiles() {
+            return files;
+        }
+    }
+}

@@ -17,42 +17,25 @@
 
 package org.apache.skywalking.apm.plugin.hutool.v5.http.define;
 
-import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
-import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArguments;
-import static org.apache.skywalking.apm.agent.core.plugin.match.NameMatch.byName;
-
-import org.apache.skywalking.apm.agent.core.logging.api.ILog;
-import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInterceptPoint;
 import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
 import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
-
-//import org.apache.skywalking.apm.agent.core.plugin.interceptor.ConstructorInterceptPoint;
-//import org.apache.skywalking.apm.agent.core.plugin.interceptor.InstanceMethodsInterceptPoint;
-//import org.apache.skywalking.apm.agent.core.plugin.interceptor.StaticMethodsInterceptPoint;
-//import org.apache.skywalking.apm.agent.core.plugin.interceptor.enhance.ClassInstanceMethodsEnhancePluginDefine;
-//import org.apache.skywalking.apm.agent.core.plugin.match.ClassMatch;
-
-import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 import org.apache.skywalking.apm.dependencies.net.bytebuddy.description.method.MethodDescription;
+import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatcher;
 
+import static org.apache.skywalking.apm.agent.core.plugin.match.NameMatch.byName;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.named;
+import static org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
-/**
- * 
- */
 public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhancePluginDefine {
     private static final String ENHANCE_CLASS = "cn.hutool.http.HttpRequest";
     private static final String ENHANCE_METHOD = "execute";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpRequestInterceptor";
 
-	private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestInstrumentation.class);
-
-    
     @Override
-    protected ClassMatch enhanceClass() {    
-		LOGGER.warn("### enhanceClass-hutool, {} ", ENHANCE_CLASS);
+    protected ClassMatch enhanceClass() {
         return byName(ENHANCE_CLASS);
     }
 
@@ -63,26 +46,23 @@ public class HutoolHttpRequestInstrumentation extends ClassInstanceMethodsEnhanc
 
     @Override
     public InstanceMethodsInterceptPoint[] getInstanceMethodsInterceptPoints() {
-        return new InstanceMethodsInterceptPoint[]{
-        		new InstanceMethodsInterceptPoint() {
-                    @Override
-                    public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                		LOGGER.warn("### getMethodsMatcher-hutool, {} ", ENHANCE_METHOD);
+        return new InstanceMethodsInterceptPoint[] {
+            new InstanceMethodsInterceptPoint() {
+                @Override
+                public ElementMatcher<MethodDescription> getMethodsMatcher() {
+                    return named(ENHANCE_METHOD).and(takesArguments(0).or(takesArguments(boolean.class)));
+                }
 
-                        return named(ENHANCE_METHOD).and(takesArguments(boolean.class));
-                    }
+                @Override
+                public String getMethodsInterceptor() {
+                    return INTERCEPTOR_CLASS;
+                }
 
-                    @Override
-                    public String getMethodsInterceptor() {
-                    	LOGGER.warn("### getMethodsInterceptor-hutool, {} ", ENHANCE_METHOD);
-                        return INTERCEPTOR_CLASS;
-                    }
-
-                    @Override
-                    public boolean isOverrideArgs() {
-                        return false;
-                    }
-                }      		
+                @Override
+                public boolean isOverrideArgs() {
+                    return false;
+                }
+            }
         };
     }
 

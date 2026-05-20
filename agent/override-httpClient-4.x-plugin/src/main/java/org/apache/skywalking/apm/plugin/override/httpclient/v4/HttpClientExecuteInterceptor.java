@@ -67,8 +67,9 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
                 httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, officialCollectEnabled,
                 overrideCollectEnabled);
         }
-
+        
         if (officialCollectEnabled || overrideCollectEnabled) {
+        	// 根据配置项采集不同类型数据, 在这个方法里执行, 其中的 HttpClientParamCollector.collect（...）
             collectHttpParam(httpRequest, span);
         }
     }

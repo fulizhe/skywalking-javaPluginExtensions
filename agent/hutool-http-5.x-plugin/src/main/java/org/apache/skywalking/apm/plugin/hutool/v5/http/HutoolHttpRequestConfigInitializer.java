@@ -18,12 +18,6 @@
 
 package org.apache.skywalking.apm.plugin.hutool.v5.http;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.InputStream;
-import java.util.Map;
-import java.util.Properties;
 import org.apache.skywalking.apm.agent.core.boot.AgentPackageNotFoundException;
 import org.apache.skywalking.apm.agent.core.boot.AgentPackagePath;
 import org.apache.skywalking.apm.agent.core.conf.ConfigNotFoundException;
@@ -32,27 +26,36 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.util.ConfigInitializer;
 import org.apache.skywalking.apm.util.PropertyPlaceholderHelper;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.util.Map;
+import java.util.Properties;
+
 /**
- * <p> 读取配置
- * <p> 参考自  IgnoreConfigInitializer.java 
- * @author LQ
- * @deprecated 暂未启用
+ * Historical config initializer kept in the tree to preserve the earlier
+ * standalone Hutool configuration loading attempt.
+ * <p> This initializer is no longer invoked by the active Hutool override.
+ * <p> Replacement:
+ * <ul>
+ *   <li>active switch sources:
+ *   {@code org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig} and
+ *   {@code org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig}</li>
+ *   <li>Hutool-side switch adapter:
+ *   {@code org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpCollectionSwitch}</li>
+ *   <li>active request collection path:
+ *   {@code org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpRequestInterceptor}</li>
+ * </ul>
+ *
+ * @deprecated Not used by the current Hutool override implementation.
  */
 @Deprecated
-public class HutoolHttpRequestConfigInitializer {
+class HutoolHttpRequestConfigInitializer {
     private static final ILog LOGGER = LogManager.getLogger(HutoolHttpRequestConfigInitializer.class);
     private static final String CONFIG_FILE_NAME = "/config/apm-trace-ignore-plugin.config";
     private static final String ENV_KEY_PREFIX = "skywalking.";
 
-    /**
-     * Try to locate `apm-trace-ignore-plugin.config`, which should be in the /optional-plugins/apm-trace-ignore-plugin/
-     * dictionary of agent package.
-     * <p>
-     * Also try to override the config by system.env and system.properties. All the keys in these two places should
-     * start with {@link #ENV_KEY_PREFIX}. e.g. in env `skywalking.trace.ignore_path=your_path` to override
-     * `trace.ignore_path` in apm-trace-ignore-plugin.config file.
-     * <p>
-     */
     public static void initialize() {
         try (final InputStream configFileStream = loadConfigFromAgentFolder()) {
             Properties properties = new Properties();
@@ -88,11 +91,6 @@ public class HutoolHttpRequestConfigInitializer {
         }
     }
 
-    /**
-     * Load the config file, where the agent jar is.
-     *
-     * @return the config file {@link InputStream}, or null if not needEnhance.
-     */
     private static InputStream loadConfigFromAgentFolder() throws AgentPackageNotFoundException, ConfigNotFoundException {
         File configFile = new File(AgentPackagePath.getPath(), CONFIG_FILE_NAME);
         if (configFile.exists() && configFile.isFile()) {

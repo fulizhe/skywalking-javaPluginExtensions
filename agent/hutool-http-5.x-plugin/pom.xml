@@ -36,8 +36,22 @@
 			<groupId>cn.hutool</groupId>
 			<artifactId>hutool-http</artifactId>
 		    <version>${hutool.version}</version>
-		</dependency>        
+		</dependency>
+        <dependency>
+            <groupId>org.apache.skywalking</groupId>
+            <artifactId>apm-httpclient-commons</artifactId>
+            <version>${skywalking.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openskywalking</groupId>
+            <artifactId>override-httpClient-4.x-plugin</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
 
-
+    <build>
+        <finalName>override-apm-hutool-http-5.x-plugin-${skywalking.version}</finalName>
+    </build>
 </project>

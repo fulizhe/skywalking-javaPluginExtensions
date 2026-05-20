@@ -22,18 +22,28 @@ import org.apache.skywalking.apm.agent.core.boot.PluginConfig;
 
 /**
  * @author LQ
- * <p> 参考自  JDBCPluginConfig.java, HttpClientPluginConfig.java
- * @deprecated 暂未启用
+ * <p> Retained to preserve the earlier Hutool plugin exploration and local
+ * configuration design work.
+ * <p> This class is no longer part of the active collection path.
+ * <p> Replacement:
+ * <ul>
+ *   <li>official query collection switch: {@code org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig}</li>
+ *   <li>shared override body collection switch:
+ *   {@code org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig}</li>
+ *   <li>Hutool runtime decision adapter:
+ *   {@code org.apache.skywalking.apm.plugin.hutool.v5.http.HutoolHttpCollectionSwitch}</li>
+ * </ul>
+ * @deprecated Not used by the current Hutool override implementation.
  */
 @Deprecated
-public class HutoolHttpRequestConfig {
- 
+class HutoolHttpRequestConfig {
+
     public static class Plugin {
         @PluginConfig(root = HutoolHttpRequestConfig.class)
         public static class Zuul {
             /**
              * <p> If set to true, the final routed url will record.
-             * <p> 配置样例: -Dskywalking.plugin.zuul.trace_final_url=true
+             * <p> Example: -Dskywalking.plugin.zuul.trace_final_url=true
              */
             public static boolean TRACE_FINAL_URL = false;
         }
