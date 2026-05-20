@@ -44,6 +44,8 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         final String requestUri = getRequestURI(requestUrl);
         final AbstractSpan span = ContextManager.createExitSpan(requestUri, contextCarrier, remotePeer);
         final boolean shouldCollect = HttpClientCollectionSwitch.shouldCollect();
+        final boolean shouldCollectQuery = HttpClientCollectionSwitch.shouldCollectQuery();
+        final boolean shouldCollectBody = HttpClientCollectionSwitch.shouldCollectBody();
 
         if (ERROR_URI.equals(requestUri)) {
             span.errorOccurred();
@@ -62,9 +64,10 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         }
 
         if (LOGGER.isDebugEnable()) {
-            LOGGER.debug("### Intercept httpclient request, method={}, uri={}, remotePeer={}, shouldCollect={}, official={}, override={}",
-                httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, shouldCollect,
-                HttpClientCollectionSwitch.isOfficialCollectEnabled(), HttpClientCollectionSwitch.isOverrideCollectEnabled());
+            LOGGER.debug("### Intercept httpclient request, method={}, uri={}, remotePeer={}, shouldCollect={}, shouldCollectQuery={}, shouldCollectBody={}, official={}, override={}",
+                httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, shouldCollect, shouldCollectQuery,
+                shouldCollectBody, HttpClientCollectionSwitch.isOfficialCollectEnabled(),
+                HttpClientCollectionSwitch.isOverrideCollectEnabled());
         }
 
         if (shouldCollect) {

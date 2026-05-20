@@ -41,12 +41,17 @@ final class HttpClientParamCollector {
         final List<String> paramEntries = new ArrayList<String>();
         final List<String> fileEntries = new ArrayList<String>();
 
-        collectQueryString(request, paramEntries);
-        collectEntity(request, paramEntries, fileEntries);
+        if (HttpClientCollectionSwitch.shouldCollectQuery()) {
+            collectQueryString(request, paramEntries);
+        }
+        if (HttpClientCollectionSwitch.shouldCollectBody()) {
+            collectEntity(request, paramEntries, fileEntries);
+        }
 
         if (LOGGER.isDebugEnable()) {
-            LOGGER.debug("### Httpclient param collection finished, requestType={}, paramEntryCount={}, fileEntryCount={}",
-                request == null ? null : request.getClass().getName(), paramEntries.size(), fileEntries.size());
+            LOGGER.debug("### Httpclient param collection finished, requestType={}, collectQuery={}, collectBody={}, paramEntryCount={}, fileEntryCount={}",
+                request == null ? null : request.getClass().getName(), HttpClientCollectionSwitch.shouldCollectQuery(),
+                HttpClientCollectionSwitch.shouldCollectBody(), paramEntries.size(), fileEntries.size());
         }
         return new CollectedTags(joinEntries(paramEntries), joinEntries(fileEntries));
     }

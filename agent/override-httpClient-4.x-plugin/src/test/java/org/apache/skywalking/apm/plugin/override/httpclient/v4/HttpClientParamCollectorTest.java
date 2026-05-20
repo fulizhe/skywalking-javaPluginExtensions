@@ -32,6 +32,8 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldCollectQueryAndFormBody() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
         request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
 
@@ -45,6 +47,7 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldCollectMultipartFileSizeAndTextPart() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
         final File temp = File.createTempFile("httpclient4-", ".txt");
         final FileWriter writer = new FileWriter(temp);
         writer.write("abcdef");
@@ -69,6 +72,7 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldClipLargeBodyValues() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 16;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path");
         request.setEntity(new StringEntity("0123456789abcdefghijklmnopqrstuvwxyz", ContentType.TEXT_PLAIN));
 
@@ -78,21 +82,53 @@ public class HttpClientParamCollectorTest {
     }
 
     @Test
-    public void shouldEnableCollectionOnlyWhenOfficialAndOverrideSwitchesAreTurnedOn() {
+    public void shouldEnableQueryCollectionWhenOfficialSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
 
         assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
+        assertThat(HttpClientCollectionSwitch.shouldCollectQuery(), is(true));
+        assertThat(HttpClientCollectionSwitch.shouldCollectBody(), is(false));
     }
 
     @Test
-    public void shouldNotEnableCollectionWhenOnlyRuntimeOverrideSwitchIsTurnedOn() {
+    public void shouldEnableOnlyBodyCollectionWhenOnlyRuntimeOverrideSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
         OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
 
         HttpClientCollectionSwitch.toggleRuntimeCollect(true);
 
-        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(false));
+        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
+        assertThat(HttpClientCollectionSwitch.shouldCollectQuery(), is(false));
+        assertThat(HttpClientCollectionSwitch.shouldCollectBody(), is(true));
         assertThat(OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS, is(true));
+    }
+
+    @Test
+    public void shouldCollectOnlyQueryWhenOnlyOfficialSwitchIsTurnedOn() throws Exception {
+        HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
+        request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
+
+        final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
+
+        assertThat(tags.getParams(), is("query=a=1&b=two"));
+        assertThat(tags.getFiles(), is((String) null));
+    }
+
+    @Test
+    public void shouldCollectOnlyBodyWhenOnlyOverrideSwitchIsTurnedOn() throws Exception {
+        HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
+        final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
+        request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
+
+        final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
+
+        assertThat(tags.getParams(), is("form=x=10&y=hello"));
+        assertThat(tags.getFiles(), is((String) null));
     }
 }

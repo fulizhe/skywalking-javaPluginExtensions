@@ -9,18 +9,22 @@ collection.
 This plugin keeps SkyWalking official config behavior unchanged and adds an
 override config entry of its own.
 
-Effective collection is enabled only when both of these are true:
+Collection responsibility is split:
 
 - official switch `plugin.httpclient.collect_http_params=true`
+  controls query-string parameter collection
 - override switch `plugin.overridehttpclient.collect_http_params=true`
+  controls request body and multipart/file metadata collection
 
 Runtime enable/disable through `SWHttpClientCollectUtils` updates the override
-switch, but effective collection still depends on the official switch being on.
+switch only.
 
 ## What it collects
 
-- Reuses the official switch:
+- Uses the official switch for query collection:
   `plugin.httpclient.collect_http_params=true|false`
+- Uses the override switch for body collection:
+  `plugin.overridehttpclient.collect_http_params=true|false`
 - Reuses the official threshold:
   `plugin.http.http_params_length_threshold`
 - Collects query string
@@ -76,6 +80,8 @@ Status response includes:
 
 - `officialCollectHttpParams`
 - `overrideCollectHttpParams`
+- `effectiveCollectQueryParams`
+- `effectiveCollectBodyParams`
 - `effectiveCollectHttpParams`
 - `httpParamsLengthThreshold`
 
@@ -86,8 +92,7 @@ Note:
 - the agent plugin intercepts these methods at runtime
 - runtime enable/disable updates
   `plugin.overridehttpclient.collect_http_params`
-- effective collection still requires
-  `plugin.httpclient.collect_http_params=true`
+- runtime enable/disable affects body collection only
 
 ## Override config
 
