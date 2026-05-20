@@ -88,7 +88,7 @@ public class MeterLocalSender extends MeterSender {
         case METRIC_NOT_SET:
         default:
             // 其他类型暂不处理        	
-        	LOGGER.info("### Meter type: " + meterData.getMetricCase());
+        	//LOGGER.info("### Meter type: " + meterData.getMetricCase());
             break;
         }
         return result;
