@@ -80,9 +80,6 @@ Status response includes:
 
 - `officialCollectHttpParams`
 - `overrideCollectHttpParams`
-- `effectiveCollectQueryParams`
-- `effectiveCollectBodyParams`
-- `effectiveCollectHttpParams`
 - `httpParamsLengthThreshold`
 
 Note:

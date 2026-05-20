@@ -40,18 +40,20 @@ final class HttpClientParamCollector {
     static CollectedTags collect(final HttpRequest request) {
         final List<String> paramEntries = new ArrayList<String>();
         final List<String> fileEntries = new ArrayList<String>();
+        final boolean officialCollectEnabled = HttpClientCollectionSwitch.isOfficialCollectEnabled();
+        final boolean overrideCollectEnabled = HttpClientCollectionSwitch.isOverrideCollectEnabled();
 
-        if (HttpClientCollectionSwitch.shouldCollectQuery()) {
+        if (officialCollectEnabled) {
             collectQueryString(request, paramEntries);
         }
-        if (HttpClientCollectionSwitch.shouldCollectBody()) {
+        if (overrideCollectEnabled) {
             collectEntity(request, paramEntries, fileEntries);
         }
 
         if (LOGGER.isDebugEnable()) {
-            LOGGER.debug("### Httpclient param collection finished, requestType={}, collectQuery={}, collectBody={}, paramEntryCount={}, fileEntryCount={}",
-                request == null ? null : request.getClass().getName(), HttpClientCollectionSwitch.shouldCollectQuery(),
-                HttpClientCollectionSwitch.shouldCollectBody(), paramEntries.size(), fileEntries.size());
+            LOGGER.debug("### Httpclient param collection finished, requestType={}, officialEnabled={}, overrideEnabled={}, paramEntryCount={}, fileEntryCount={}",
+                request == null ? null : request.getClass().getName(), officialCollectEnabled,
+                overrideCollectEnabled, paramEntries.size(), fileEntries.size());
         }
         return new CollectedTags(joinEntries(paramEntries), joinEntries(fileEntries));
     }

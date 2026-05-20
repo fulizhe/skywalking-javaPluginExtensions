@@ -7,8 +7,10 @@ public class OverrideHttpClientPluginConfig {
         @PluginConfig(root = OverrideHttpClientPluginConfig.class)
         public static class HttpClient {
             /**
-             * A dedicated switch for this override plugin. Keep it separated from
-             * SkyWalking official plugin.httpclient.collect_http_params.
+             * A dedicated body collection switch for this override plugin.
+             * Keep it separated from SkyWalking official
+             * plugin.httpclient.collect_http_params, which is used for query
+             * parameter collection.
              */
             public static boolean COLLECT_HTTP_PARAMS = false;
         }

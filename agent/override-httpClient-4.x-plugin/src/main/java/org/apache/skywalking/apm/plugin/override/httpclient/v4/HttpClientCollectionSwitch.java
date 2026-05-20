@@ -25,29 +25,14 @@ final class HttpClientCollectionSwitch {
         final boolean previous = OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
         OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = enabled;
         LOGGER.info(
-                "### Override httpclient body collection switch updated, previous={}, current={}, officialQuery={}, effectiveQuery={}, effectiveBody={}",
-                previous, enabled, isOfficialCollectEnabled(), shouldCollectQuery(), shouldCollectBody());
-    }
-
-    static boolean shouldCollect() {
-        return shouldCollectQuery() || shouldCollectBody();
-    }
-
-    static boolean shouldCollectQuery() {
-        return isOfficialCollectEnabled();
-    }
-
-    static boolean shouldCollectBody() {
-        return isOverrideCollectEnabled();
+                "### Override httpclient body collection switch updated, previous={}, current={}, officialEnabled={}",
+                previous, enabled, isOfficialCollectEnabled());
     }
 
     static Map<String, Object> currentStatus() {
         final Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("officialCollectHttpParams", isOfficialCollectEnabled());
         result.put("overrideCollectHttpParams", isOverrideCollectEnabled());
-        result.put("effectiveCollectQueryParams", shouldCollectQuery());
-        result.put("effectiveCollectBodyParams", shouldCollectBody());
-        result.put("effectiveCollectHttpParams", shouldCollect());
         result.put("httpParamsLengthThreshold",
                 HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD);
         return result;

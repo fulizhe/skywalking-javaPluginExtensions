@@ -82,25 +82,23 @@ public class HttpClientParamCollectorTest {
     }
 
     @Test
-    public void shouldEnableQueryCollectionWhenOfficialSwitchIsTurnedOn() {
+    public void shouldReportOfficialCollectionSwitchWhenOfficialSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
         OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
 
-        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
-        assertThat(HttpClientCollectionSwitch.shouldCollectQuery(), is(true));
-        assertThat(HttpClientCollectionSwitch.shouldCollectBody(), is(false));
+        assertThat(HttpClientCollectionSwitch.isOfficialCollectEnabled(), is(true));
+        assertThat(HttpClientCollectionSwitch.isOverrideCollectEnabled(), is(false));
     }
 
     @Test
-    public void shouldEnableOnlyBodyCollectionWhenOnlyRuntimeOverrideSwitchIsTurnedOn() {
+    public void shouldEnableOnlyOverrideCollectionWhenOnlyRuntimeOverrideSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
         OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
 
         HttpClientCollectionSwitch.toggleRuntimeCollect(true);
 
-        assertThat(HttpClientCollectionSwitch.shouldCollect(), is(true));
-        assertThat(HttpClientCollectionSwitch.shouldCollectQuery(), is(false));
-        assertThat(HttpClientCollectionSwitch.shouldCollectBody(), is(true));
+        assertThat(HttpClientCollectionSwitch.isOfficialCollectEnabled(), is(false));
+        assertThat(HttpClientCollectionSwitch.isOverrideCollectEnabled(), is(true));
         assertThat(OverrideHttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS, is(true));
     }
 

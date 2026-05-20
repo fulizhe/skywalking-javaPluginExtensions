@@ -43,9 +43,8 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         final String requestUrl = httpRequest.getRequestLine().getUri();
         final String requestUri = getRequestURI(requestUrl);
         final AbstractSpan span = ContextManager.createExitSpan(requestUri, contextCarrier, remotePeer);
-        final boolean shouldCollect = HttpClientCollectionSwitch.shouldCollect();
-        final boolean shouldCollectQuery = HttpClientCollectionSwitch.shouldCollectQuery();
-        final boolean shouldCollectBody = HttpClientCollectionSwitch.shouldCollectBody();
+        final boolean officialCollectEnabled = HttpClientCollectionSwitch.isOfficialCollectEnabled();
+        final boolean overrideCollectEnabled = HttpClientCollectionSwitch.isOverrideCollectEnabled();
 
         if (ERROR_URI.equals(requestUri)) {
             span.errorOccurred();
@@ -64,13 +63,12 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
         }
 
         if (LOGGER.isDebugEnable()) {
-            LOGGER.debug("### Intercept httpclient request, method={}, uri={}, remotePeer={}, shouldCollect={}, shouldCollectQuery={}, shouldCollectBody={}, official={}, override={}",
-                httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, shouldCollect, shouldCollectQuery,
-                shouldCollectBody, HttpClientCollectionSwitch.isOfficialCollectEnabled(),
-                HttpClientCollectionSwitch.isOverrideCollectEnabled());
+            LOGGER.debug("### Intercept httpclient request, method={}, uri={}, remotePeer={}, officialEnabled={}, overrideEnabled={}",
+                httpRequest.getRequestLine().getMethod(), requestUri, remotePeer, officialCollectEnabled,
+                overrideCollectEnabled);
         }
 
-        if (shouldCollect) {
+        if (officialCollectEnabled || overrideCollectEnabled) {
             collectHttpParam(httpRequest, span);
         }
     }
@@ -90,6 +88,8 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
             final StatusLine statusLine = response.getStatusLine();
             if (statusLine != null) {
                 final HttpRequest httpRequest = (HttpRequest) allArguments[1];
+                final boolean officialCollectEnabled = HttpClientCollectionSwitch.isOfficialCollectEnabled();
+                final boolean overrideCollectEnabled = HttpClientCollectionSwitch.isOverrideCollectEnabled();
                 final int statusCode = statusLine.getStatusCode();
                 final AbstractSpan span = ContextManager.activeSpan();
                 Tags.HTTP_RESPONSE_STATUS_CODE.set(span, statusCode);
@@ -101,7 +101,7 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
                     LOGGER.debug("### Httpclient request finished, method={}, uri={}, statusCode={}",
                         httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri(), statusCode);
                 }
-                if (!HttpClientCollectionSwitch.shouldCollect() && span.isProfiling()) {
+                if (!officialCollectEnabled && !overrideCollectEnabled && span.isProfiling()) {
                     LOGGER.info("### Collect httpclient params by profiling fallback, method={}, uri={}",
                         httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri());
                     collectHttpParam(httpRequest, span);
