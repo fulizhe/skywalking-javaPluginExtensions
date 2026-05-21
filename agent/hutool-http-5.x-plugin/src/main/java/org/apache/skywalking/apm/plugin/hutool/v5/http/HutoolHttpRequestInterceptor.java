@@ -116,6 +116,10 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
                     request.getMethod().name(), request.getUrl());
                 collectHttpParam(request, span);
             }
+
+            if (objInst instanceof HttpRequest) {
+                collectHttpResponse((HttpRequest) objInst, response, span);
+            }
         }
 
         ContextManager.stopSpan();
@@ -177,5 +181,19 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
 
     private int lengthOf(final String value) {
         return value == null ? 0 : value.length();
+    }
+
+    private void collectHttpResponse(final HttpRequest request,
+                                     final HttpResponse response,
+                                     final AbstractSpan span) {
+        final String responseBody = HutoolHttpResponseCollector.collect(request, response);
+        if (responseBody == null) {
+            return;
+        }
+        span.tag(Tags.ofKey(HutoolHttpResponseCollector.TAG_KEY_HTTP_RESPONSE_BODY), responseBody);
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Collected hutool http response body, method={}, uri={}, responseLength={}",
+                request.getMethod().name(), request.getUrl(), responseBody.length());
+        }
     }
 }

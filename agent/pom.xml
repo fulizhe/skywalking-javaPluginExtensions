@@ -31,7 +31,21 @@
         <shade.net.bytebuddy.source>net.bytebuddy</shade.net.bytebuddy.source>
         <shade.net.bytebuddy.target>${shade.package}.${shade.net.bytebuddy.source}</shade.net.bytebuddy.target>
          -->
+         
+        <hutool.version>5.4.1</hutool.version>
     </properties>
+
+	<dependencyManagement>
+	    <dependencies>
+	        <dependency>
+	            <groupId>cn.hutool</groupId>
+	            <artifactId>hutool-bom</artifactId>
+	            <version>${hutool.version}</version>
+	            <type>pom</type>
+	            <scope>import</scope>
+	        </dependency>
+	    </dependencies>
+	</dependencyManagement>
 
     <dependencies>
         <dependency>

@@ -14,4 +14,12 @@ final class HutoolHttpCollectionSwitch {
     static boolean isOverrideCollectEnabled() {
         return OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     }
+
+    static boolean isResponseCollectEnabled() {
+        return OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
+    }
+
+    static int responseThreshold() {
+        return HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
+    }
 }

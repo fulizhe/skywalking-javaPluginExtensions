@@ -28,14 +28,14 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <hutool.version>5.4.1</hutool.version>        
     </properties>
 
     <dependencies>
 		<dependency>
 			<groupId>cn.hutool</groupId>
 			<artifactId>hutool-http</artifactId>
-		    <version>${hutool.version}</version>
+			<version>${hutool.version}</version>
+		    <scope>provided</scope>
 		</dependency>
         <dependency>
             <groupId>org.apache.skywalking</groupId>
