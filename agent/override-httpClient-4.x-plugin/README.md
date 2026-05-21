@@ -34,6 +34,64 @@ switch only.
 - Records file part metadata as `filename / size / contentType`
 - Clips oversized values with the same threshold rule
 
+## Response body capture note(需要收集返回值的注意事项)
+
+This plugin can only capture response body safely when the Apache HttpClient
+response entity is repeatable.
+
+In many real deployments the response entity is often one of these wrappers:
+
+- `org.apache.http.impl.execchain.ResponseEntityProxy`
+- `org.apache.http.client.entity.DecompressingEntity`
+
+These entities are usually `repeatable=false`, so the plugin skips response
+body capture by design. This avoids consuming the business response stream and
+breaking application logic.
+
+If the business wants this plugin to capture response body, the business layer
+should explicitly convert the response entity into a repeatable entity before
+later business code reads it.
+
+Typical example:
+
+```java
+// 方法1
+CloseableHttpResponse response = client.execute(request);
+try {
+    HttpEntity entity = response.getEntity();
+    if (entity != null && !entity.isRepeatable()) {
+        response.setEntity(new BufferedHttpEntity(entity));
+    }
+
+    String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+} finally {
+    response.close();
+}
+
+// 方法2: 做一个小工具makeRepeatableIfJson(...) JSON 响应可重复读;插件能采;大流量/大文件接口不受影响
+// 调用方式: 
+// 		CloseableHttpResponse response = client.execute(request);
+// 		makeRepeatableIfJson(response);
+private static void makeRepeatableIfJson(HttpResponse response) throws IOException {
+    HttpEntity entity = response.getEntity();
+    if (entity == null || entity.isRepeatable()) {
+        return;
+    }
+
+    Header contentType = entity.getContentType();
+    String value = contentType == null ? null : contentType.getValue();
+    if (value != null && value.toLowerCase().contains("application/json")) {
+        response.setEntity(new BufferedHttpEntity(entity));
+    }
+}
+```
+
+Recommended usage boundary:
+
+- use this only for normal JSON/text responses
+- do not apply this blindly to large downloads or streaming responses
+- the memory cost of buffering is a business-side decision, not a plugin-side decision
+
 ## Body and file together
 
 If the request is `multipart/form-data`, text fields and file fields are both
