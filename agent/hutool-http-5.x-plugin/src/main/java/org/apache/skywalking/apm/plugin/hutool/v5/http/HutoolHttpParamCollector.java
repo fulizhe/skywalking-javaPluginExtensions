@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+// 支持 hutool 5.4.x 和 5.8.x
 final class HutoolHttpParamCollector {
     static final String TAG_KEY_HTTP_PARAMS = "http.request.params";
     static final String TAG_KEY_HTTP_FILES = "http.request.files";
@@ -157,6 +158,7 @@ final class HutoolHttpParamCollector {
 
     private static BodySnapshot extractBodySnapshot(final HttpRequest request) {
         try {
+        	// hutool 5.4.x
             final Field bodyBytesField = findField(request.getClass(), "bodyBytes");
             if (bodyBytesField != null) {
                 bodyBytesField.setAccessible(true);
@@ -165,7 +167,7 @@ final class HutoolHttpParamCollector {
                     return new BodySnapshot((byte[]) bodyBytes, null);
                 }
             }
-
+            // hutool 5.8.x
             final Field bodyField = findField(request.getClass(), "body");
             if (bodyField != null) {
                 bodyField.setAccessible(true);
