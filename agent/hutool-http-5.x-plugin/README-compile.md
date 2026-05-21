@@ -1,20 +1,32 @@
-## 编译(公司内环境)
+# hutool-http-5.x-plugin compile/export
 
+## Recommended
+
+Use the repo-level batch script to build and export both override plugins in one pass:
+
+```bat
+E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-override-plugins.bat
 ```
-$env:path="D:\apps\java\jdk1.8.0_172\bin;$env:path"
 
-// 编译出插件
-cd E:\gitRepository\_skywalking-javaPluginExtensions\agent
-mvn clean package '-Dmaven.test.skip=true' -T 2C -pl hutool-http-5.x-plugin -am
-// 拷贝插件到SW下 original-
-cp ./hutool-http-5.x-plugin/target/override-apm-hutool-http-5.x-plugin-9.4.0.jar D:\apps\apache-skywalking-java-agent-9.4.0\plugins\override-apm-hutool-http-5.x-plugin-9.4.0.jar
-// 验证拷贝成功
-ls D:\apps\apache-skywalking-java-agent-9.4.0\plugins\ | findstr override-apm-hutool-http-5.x-plugin-
-// 移除官方版本
-mv D:\apps\apache-skywalking-java-agent-9.4.0\plugins\apm-hutool-http-5.x-plugin-9.4.0.jar D:\apps\apache-skywalking-java-agent-9.4.0\optional-plugins -ErrorAction SilentlyContinue
-// 验证加载成功
-cat D:\apps\apache-skywalking-java-agent-9.4.0\logs\skywalking-api.log | findstr override-apm-hutool-http-5.x-plugin-
+You can also pass explicit paths:
 
-// 验证
+```bat
+E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-override-plugins.bat ^
+  "D:\apps\apache-skywalking-java-agent-9.4.0" ^
+  "D:\apps\java\jdk1.8.0_172"
+```
 
+The script will:
+
+- build `override-httpClient-4.x-plugin`
+- build `hutool-http-5.x-plugin`
+- copy both custom jars into `SkyWalking Agent/plugins`
+- move the official built-in jars into `SkyWalking Agent/optional-plugins`
+- print the exported jar list
+- try to scan `logs/skywalking-api.log` for related load messages
+
+## Current Hutool artifact
+
+```text
+hutool-http-5.x-plugin/target/override-apm-hutool-http-5.x-plugin-9.4.0.jar
 ```
