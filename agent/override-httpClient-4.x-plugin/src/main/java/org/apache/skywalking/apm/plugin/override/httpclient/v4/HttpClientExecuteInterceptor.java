@@ -107,6 +107,7 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
                         httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri());
                     collectHttpParam(httpRequest, span);
                 }
+                collectHttpResponse(response, span, httpRequest);
             }
         }
 
@@ -182,5 +183,19 @@ public class HttpClientExecuteInterceptor implements InstanceMethodsAroundInterc
 
     private int lengthOf(final String value) {
         return value == null ? 0 : value.length();
+    }
+
+    private void collectHttpResponse(final HttpResponse response,
+                                     final AbstractSpan span,
+                                     final HttpRequest httpRequest) {
+        final String responseBody = HttpClientResponseCollector.collect(response);
+        if (responseBody == null) {
+            return;
+        }
+        span.tag(Tags.ofKey(HttpClientResponseCollector.TAG_KEY_HTTP_RESPONSE_BODY), responseBody);
+        if (LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Collected httpclient response body, method={}, uri={}, responseLength={}",
+                httpRequest.getRequestLine().getMethod(), httpRequest.getRequestLine().getUri(), responseBody.length());
+        }
     }
 }

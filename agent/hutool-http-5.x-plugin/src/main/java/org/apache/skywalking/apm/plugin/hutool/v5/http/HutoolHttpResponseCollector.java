@@ -10,6 +10,7 @@ import java.lang.reflect.Field;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
+// SEE HttpClientResponseCollector.java
 final class HutoolHttpResponseCollector {
     static final String TAG_KEY_HTTP_RESPONSE_BODY = "http.response.body";
 

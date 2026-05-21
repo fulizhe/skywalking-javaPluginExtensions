@@ -177,8 +177,8 @@ final class HutoolHttpParamCollector {
                     return new BodySnapshot(resource.readBytes(), resource.getName());
                 }
             }
-            
-            LOGGER.warn("### Extract hutool http body failed, unkown hutool request version. " + request.getClass().getName());
+            LOGGER.warn("### Extract hutool http body skipped, unsupported hutool request structure, requestType={}, url={}",
+                request.getClass().getName(), request.getUrl());
         } catch (Exception e) {
             LOGGER.warn(e, "### Extract hutool http body failed, requestType=" + request.getClass().getName());
         }

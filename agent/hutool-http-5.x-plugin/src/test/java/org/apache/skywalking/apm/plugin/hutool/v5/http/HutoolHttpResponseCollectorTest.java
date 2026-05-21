@@ -1,20 +1,25 @@
 package org.apache.skywalking.apm.plugin.hutool.v5.http;
 
-import cn.hutool.http.HttpRequest;
-import cn.hutool.http.HttpResponse;
-import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
-import org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig;
-import org.junit.After;
-import org.junit.Test;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
+import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
+import org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig;
+import org.junit.After;
+import org.junit.Test;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+
+import cn.hutool.http.HttpRequest;
+import cn.hutool.http.HttpResponse;
 
 public class HutoolHttpResponseCollectorTest {
     private final boolean originalOverrideCollectSwitch =
