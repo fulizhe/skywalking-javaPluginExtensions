@@ -73,21 +73,21 @@ final class HutoolHttpParamCollector {
             return;
         }
 
-        final byte[] bodyBytes = extractBodyBytes(request);
-        if (bodyBytes == null || bodyBytes.length == 0) {
+        final BodySnapshot bodySnapshot = extractBodySnapshot(request);
+        if (bodySnapshot == null || bodySnapshot.bytes == null || bodySnapshot.bytes.length == 0) {
             return;
         }
 
         final String contentType = request.header("Content-Type");
         if (shouldTreatAsText(contentType)) {
-            final String text = new String(bodyBytes, resolveCharset(request));
+            final String text = new String(bodySnapshot.bytes, resolveCharset(request));
             if (StringUtil.isNotEmpty(text)) {
                 paramEntries.add(clip("body=" + text));
                 return;
             }
         }
 
-        fileEntries.add(clipFileEntry("body", null, bodyBytes.length, contentType));
+        fileEntries.add(clipFileEntry("body", bodySnapshot.name, bodySnapshot.bytes.length, contentType));
     }
 
     private static void collectFormUrlEncoded(final Map<String, Object> form, final List<String> paramEntries) {
@@ -155,16 +155,42 @@ final class HutoolHttpParamCollector {
         fileEntries.add(clipFileEntry(fieldName, null, -1, null));
     }
 
-    private static byte[] extractBodyBytes(final HttpRequest request) {
+    private static BodySnapshot extractBodySnapshot(final HttpRequest request) {
         try {
-            final Field bodyBytesField = request.getClass().getSuperclass().getDeclaredField("bodyBytes");
-            bodyBytesField.setAccessible(true);
-            return (byte[]) bodyBytesField.get(request);
+            final Field bodyBytesField = findField(request.getClass(), "bodyBytes");
+            if (bodyBytesField != null) {
+                bodyBytesField.setAccessible(true);
+                final Object bodyBytes = bodyBytesField.get(request);
+                if (bodyBytes instanceof byte[]) {
+                    return new BodySnapshot((byte[]) bodyBytes, null);
+                }
+            }
+
+            final Field bodyField = findField(request.getClass(), "body");
+            if (bodyField != null) {
+                bodyField.setAccessible(true);
+                final Object body = bodyField.get(request);
+                if (body instanceof Resource) {
+                    final Resource resource = (Resource) body;
+                    return new BodySnapshot(resource.readBytes(), resource.getName());
+                }
+            }
         } catch (Exception e) {
-            LOGGER.warn(e,"### Extract hutool http body bytes failed, requestType={}",
-                    request.getClass().getName());
-            return null;
+            LOGGER.warn(e, "### Extract hutool http body failed, requestType=" + request.getClass().getName());
         }
+        return null;
+    }
+
+    private static Field findField(final Class<?> type, final String fieldName) {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        return null;
     }
 
     private static Charset resolveCharset(final HttpRequest request) {
@@ -203,7 +229,7 @@ final class HutoolHttpParamCollector {
         try {
             return resource.readBytes().length;
         } catch (Exception e) {
-            LOGGER.warn("### Read hutool resource bytes failed, resourceName={}", resource.getName(), e);
+            LOGGER.warn(e, "### Read hutool resource bytes failed, resourceName={}" + resource.getName());
             return -1;
         }
     }
@@ -265,6 +291,16 @@ final class HutoolHttpParamCollector {
 
         String getFiles() {
             return files;
+        }
+    }
+
+    private static final class BodySnapshot {
+        private final byte[] bytes;
+        private final String name;
+
+        private BodySnapshot(final byte[] bytes, final String name) {
+            this.bytes = bytes;
+            this.name = name;
         }
     }
 }
