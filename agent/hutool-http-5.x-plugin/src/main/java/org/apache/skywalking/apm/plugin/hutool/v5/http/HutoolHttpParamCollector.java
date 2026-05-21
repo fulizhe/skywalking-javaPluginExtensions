@@ -10,6 +10,7 @@ import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
 import org.apache.skywalking.apm.util.StringUtil;
 
 import java.io.File;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.net.URL;
@@ -158,9 +159,12 @@ final class HutoolHttpParamCollector {
 
     private static BodySnapshot extractBodySnapshot(final HttpRequest request) {
         try {
+            boolean knownBodyFieldFound = false;
+
         	// hutool 5.4.x
             final Field bodyBytesField = findField(request.getClass(), "bodyBytes");
             if (bodyBytesField != null) {
+                knownBodyFieldFound = true;
                 bodyBytesField.setAccessible(true);
                 final Object bodyBytes = bodyBytesField.get(request);
                 if (bodyBytes instanceof byte[]) {
@@ -170,15 +174,23 @@ final class HutoolHttpParamCollector {
             // hutool 5.8.x
             final Field bodyField = findField(request.getClass(), "body");
             if (bodyField != null) {
+                knownBodyFieldFound = true;
                 bodyField.setAccessible(true);
                 final Object body = bodyField.get(request);
                 if (body instanceof Resource) {
                     final Resource resource = (Resource) body;
                     return new BodySnapshot(resource.readBytes(), resource.getName());
                 }
+                if (body == null) {
+                    return null;
+                }
             }
-            LOGGER.warn("### Extract hutool http body skipped, unsupported hutool request structure, requestType={}, url={}",
-                request.getClass().getName(), request.getUrl());
+
+            if (!knownBodyFieldFound || mayHaveBody(request)) {
+                LOGGER.warn("### Extract hutool http body skipped, unsupported hutool request structure, requestType={}, method={}, url={}, hutoolVersion={}, requestFields={}",
+                    request.getClass().getName(), request.getMethod(), request.getUrl(), resolveHutoolVersion(),
+                    describeFields(request));
+            }
         } catch (Exception e) {
             LOGGER.warn(e, "### Extract hutool http body failed, requestType=" + request.getClass().getName());
         }
@@ -195,6 +207,78 @@ final class HutoolHttpParamCollector {
             }
         }
         return null;
+    }
+
+    private static String describeFields(final Object target) {
+        if (target == null) {
+            return "null";
+        }
+        final StringBuilder builder = new StringBuilder();
+        Class<?> current = target.getClass();
+        while (current != null) {
+            final Field[] fields = current.getDeclaredFields();
+            for (Field field : fields) {
+                if (builder.length() > 0) {
+                    builder.append(", ");
+                }
+                builder.append(current.getSimpleName()).append('.').append(field.getName()).append('=');
+                try {
+                    field.setAccessible(true);
+                    builder.append(describeValue(field.get(target)));
+                } catch (Exception e) {
+                    builder.append("<inaccessible:");
+                    builder.append(e.getClass().getSimpleName()).append('>');
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return clip(builder.toString());
+    }
+
+    private static String describeValue(final Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof byte[]) {
+            return "byte[" + ((byte[]) value).length + "]";
+        }
+        if (value instanceof char[]) {
+            return "char[" + ((char[]) value).length + "]";
+        }
+        if (value.getClass().isArray()) {
+            return value.getClass().getComponentType().getSimpleName() + "[" + Array.getLength(value) + "]";
+        }
+        if (value instanceof Resource) {
+            final Resource resource = (Resource) value;
+            return "Resource{name=" + resource.getName() + ",url=" + resource.getUrl() + "}";
+        }
+        final String text = String.valueOf(value);
+        return text.length() > 256 ? text.substring(0, 256) + "..." : text;
+    }
+
+    private static String resolveHutoolVersion() {
+        final Package pkg = HttpRequest.class.getPackage();
+        if (pkg == null) {
+            return "";
+        }
+        if (StringUtil.isNotEmpty(pkg.getImplementationVersion())) {
+            return pkg.getImplementationVersion();
+        }
+        if (StringUtil.isNotEmpty(pkg.getSpecificationVersion())) {
+            return pkg.getSpecificationVersion();
+        }
+        return "";
+    }
+
+    private static boolean mayHaveBody(final HttpRequest request) {
+        if (request == null || request.getMethod() == null) {
+            return false;
+        }
+        final String methodName = request.getMethod().name();
+        return "POST".equals(methodName)
+            || "PUT".equals(methodName)
+            || "PATCH".equals(methodName)
+            || "DELETE".equals(methodName);
     }
 
     private static Charset resolveCharset(final HttpRequest request) {

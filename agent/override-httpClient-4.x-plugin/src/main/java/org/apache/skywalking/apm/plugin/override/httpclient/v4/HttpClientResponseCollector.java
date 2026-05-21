@@ -28,9 +28,23 @@ final class HttpClientResponseCollector {
         }
 
         final HttpEntity entity = response.getEntity();
+        // 当前是 org.apache.http.client.entity.DecompressingEntity; 服务端搞了gzip
+        // 其它类型: org.apache.http.impl.execchain.ResponseEntityProxy, Apache HttpClient 默认把响应交给业务时，本来就是流式代理实体。本质上都还是一次性读的响应流
+        // 解决: 某一层统一缓冲成 BufferedHttpEntity; 那插件就能安全采，但这是业务/客户端链路的设计决策，不该由探针偷偷做
         if (entity == null || !entity.isRepeatable()) {
-        	LOGGER.warn("### Read httpclient response as text failed, entity is null or unRepeatable, {}", entity.isRepeatable());
+        	if(LOGGER.isDebugEnable()) {
+                LOGGER.debug("### Skip httpclient response body collection, entityClass={}, repeatable={}, contentType={}",
+                        entity == null ? null : entity.getClass().getName(),
+                        entity != null && entity.isRepeatable(),
+                        getContentTypeValue(entity)); 	
+            }
+        	LOGGER.info("### entity not repeatable, skip by design");
             return null;
+        }
+        
+        if(LOGGER.isDebugEnable()) {
+            LOGGER.debug("### Inspect httpclient response body collection, entityClass={}, repeatable={}, contentType={}",
+                    entity.getClass().getName(), entity.isRepeatable(), getContentTypeValue(entity));        	
         }
 
         final String contentType = getContentTypeValue(entity);
