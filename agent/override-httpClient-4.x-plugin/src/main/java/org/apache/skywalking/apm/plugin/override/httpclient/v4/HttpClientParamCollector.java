@@ -170,8 +170,8 @@ final class HttpClientParamCollector {
             }
             return true;
         } catch (Exception e) {
-            LOGGER.warn("### Collect multipart httpclient entity failed, entityClass={}, contentType={}, contentLength={}",
-                entity.getClass().getName(), contentType, entity.getContentLength(), e);
+            LOGGER.warn(e, "### Collect multipart httpclient entity failed, entityClass={}, contentType={}, contentLength={}",
+                    entity.getClass().getName(), contentType, entity.getContentLength());
             fileEntries.add(clipFileEntry("multipart", null, entity.getContentLength(), contentType));
             return true;
         }
@@ -188,7 +188,7 @@ final class HttpClientParamCollector {
                 getEntity.setAccessible(true);
                 return getEntity.invoke(entity);
             } catch (Exception e) {
-                LOGGER.warn("### Unwrap multipart entity failed, entityClass={}", className, e);
+                LOGGER.warn(e, "### Unwrap multipart entity failed, entityClass={}", className);
                 return null;
             }
         }
@@ -252,7 +252,7 @@ final class HttpClientParamCollector {
             reader.close();
             return builder.toString();
         } catch (Exception e) {
-            LOGGER.warn("### Read multipart text body failed, contentBodyClass={}", className, e);
+            LOGGER.warn(e, "### Read multipart text body failed, contentBodyClass={}", className);
             return null;
         }
     }
@@ -269,8 +269,8 @@ final class HttpClientParamCollector {
             }
             return EntityUtils.toString(entity, charset);
         } catch (Exception e) {
-            LOGGER.warn("### Read httpclient entity as text failed, entityClass={}, contentType={}, repeatable={}",
-                entity.getClass().getName(), getContentTypeValue(entity), entity.isRepeatable(), e);
+            LOGGER.warn(e, "### Read httpclient entity as text failed, entityClass={}, contentType={}, repeatable={}",
+                    entity.getClass().getName(), getContentTypeValue(entity), entity.isRepeatable());
             return null;
         }
     }
@@ -281,8 +281,8 @@ final class HttpClientParamCollector {
             fileField.setAccessible(true);
             return (File) fileField.get(entity);
         } catch (Exception e) {
-            LOGGER.warn("### Extract file metadata from FileEntity failed, contentType={}, contentLength={}",
-                getContentTypeValue(entity), entity.getContentLength(), e);
+            LOGGER.warn(e, "### Extract file metadata from FileEntity failed, contentType={}, contentLength={}",
+                    getContentTypeValue(entity), entity.getContentLength());
             return null;
         }
     }

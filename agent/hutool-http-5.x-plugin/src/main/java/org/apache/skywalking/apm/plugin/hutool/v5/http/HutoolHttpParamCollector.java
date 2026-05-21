@@ -161,8 +161,8 @@ final class HutoolHttpParamCollector {
             bodyBytesField.setAccessible(true);
             return (byte[]) bodyBytesField.get(request);
         } catch (Exception e) {
-            LOGGER.warn("### Extract hutool http body bytes failed, requestType={}",
-                request.getClass().getName(), e);
+            LOGGER.warn(e,"### Extract hutool http body bytes failed, requestType={}",
+                    request.getClass().getName());
             return null;
         }
     }
