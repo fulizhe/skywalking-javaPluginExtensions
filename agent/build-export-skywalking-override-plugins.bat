@@ -33,11 +33,11 @@ set "PLUGINS_DIR=%SKYWALKING_AGENT_HOME%\plugins"
 set "OPTIONAL_PLUGINS_DIR=%SKYWALKING_AGENT_HOME%\optional-plugins"
 set "AGENT_LOG_FILE=%SKYWALKING_AGENT_HOME%\logs\skywalking-api.log"
 
-set "HTTPCLIENT_MODULE=override-httpClient-4.x-plugin"
+set "HTTPCLIENT_MODULE=override-httpclient-4.x-plugin"
 set "HTTPCLIENT_JAR=override-apm-httpclient-4.x-plugin-9.4.0.jar"
 set "HTTPCLIENT_OFFICIAL_JAR=apm-httpClient-4.x-plugin-9.4.0.jar"
 
-set "HUTOOL_MODULE=hutool-http-5.x-plugin"
+set "HUTOOL_MODULE=override-hutool-http-5.x-plugin"
 set "HUTOOL_JAR=override-apm-hutool-http-5.x-plugin-9.4.0.jar"
 set "HUTOOL_OFFICIAL_JAR=apm-hutool-http-5.x-plugin-9.4.0.jar"
 

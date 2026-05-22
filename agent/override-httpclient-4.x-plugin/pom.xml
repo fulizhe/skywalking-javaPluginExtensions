@@ -25,8 +25,8 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>override-httpClient-4.x-plugin</artifactId>
-    <name>override-httpClient-4.x-plugin</name>
+    <artifactId>override-httpclient-4.x-plugin</artifactId>
+    <name>override-httpclient-4.x-plugin</name>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

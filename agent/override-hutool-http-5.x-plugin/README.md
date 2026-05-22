@@ -1,4 +1,4 @@
-# hutool-http-5.x-plugin
+# override-hutool-http-5.x-plugin
 
 This module overrides the official SkyWalking `hutool-http-5.x-plugin`
 behavior and adds request parameter collection for Hutool HttpRequest.
@@ -6,14 +6,14 @@ behavior and adds request parameter collection for Hutool HttpRequest.
 ## Collection switch model
 
 This module reuses the same collection model as
-`override-httpClient-4.x-plugin`.
+`override-httpclient-4.x-plugin`.
 
 - official switch `plugin.httpclient.collect_http_params=true`
   controls query-string collection
 - shared override switch `plugin.overridehttpclient.collect_http_params=true`
   controls request body and multipart/file metadata collection
 
-The override switch is shared with `override-httpClient-4.x-plugin`, including
+The override switch is shared with `override-httpclient-4.x-plugin`, including
 the same runtime control entry.
 
 ## What it collects
@@ -27,7 +27,7 @@ the same runtime control entry.
 
 ## Shared runtime control
 
-Use the same toolkit entry as `override-httpClient-4.x-plugin`:
+Use the same toolkit entry as `override-httpclient-4.x-plugin`:
 
 ```java
 org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils
@@ -41,6 +41,6 @@ Status fields follow the same layout:
 
 ## Deployment note
 
-Use this plugin together with `override-httpClient-4.x-plugin` when you want
+Use this plugin together with `override-httpclient-4.x-plugin` when you want
 both Apache HttpClient 4.x and Hutool HTTP to share the same body collection
 switch.

@@ -24,7 +24,7 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>hutool-http-5.x-plugin</artifactId>
+    <artifactId>override-hutool-http-5.x-plugin</artifactId>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -45,7 +45,7 @@
         </dependency>
         <dependency>
             <groupId>org.openskywalking</groupId>
-            <artifactId>override-httpClient-4.x-plugin</artifactId>
+            <artifactId>override-httpclient-4.x-plugin</artifactId>
             <version>${project.version}</version>
             <scope>provided</scope>
         </dependency>

@@ -1,4 +1,4 @@
-# override-httpClient-4.x-plugin
+# override-httpclient-4.x-plugin
 
 This module overrides SkyWalking 9.4.0 built-in `apm-httpClient-4.x-plugin`
 while keeping the original tracing behavior and enhancing request parameter

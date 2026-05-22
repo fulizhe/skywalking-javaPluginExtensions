@@ -8,7 +8,6 @@
 
     <modules>
         <module>zuul-1.x-plugin</module>
-		<module>hutool-http-5.x-plugin</module>
 		<module>sqlite-3.x-plugin</module>
 		
 		<module>dynamic-debug-runtime-8.x-plugin</module>
@@ -16,7 +15,8 @@
 		
 		<module>logfile-reporter-plugin</module>
 
-        <module>override-httpClient-4.x-plugin</module>
+        <module>override-httpclient-4.x-plugin</module>
+		<module>override-hutool-http-5.x-plugin</module>
     </modules>
     <packaging>pom</packaging>
 

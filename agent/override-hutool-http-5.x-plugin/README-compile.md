@@ -1,4 +1,4 @@
-# hutool-http-5.x-plugin compile/export
+# override-hutool-http-5.x-plugin compile/export
 
 ## Recommended
 
@@ -18,8 +18,8 @@ E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-
 
 The script will:
 
-- build `override-httpClient-4.x-plugin`
-- build `hutool-http-5.x-plugin`
+- build `override-httpclient-4.x-plugin`
+- build `override-hutool-http-5.x-plugin`
 - copy both custom jars into `SkyWalking Agent/plugins`
 - move the official built-in jars into `SkyWalking Agent/optional-plugins`
 - print the exported jar list
@@ -28,5 +28,5 @@ The script will:
 ## Current Hutool artifact
 
 ```text
-hutool-http-5.x-plugin/target/override-apm-hutool-http-5.x-plugin-9.4.0.jar
+override-hutool-http-5.x-plugin/target/override-apm-hutool-http-5.x-plugin-9.4.0.jar
 ```
