@@ -34,7 +34,7 @@ switch only.
 - Records file part metadata as `filename / size / contentType`
 - Clips oversized values with the same threshold rule
 
-## Response body capture note(需要收集返回值的注意事项)
+## Response body capture note(apache httpclient需要收集返回值的注意事项)
 
 This plugin can only capture response body safely when the Apache HttpClient
 response entity is repeatable.
