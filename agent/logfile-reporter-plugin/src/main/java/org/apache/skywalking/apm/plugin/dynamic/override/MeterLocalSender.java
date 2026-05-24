@@ -43,6 +43,9 @@ public class MeterLocalSender extends MeterSender {
     public void prepare() {
         Integer configured = LogFileReporterPluginConfig.Plugin.MeterLocal.MAX_METER_DATA_SIZE;
         final Integer maxMeterDataSize = (configured != null && configured > 0) ? configured : 300;
+        // ### prepare方法被调用，配置的maxMeterDataSize为: {}，实际使用为: {}
+        LOGGER.info("### MeterLocalSender.prepare方法被调用，配置的maxMeterDataSize为: {}，实际使用为: {}", configured, maxMeterDataSize);
+        
         this.meterDataCache = new CircularBlockingQueue<>(maxMeterDataSize);
 
         // 本agent脱离OAP, 所以不需要监听GRPC
