@@ -59,6 +59,7 @@ public class JVMMetricsLocalSender extends JVMMetricsSender implements BootServi
 
 		Integer configured = LogFileReporterPluginConfig.Plugin.JvmMetricsLocal.MAX_METRICS_DATA_SIZE;
 		this.maxMetricsDataSize = (configured != null && configured > 0) ? configured : 1000;
+		LOGGER.info("### JVMMetricsLocalSender.prepare方法被调用，配置的maxMetricsDataSize为: {}，实际使用为: {}", configured, this.maxMetricsDataSize);
 
 		jvmMetricsDataCache = new CircularBlockingQueue<>(this.maxMetricsDataSize);
 	}

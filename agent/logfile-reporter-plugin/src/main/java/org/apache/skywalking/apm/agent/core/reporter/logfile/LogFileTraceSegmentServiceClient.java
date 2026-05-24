@@ -97,6 +97,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	public void prepare() {
 		Integer configured = LogFileReporterPluginConfig.Plugin.LogFileReporter.MAX_LOG_SIZE;
 		this.maxLogSize = (configured != null && configured > 0) ? configured : 1000;
+		LOGGER.info("### LogFileTraceSegmentServiceClient.prepare方法被调用，配置的maxLogSize为: {}，实际使用为: {}", configured, this.maxLogSize);
 
 		final int maxSize = this.maxLogSize;
 		logfileStatMap = Collections.synchronizedMap(
