@@ -42,7 +42,7 @@ public class MeterLocalSender extends MeterSender {
     @Override
     public void prepare() {
         Integer configured = LogFileReporterPluginConfig.Plugin.MeterLocal.MAX_METER_DATA_SIZE;
-        final Integer maxMeterDataSize = (configured != null && configured > 0) ? configured : 1000;
+        final Integer maxMeterDataSize = (configured != null && configured > 0) ? configured : 300;
         this.meterDataCache = new CircularBlockingQueue<>(maxMeterDataSize);
 
         // 本agent脱离OAP, 所以不需要监听GRPC
