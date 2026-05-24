@@ -20,13 +20,13 @@ import org.apache.skywalking.apm.network.language.agent.v3.MeterData;
 import org.apache.skywalking.apm.network.language.agent.v3.MeterHistogram;
 import org.apache.skywalking.apm.network.language.agent.v3.MeterSingleValue;
 import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
-
+import org.apache.skywalking.apm.agent.core.conf.Config;
 /**
  * <p>
  *
  * <p>
  * <p>
- * Refer To {@code KafkaMeterSender}
+ * @link <a href="https://github.com/apache/skywalking-java/blob/main/apm-sniffer/optional-reporter-plugins/kafka-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/kafka/KafkaMeterSender.java">KafkaMeterSender</a>
  * <p>
  *
  *  <p> <a href="https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-meter/">...</a> 【application-toolkit-meter组件】</p>
@@ -59,21 +59,27 @@ public class MeterLocalSender extends MeterSender {
 
     @Override
     public void send(Map<MeterId, BaseMeter> meterMap, MeterService meterService) {
+        // 以下注释内容借鉴自: KafkaMeterSender.java
+        // MeterDataCollection.Builder builder = MeterDataCollection.newBuilder();
         transform(meterMap, meterData -> {
             if (LOGGER.isDebugEnable()) {
                 LOGGER.debug("Meter data reporting, instance: {}", meterData.getServiceInstance());
             }
             // 将MeterData转换为Map并存入meterDataCache
             meterDataCache.add(buildMeterDataMap(meterData));
+
+            //builder.addMeterData(meterData);
         });
+
+        //List<MeterData> meterDatas = builder.build().getMeterDataList();
     }
 
     private Map<String, Object> buildMeterDataMap(MeterData meterData) {
-        Map<String, Object> result = new HashMap<>();
+        final Map<String, Object> result = new HashMap<>();
         // 存储服务和实例信息
-        result.put("service", meterData.getService());
-        result.put("serviceInstance", meterData.getServiceInstance());
-        result.put("timestamp", meterData.getTimestamp());
+        result.put("service", Config.Agent.SERVICE_NAME);
+        result.put("serviceInstance", Config.Agent.INSTANCE_NAME);
+        result.put("timestamp", System.currentTimeMillis());
 
         // 存储指标类型
         result.put("type", meterData.getMetricCase().name());
