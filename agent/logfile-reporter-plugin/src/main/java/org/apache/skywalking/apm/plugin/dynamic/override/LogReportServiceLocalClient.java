@@ -30,6 +30,7 @@ import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.util.CollectionUtil;
 import org.apache.skywalking.apm.network.logging.v3.LogData;
 import org.apache.skywalking.apm.network.logging.v3.LogDataBody;
+import org.apache.skywalking.apm.network.logging.v3.TraceContext;
 import org.apache.skywalking.apm.toolkit.CircularBlockingQueue;
 
 /**
@@ -54,12 +55,12 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
 
     @Override
     public void prepare() {
-    	LOGGER.info("### prepare: {}", this.getClass().getName());
-    	
+        LOGGER.info("### prepare: {}", this.getClass().getName());
+
         logDataCache = new CircularBlockingQueue<>(1000);
-        
+
         // 本agent脱离OAP, 所以不需要监听GRPC
-        //super.prepare();
+        // super.prepare();
     }
 
     public List<Map<String, Object>> getLogDatas() {
@@ -92,6 +93,13 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
             logDataMap.put("serviceInstance", logDataObj.getServiceInstance());
             logDataMap.put("endpoint", logDataObj.getEndpoint());
 
+            final TraceContext traceCtx = logDataObj.getTraceContext();
+            if (traceCtx != null && !traceCtx.getTraceId().isEmpty()) {
+                logDataMap.put("traceId", traceCtx.getTraceId());
+                logDataMap.put("traceSegmentId", traceCtx.getTraceSegmentId());
+                logDataMap.put("spanId", traceCtx.getSpanId());
+            }
+
             final LogDataBody body = logDataObj.getBody();
             logDataMap.put("body_content_case", body.getContentCase().toString());
             logDataMap.put("body_type", body.getType());
@@ -119,7 +127,6 @@ public class LogReportServiceLocalClient extends LogReportServiceClient {
 
             logDataMap.put("tags", tagsMap);
             logDataMap.put("timestamp", logDataObj.getTimestamp());
-            logDataMap.put("traceContext", logDataObj.getTraceContext().toString());
             logDataMap.put("layer", logDataObj.getLayer());
 
             logDataCache.add(logDataMap);
