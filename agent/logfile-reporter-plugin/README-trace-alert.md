@@ -182,7 +182,9 @@ Map<String, Object> traceAlert = (Map<String, Object>) status.get("traceAlert");
 | `dispatcher.dispatchSkippedDuplicate` | 同 trace 重复告警被跳过次数 |
 | `config.*` | 当前生效配置（含实时解析的 `webhookResolvedUrl`） |
 
-实现类：`TraceAlertMetrics`；挂载点：`LogfileReporterStatusExposeInterceptor` → `resultMap.traceAlert`。
+实现类：`TraceAlertMetrics`（Agent ClassLoader）；挂载点：`LogfileReporterStatusExposeInterceptor` 经反射调用 `LogFileTraceSegmentServiceClient#getTraceAlertMetrics()` → `resultMap.traceAlert`。
+
+> **注意**：拦截器运行在 PluginClassLoader，不可直接 `TraceAlertMetrics.get()`，否则会读到默认配置（如 `enabled=false`）且计数恒为 0。须与 `getLogfileStatMap` 一样走 BootService 反射。
 
 ## 去重与线程模型
 

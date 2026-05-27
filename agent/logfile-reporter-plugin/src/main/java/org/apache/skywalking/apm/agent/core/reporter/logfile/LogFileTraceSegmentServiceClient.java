@@ -23,6 +23,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.AsyncTraceAlertDispatcher;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
@@ -92,6 +93,17 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		synchronized (logfileStatMap) {
 			return new HashMap<>(logfileStatMap);
 		}
+	}
+
+	/**
+	 * 慢/错链路告警运行指标与配置快照。
+	 * <p>
+	 * 须由 Agent ClassLoader 侧调用（与 {@link AsyncTraceAlertDispatcher} 同一副本）；
+	 * 插件拦截器请通过反射调用本方法，勿直接引用 {@link TraceAlertMetrics}。
+	 * </p>
+	 */
+	public Map<String, Object> getTraceAlertMetrics() {
+		return TraceAlertMetrics.get().snapshot();
 	}
 
 	// ==================================== @Override

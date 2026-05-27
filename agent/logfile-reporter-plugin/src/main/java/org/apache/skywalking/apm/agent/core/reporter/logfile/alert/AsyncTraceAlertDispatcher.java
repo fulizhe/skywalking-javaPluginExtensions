@@ -90,12 +90,12 @@ public class AsyncTraceAlertDispatcher {
         }
 
         TraceAlertMetrics.get().recordDispatchSubmitted();
-
+/* ==== 减少这种持续性的日志输出
         LOGGER.info("### [TraceAlert] dispatch traceId={}, alertTypes={}, entryOperation={}, durationMs={}, "
                         + "thresholdMs={}, errorSpanCount={}",
                 traceId, pending, result.getEntryOperation(), result.getDurationMs(),
                 result.getThresholdMs(), result.getErrorSpanCount());
-
+*/
         markNotified(traceId, pending);
         final TraceAlertEvent event = new TraceAlertEvent(
                 traceId,
