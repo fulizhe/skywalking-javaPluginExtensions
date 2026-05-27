@@ -22,6 +22,7 @@ import org.apache.skywalking.apm.agent.core.context.trace.TraceSegment;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.AsyncTraceAlertDispatcher;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
@@ -58,6 +59,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private int maxLogSize;
 	/** 借鉴自 Druid 的 JdbcDataSourceStat，使用同步包装保证并发访问安全；在 prepare() 中初始化 */
 	private Map<String, Map<String, Object>> logfileStatMap;
+
+	private AsyncTraceAlertDispatcher traceAlertDispatcher;
 
 	public LogFileTraceSegmentServiceClient() {
 		this.enable = new AtomicBoolean(true);
@@ -111,7 +114,14 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				});
 
 		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - maxLogSize is [ {} ]", maxLogSize);
-		
+
+		traceAlertDispatcher = AsyncTraceAlertDispatcher.createIfEnabled();
+		if (traceAlertDispatcher != null) {
+			LOGGER.info("### [TraceAlert] LogFileTraceSegmentServiceClient bound to AsyncTraceAlertDispatcher.");
+		} else {
+			LOGGER.info("### [TraceAlert] LogFileTraceSegmentServiceClient: trace alert dispatcher is off.");
+		}
+
 		// 本agent脱离OAP, 所以不需要监听GRPC
 		//super.prepare();
 	}
@@ -131,6 +141,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	public void shutdown() {
 		TracingContext.ListenerManager.remove(this);
 		carrier.shutdownConsumers();
+		if (traceAlertDispatcher != null) {
+			traceAlertDispatcher.shutdown();
+		}
 	}
 
 	@Override
@@ -210,6 +223,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private Log.SpanInfo spanToSpanInfo(SpanObject span) {
 		Log.SpanInfo spanInfo = new Log.SpanInfo();
 		spanInfo.setSpanId(span.getSpanId());
+		spanInfo.setParentSpanId(span.getParentSpanId());
 		spanInfo.setOperationName(span.getOperationName());
 		spanInfo.setStartTime(span.getStartTime());
 		spanInfo.setEndTime(span.getEndTime());
@@ -253,8 +267,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 */
 	private void mergeLogIntoStatMap(Log log) {
 		final String globalTraceid = log.getTraceId();
-		
+
 		final Map<String, Map<String, Object>> statMap = logfileStatMap;
+		Map<String, Object> mergedEntry = null;
 		synchronized (statMap) {
 			if (statMap.containsKey(globalTraceid)) {
 				// 已有该traceId，合并log
@@ -269,14 +284,19 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 						logs.add(log.toMap());
 					}
 				}
+				mergedEntry = statMap.get(globalTraceid);
 			} else {
 				// 没有该traceId，直接put一个新的LogCollection.toMap()
-				statMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
+				mergedEntry = new LogCollection(new ArrayList<Log>() {
 					{
 						add(log);
 					}
-				}).toMap());
+				}).toMap();
+				statMap.put(globalTraceid, mergedEntry);
 			}
+		}
+		if (traceAlertDispatcher != null && mergedEntry != null) {
+			traceAlertDispatcher.afterTraceMerged(globalTraceid, mergedEntry);
 		}
 	}
 
