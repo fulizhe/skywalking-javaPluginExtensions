@@ -114,6 +114,8 @@ public final class TraceAlertMetrics {
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_CONNECT_TIMEOUT_MS);
         config.put("webhookReadTimeoutMs",
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_READ_TIMEOUT_MS);
+        config.put("notifiedCacheTtlMs",
+                LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.NOTIFIED_CACHE_TTL_MS);
 
         final String urlTemplate = WebhookUrlResolver.getWebhookUrlTemplate();
         final String resolvedUrl = WebhookUrlResolver.resolveConfiguredUrl();

@@ -67,6 +67,12 @@ public class LogFileReporterPluginConfig {
 
                 /** 可选：全限定类名，作为 TraceAnomalyListener 补充加载 */
                 public static String LISTENER_CLASS = "";
+
+                /**
+                 * 同一 traceId 告警去重缓存 TTL（毫秒），到期后允许再次通知并回收内存，默认 10 分钟。
+                 * 配置键示例：{@code plugin.logfilereporter.alert.notified_cache_ttl_ms=600000}
+                 */
+                public static Integer NOTIFIED_CACHE_TTL_MS = 600_000;
             }
         }
 

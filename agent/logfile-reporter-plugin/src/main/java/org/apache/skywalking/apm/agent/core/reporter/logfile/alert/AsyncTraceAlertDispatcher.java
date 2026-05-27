@@ -3,7 +3,6 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -15,23 +14,26 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 
 /**
- * 异步分发慢/错链路告警，同一 traceId 同类型告警只通知一次。
+ * 异步分发慢/错链路告警，同一 traceId 同类型告警在 TTL 窗口内只通知一次。
  */
 public class AsyncTraceAlertDispatcher {
 
     private static final ILog LOGGER = LogManager.getLogger(AsyncTraceAlertDispatcher.class);
 
-    private static final int FLAG_ERROR = 1;
-    private static final int FLAG_SLOW = 2;
-
     private final TraceEvaluator evaluator;
     private final List<TraceAnomalyListener> listeners;
     private final ExecutorService executor;
-    private final ConcurrentHashMap<String, Integer> notifiedFlags = new ConcurrentHashMap<String, Integer>();
+    private final NotifiedFlagsCache notifiedFlags;
 
     public AsyncTraceAlertDispatcher(final TraceEvaluator evaluator, final List<TraceAnomalyListener> listeners) {
+        this(evaluator, listeners, NotifiedFlagsCache.fromConfig());
+    }
+
+    AsyncTraceAlertDispatcher(final TraceEvaluator evaluator, final List<TraceAnomalyListener> listeners,
+            final NotifiedFlagsCache notifiedFlags) {
         this.evaluator = evaluator;
         this.listeners = listeners;
+        this.notifiedFlags = notifiedFlags;
         this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger(0);
 
@@ -116,19 +118,11 @@ public class AsyncTraceAlertDispatcher {
     }
 
     private boolean shouldNotify(final String traceId, final AlertType type) {
-        final int flag = type == AlertType.ERROR ? FLAG_ERROR : FLAG_SLOW;
-        final Integer existing = notifiedFlags.get(traceId);
-        return existing == null || (existing & flag) == 0;
+        return notifiedFlags.shouldNotify(traceId, type);
     }
 
     private void markNotified(final String traceId, final EnumSet<AlertType> types) {
-        notifiedFlags.compute(traceId, (key, existing) -> {
-            int flags = existing == null ? 0 : existing;
-            for (AlertType type : types) {
-                flags |= type == AlertType.ERROR ? FLAG_ERROR : FLAG_SLOW;
-            }
-            return flags;
-        });
+        notifiedFlags.markNotified(traceId, types);
     }
 
     private final class DispatchTask implements Runnable {

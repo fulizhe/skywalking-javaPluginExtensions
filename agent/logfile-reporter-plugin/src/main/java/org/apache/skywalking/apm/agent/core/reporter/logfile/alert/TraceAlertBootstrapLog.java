@@ -18,14 +18,16 @@ final class TraceAlertBootstrapLog {
 
     static void logEffectiveAlertConfig() {
         LOGGER.info("### [TraceAlert] effective config: enabled={}, defaultSlowThresholdMs={}, httpErrorStatusMin={}, "
-                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRules=[{}], listenerClass=[{}]",
+                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRules=[{}], listenerClass=[{}], "
+                        + "notifiedCacheTtlMs={}",
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLED,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR,
                 abbreviate(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES, 256),
-                emptyToDash(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.LISTENER_CLASS));
+                emptyToDash(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.LISTENER_CLASS),
+                LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.NOTIFIED_CACHE_TTL_MS);
 
         final String urlTemplate = WebhookUrlResolver.getWebhookUrlTemplate();
         final String resolvedUrl = WebhookUrlResolver.resolveConfiguredUrl();
