@@ -60,6 +60,7 @@ public class AsyncTraceAlertDispatcher {
         TraceAlertBootstrapLog.logListeners(listeners);
         final TraceEvaluator evaluator = TraceEvaluator.fromConfig(listeners);
         LOGGER.info("### [TraceAlert] dispatcher ready, totalListenerCount={}", listeners.size());
+        TraceAlertMetrics.get().markDispatcherInitialized();
         return new AsyncTraceAlertDispatcher(evaluator, listeners);
     }
 
@@ -80,12 +81,15 @@ public class AsyncTraceAlertDispatcher {
             }
         }
         if (pending.isEmpty()) {
+            TraceAlertMetrics.get().recordDispatchSkippedDuplicate();
             if (LOGGER.isDebugEnable()) {
                 LOGGER.debug("### [TraceAlert] trace [{}] matched {} but already notified, skip.",
                         traceId, result.getAlertTypes());
             }
             return;
         }
+
+        TraceAlertMetrics.get().recordDispatchSubmitted();
 
         LOGGER.info("### [TraceAlert] dispatch traceId={}, alertTypes={}, entryOperation={}, durationMs={}, "
                         + "thresholdMs={}, errorSpanCount={}",
@@ -144,7 +148,9 @@ public class AsyncTraceAlertDispatcher {
                 try {
                     listener.onTraceAlert(event);
                 } catch (Throwable t) {
-                    LOGGER.error(t, "TraceAnomalyListener failed for trace [{}].", event.getTraceId());
+                    TraceAlertMetrics.get().recordListenerInvocationFailed();
+                    LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].",
+                            event.getTraceId());
                 }
             }
         }

@@ -46,9 +46,12 @@ public class HttpTraceAnomalyListener implements TraceAnomalyListener {
 
     @Override
     public void onTraceAlert(final TraceAlertEvent event) {
+        TraceAlertMetrics.get().recordHttpAttempt();
+
         final String targetUrl = resolveWebhookUrl();
         if (targetUrl == null || targetUrl.isEmpty()) {
-            LOGGER.warn("### Trace alert webhook URL is empty, skip trace [{}].", event.getTraceId());
+            TraceAlertMetrics.get().recordHttpSkippedEmptyUrl();
+            LOGGER.warn("### [TraceAlert] webhook URL is empty, skip trace [{}].", event.getTraceId());
             return;
         }
 
@@ -72,14 +75,20 @@ public class HttpTraceAnomalyListener implements TraceAnomalyListener {
 
             final int status = connection.getResponseCode();
             if (status < 200 || status >= 300) {
-                LOGGER.warn("### Trace alert webhook returned non-success status [{}] for trace [{}], url [{}].",
+                TraceAlertMetrics.get().recordHttpFailure(event.getTraceId(), targetUrl, status,
+                        "HTTP status " + status);
+                LOGGER.warn("### [TraceAlert] webhook non-success status [{}] for trace [{}], url [{}].",
                         status, event.getTraceId(), targetUrl);
-            } else if (LOGGER.isDebugEnable()) {
-                LOGGER.debug("### Trace alert webhook succeeded for trace [{}], url [{}].",
-                        event.getTraceId(), targetUrl);
+            } else {
+                TraceAlertMetrics.get().recordHttpSuccess(event.getTraceId(), targetUrl);
+                if (LOGGER.isDebugEnable()) {
+                    LOGGER.debug("### [TraceAlert] webhook succeeded for trace [{}], url [{}].",
+                            event.getTraceId(), targetUrl);
+                }
             }
         } catch (IOException e) {
-            LOGGER.error(e, "### Failed to POST trace alert for trace [{}] to [{}].",
+            TraceAlertMetrics.get().recordHttpFailure(event.getTraceId(), targetUrl, 0, e.getMessage());
+            LOGGER.error(e, "### [TraceAlert] failed to POST trace alert for trace [{}] to [{}].",
                     event.getTraceId(), targetUrl);
         } finally {
             if (connection != null) {

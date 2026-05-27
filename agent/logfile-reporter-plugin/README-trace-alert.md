@@ -130,6 +130,60 @@ public class DbTraceAnomalyListener implements TraceAnomalyListener {
 }
 ```
 
+## 运行指标查询（运维）
+
+业务侧通过 toolkit 已有接口拉取 agent 本地状态（与 trace/jvm 数据同一入口）：
+
+```java
+Map<String, Object> status = SWLogfileReporterUtils.statisticStatus();
+Map<String, Object> traceAlert = (Map<String, Object>) status.get("traceAlert");
+```
+
+`traceAlert` 结构示例：
+
+```json
+{
+  "config": {
+    "enabled": true,
+    "defaultSlowThresholdMs": 3000,
+    "webhookResolvedUrl": "http://127.0.0.1:9600/inner/sw/trace-alert",
+    "webhookPlaceholderUnresolved": false
+  },
+  "dispatcher": {
+    "enabled": true,
+    "initialized": true,
+    "dispatchSubmitted": 12,
+    "dispatchSkippedDuplicate": 3,
+    "listenerInvocationFailed": 0
+  },
+  "httpWebhook": {
+    "totalAttempts": 12,
+    "successCount": 11,
+    "failureCount": 1,
+    "skippedEmptyUrl": 0,
+    "successRatePercent": "91.67",
+    "lastSuccessTimeMs": 1710000000000,
+    "lastFailureTimeMs": 1710000001000,
+    "lastHttpStatus": 500,
+    "lastFailureReason": "HTTP status 500",
+    "lastTargetUrl": "http://127.0.0.1:9600/inner/sw/trace-alert",
+    "lastTraceId": "abc123"
+  }
+}
+```
+
+| 字段 | 含义 |
+|------|------|
+| `httpWebhook.totalAttempts` | HTTP 回调尝试次数（每次 `onTraceAlert` 计 1） |
+| `httpWebhook.successCount` / `failureCount` | 2xx 成功 / 非 2xx 或 IO 异常 |
+| `httpWebhook.skippedEmptyUrl` | URL 为空跳过 |
+| `httpWebhook.successRatePercent` | 成功率（基于 totalAttempts） |
+| `dispatcher.dispatchSubmitted` | 通过去重后提交异步分发的次数 |
+| `dispatcher.dispatchSkippedDuplicate` | 同 trace 重复告警被跳过次数 |
+| `config.*` | 当前生效配置（含实时解析的 `webhookResolvedUrl`） |
+
+实现类：`TraceAlertMetrics`；挂载点：`LogfileReporterStatusExposeInterceptor` → `resultMap.traceAlert`。
+
 ## 去重与线程模型
 
 - 消费线程合并 segment 后提交评估，**不阻塞** DataCarrier
@@ -144,3 +198,5 @@ public class DbTraceAnomalyListener implements TraceAnomalyListener {
 | `AsyncTraceAlertDispatcher` | `...reporter.logfile.alert` |
 | `TraceAnomalyListener` | `...reporter.logfile.alert` |
 | `LogFileTraceSegmentServiceClient` | 合并后触发评估 |
+| `TraceAlertMetrics` | 运行指标与配置快照 |
+| `HttpTraceAnomalyListener` | HTTP webhook 发送与指标累计 |

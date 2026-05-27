@@ -33,6 +33,7 @@ import org.apache.skywalking.apm.agent.core.profile.ProfileSnapshotSender;
 import org.apache.skywalking.apm.agent.core.remote.LogReportServiceClient;
 import org.apache.skywalking.apm.agent.core.remote.ServiceManagementClient;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
 
 import cn.hutool.core.util.ReflectUtil;
 
@@ -85,6 +86,7 @@ public class LogfileReporterStatusExposeInterceptor implements StaticMethodsArou
 		resultMap.put("meterData", ReflectUtil.invoke(sender2, "getMeterDatas"));
 		resultMap.put("logData", ReflectUtil.invoke(client3, "getLogDatas"));
 		resultMap.put("profileSnapshotData", ReflectUtil.invoke(sender3, "getProfileSnapshotDatas"));
+		resultMap.put("traceAlert", TraceAlertMetrics.get().snapshot());
 
 		result.defineReturnValue(resultMap);
 	}
