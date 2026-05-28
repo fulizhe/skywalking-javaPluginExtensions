@@ -170,6 +170,7 @@ public class AsyncTraceAlertDispatcher implements Runnable {
                 TraceAlertMetrics.get().recordListenerInvocationFailed();
                 LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].",
                         event.getTraceId());
+                LOGGER.error("### [TraceAlert] TraceAnomalyListener failed for trace.", t);
             }
         }
     }
