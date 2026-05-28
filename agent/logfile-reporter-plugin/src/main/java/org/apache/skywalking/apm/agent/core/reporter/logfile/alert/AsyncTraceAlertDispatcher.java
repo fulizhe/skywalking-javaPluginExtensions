@@ -70,6 +70,17 @@ public class AsyncTraceAlertDispatcher {
         if (traceId == null || mergedMap == null) {
             return;
         }
+        
+        // TODO: 这里应该是 SLOW or ERROR 有一个就可以了吧 ?
+        // 提前判断：若 ERROR 和 SLOW 均已通知过，跳过 snapshot 构建与 evaluate，避免无谓的 span 遍历
+        if (notifiedFlags.isAllNotified(traceId)) {
+            TraceAlertMetrics.get().recordDispatchSkippedDuplicate();
+            if (LOGGER.isDebugEnable()) {
+                LOGGER.debug("### [TraceAlert] trace [{}] all alert types already notified, skip evaluate.",
+                        traceId);
+            }
+            return;
+        }
         final TraceSnapshot snapshot = TraceSnapshot.fromMergedMap(traceId, mergedMap);
         final TraceEvaluator.EvaluationResult result = evaluator.evaluate(snapshot);
         if (!result.hasAlert()) {

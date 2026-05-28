@@ -32,6 +32,18 @@ final class NotifiedFlagsCache {
         return new NotifiedFlagsCache(ttlMs);
     }
 
+    /**
+     * 判断该 traceId 的所有告警类型（ERROR + SLOW）是否均已通知过。
+     * 若是，则可在 evaluate 之前直接跳过，避免无谓的 span 遍历开销。
+     */
+    boolean isAllNotified(final String traceId) {
+        final Integer flags = cache.getIfPresent(traceId);
+        if (flags == null) {
+            return false;
+        }
+        return (flags.intValue() & (FLAG_ERROR | FLAG_SLOW)) == (FLAG_ERROR | FLAG_SLOW);
+    }
+
     boolean shouldNotify(final String traceId, final AlertType type) {
         final Integer flags = cache.getIfPresent(traceId);
         if (flags == null) {
