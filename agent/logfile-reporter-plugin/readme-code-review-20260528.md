@@ -1,0 +1,8 @@
+# 问题修复清单
+| # | 问题 | 源码位置 | 问题描述 | 状态 | 修复方案 |
+|---|------|----------|----------|------|----------|
+| 1 | 重复 evaluate | AsyncTraceAlertDispatcher.afterTraceMerged | 每次调用都执行 evaluator.evaluate(snapshot)，有人提议缓存结果复用 | ✅ 不修复 | mergedMap 每次内容不同，缓存结果会导致漏报，属于正确行为，无需改动 |
+| 2 | 锁外并发读写 | LogFileTraceSegmentServiceClient.mergeLogIntoStatMap | synchronized 块释放后，将 mergedEntry（statMap 内部 Map 的直接引用）传给 afterTraceMerged；TraceSnapshot.fromMergedMap 遍历其中 logs 列表时，消费线程可能同时 add，触发 ConcurrentModificationException | ✅ 已修复 | 在锁内对 logs 列表做 new ArrayList<>(origLogs) 防御性拷贝，锁外传快照而非活引用 |
+| 3 | 无界队列 | AsyncTraceAlertDispatcher 构造方法 | 使用 Executors.newSingleThreadExecutor()，内部队列为 LinkedBlockingQueue（容量 Integer.MAX_VALUE），队列满不会丢弃，持续堆积会导致 OOM | ✅ 已修复 | 改为显式持有 ArrayBlockingQueue（有界，默认 512），生产者用 offer 非阻塞投递，满则丢弃并通过 TraceAlertMetrics.recordDispatchRejected() 计数 |
+| 4 | shutdown 丢任务 | AsyncTraceAlertDispatcher.shutdown | 原 executor.shutdown() 仅停止接受新任务，不等待队列中已入队任务执行完毕；若 JVM 快速退出，队列中剩余告警事件全部丢失 | ✅ 已修复 | 消费线程 run() 捕获 InterruptedException 后，用 queue.poll() 循环排空剩余事件再退出；shutdown() 置 running=false 并中断线程 |
+| 5 | shouldNotify 提前判断缺失 | AsyncTraceAlertDispatcher.afterTraceMerged | evaluator.evaluate 在 shouldNotify 之前执行；若该 traceId 的 ERROR 和 SLOW 均已通知过，仍会完整执行 TraceSnapshot.fromMergedMap（遍历 logs 构建 Log 对象）和 evaluate（遍历 spans 做错误/慢判定、调用 SPI listener），造成无谓开销 | ✅ 已修复 | NotifiedFlagsCache 新增 isAllNotified，在 afterTraceMerged 入口处提前判断，两种类型均已通知则直接返回 |
