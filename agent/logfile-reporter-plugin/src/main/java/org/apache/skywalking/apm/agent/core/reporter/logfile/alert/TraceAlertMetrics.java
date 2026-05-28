@@ -1,5 +1,6 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -17,6 +18,8 @@ public final class TraceAlertMetrics {
     private final AtomicBoolean dispatcherInitialized = new AtomicBoolean(false);
 
     private final AtomicLong dispatchSubmitted = new AtomicLong();
+    private final AtomicLong dispatchSlowCount = new AtomicLong();
+    private final AtomicLong dispatchErrorCount = new AtomicLong();
     private final AtomicLong dispatchSkippedDuplicate = new AtomicLong();
     private final AtomicLong dispatchRejected = new AtomicLong();
     private final AtomicLong listenerInvocationFailed = new AtomicLong();
@@ -44,8 +47,20 @@ public final class TraceAlertMetrics {
         dispatcherInitialized.set(true);
     }
 
-    public void recordDispatchSubmitted() {
+    /**
+     * 按本次分发包含的告警类型累计 slow / error 次数（同一次分发可同时计入两者）。
+     */
+    public void recordDispatchSubmitted(final EnumSet<AlertType> alertTypes) {
         dispatchSubmitted.incrementAndGet();
+        if (alertTypes == null || alertTypes.isEmpty()) {
+            return;
+        }
+        if (alertTypes.contains(AlertType.SLOW)) {
+            dispatchSlowCount.incrementAndGet();
+        }
+        if (alertTypes.contains(AlertType.ERROR)) {
+            dispatchErrorCount.incrementAndGet();
+        }
     }
 
     public void recordDispatchSkippedDuplicate() {
@@ -136,6 +151,8 @@ public final class TraceAlertMetrics {
         dispatcher.put("enabled", enabled);
         dispatcher.put("initialized", dispatcherInitialized.get());
         dispatcher.put("dispatchSubmitted", dispatchSubmitted.get());
+        dispatcher.put("dispatchSlowCount", dispatchSlowCount.get());
+        dispatcher.put("dispatchErrorCount", dispatchErrorCount.get());
         dispatcher.put("dispatchSkippedDuplicate", dispatchSkippedDuplicate.get());
         dispatcher.put("dispatchRejected", dispatchRejected.get());
         dispatcher.put("listenerInvocationFailed", listenerInvocationFailed.get());
@@ -181,6 +198,8 @@ public final class TraceAlertMetrics {
         final TraceAlertMetrics m = INSTANCE;
         m.dispatcherInitialized.set(false);
         m.dispatchSubmitted.set(0);
+        m.dispatchSlowCount.set(0);
+        m.dispatchErrorCount.set(0);
         m.dispatchSkippedDuplicate.set(0);
         m.dispatchRejected.set(0);
         m.listenerInvocationFailed.set(0);

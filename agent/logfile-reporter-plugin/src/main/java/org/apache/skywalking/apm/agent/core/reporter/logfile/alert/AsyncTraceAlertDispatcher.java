@@ -151,7 +151,7 @@ public class AsyncTraceAlertDispatcher implements Runnable {
             }
             return;
         }
-        TraceAlertMetrics.get().recordDispatchSubmitted();
+        TraceAlertMetrics.get().recordDispatchSubmitted(pending);
     }
 
     public void shutdown() {

@@ -153,6 +153,8 @@ Map<String, Object> traceAlert = (Map<String, Object>) status.get("traceAlert");
     "enabled": true,
     "initialized": true,
     "dispatchSubmitted": 12,
+    "dispatchSlowCount": 8,
+    "dispatchErrorCount": 5,
     "dispatchSkippedDuplicate": 3,
     "listenerInvocationFailed": 0
   },
@@ -179,6 +181,8 @@ Map<String, Object> traceAlert = (Map<String, Object>) status.get("traceAlert");
 | `httpWebhook.skippedEmptyUrl` | URL 为空跳过 |
 | `httpWebhook.successRatePercent` | 成功率（基于 totalAttempts） |
 | `dispatcher.dispatchSubmitted` | 通过去重后提交异步分发的次数 |
+| `dispatcher.dispatchSlowCount` | 含 SLOW 类型的分发次数（与 error 可同时计入） |
+| `dispatcher.dispatchErrorCount` | 含 ERROR 类型的分发次数（与 slow 可同时计入） |
 | `dispatcher.dispatchSkippedDuplicate` | 同 trace 重复告警被跳过次数 |
 | `config.*` | 当前生效配置（含实时解析的 `webhookResolvedUrl`） |
 
