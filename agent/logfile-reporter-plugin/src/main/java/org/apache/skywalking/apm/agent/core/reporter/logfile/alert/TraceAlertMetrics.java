@@ -18,6 +18,7 @@ public final class TraceAlertMetrics {
 
     private final AtomicLong dispatchSubmitted = new AtomicLong();
     private final AtomicLong dispatchSkippedDuplicate = new AtomicLong();
+    private final AtomicLong dispatchRejected = new AtomicLong();
     private final AtomicLong listenerInvocationFailed = new AtomicLong();
 
     private final AtomicLong httpTotalAttempts = new AtomicLong();
@@ -49,6 +50,10 @@ public final class TraceAlertMetrics {
 
     public void recordDispatchSkippedDuplicate() {
         dispatchSkippedDuplicate.incrementAndGet();
+    }
+
+    public void recordDispatchRejected() {
+        dispatchRejected.incrementAndGet();
     }
 
     public void recordListenerInvocationFailed() {
@@ -132,6 +137,7 @@ public final class TraceAlertMetrics {
         dispatcher.put("initialized", dispatcherInitialized.get());
         dispatcher.put("dispatchSubmitted", dispatchSubmitted.get());
         dispatcher.put("dispatchSkippedDuplicate", dispatchSkippedDuplicate.get());
+        dispatcher.put("dispatchRejected", dispatchRejected.get());
         dispatcher.put("listenerInvocationFailed", listenerInvocationFailed.get());
         return dispatcher;
     }
@@ -176,6 +182,7 @@ public final class TraceAlertMetrics {
         m.dispatcherInitialized.set(false);
         m.dispatchSubmitted.set(0);
         m.dispatchSkippedDuplicate.set(0);
+        m.dispatchRejected.set(0);
         m.listenerInvocationFailed.set(0);
         m.httpTotalAttempts.set(0);
         m.httpSuccessCount.set(0);

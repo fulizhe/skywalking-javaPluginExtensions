@@ -3,9 +3,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.skywalking.apm.agent.core.conf.Config;
@@ -15,15 +13,28 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPlug
 
 /**
  * 异步分发慢/错链路告警，同一 traceId 同类型告警在 TTL 窗口内只通知一次。
+ * <p>
+ * 采用生产者-消费者模式：
+ * <ul>
+ *   <li>生产者（业务线程）：{@link #afterTraceMerged} 评估后用 {@code offer} 非阻塞投递，队列满则丢弃并计数。</li>
+ *   <li>消费者（单守护线程）：{@code run()} 循环 {@code take} 阻塞等待，逐一回调 {@link TraceAnomalyListener}。</li>
+ * </ul>
+ * </p>
  */
-public class AsyncTraceAlertDispatcher {
+public class AsyncTraceAlertDispatcher implements Runnable {
 
     private static final ILog LOGGER = LogManager.getLogger(AsyncTraceAlertDispatcher.class);
 
+    private static final int DEFAULT_DISPATCH_QUEUE_SIZE = 512;
+
     private final TraceEvaluator evaluator;
     private final List<TraceAnomalyListener> listeners;
-    private final ExecutorService executor;
     private final NotifiedFlagsCache notifiedFlags;
+    private final ArrayBlockingQueue<TraceAlertEvent> queue;
+
+    /** 消费线程，由构造方法启动，shutdown() 时中断。 */
+    private final Thread consumerThread;
+    private volatile boolean running = true;
 
     public AsyncTraceAlertDispatcher(final TraceEvaluator evaluator, final List<TraceAnomalyListener> listeners) {
         this(evaluator, listeners, NotifiedFlagsCache.fromConfig());
@@ -34,17 +45,13 @@ public class AsyncTraceAlertDispatcher {
         this.evaluator = evaluator;
         this.listeners = listeners;
         this.notifiedFlags = notifiedFlags;
-        this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
-            private final AtomicInteger counter = new AtomicInteger(0);
+        this.queue = new ArrayBlockingQueue<>(resolveDispatchQueueSize());
 
-            @Override
-            public Thread newThread(final Runnable runnable) {
-                final Thread thread = new Thread(runnable,
-                        "LogfileTraceAlert-" + counter.incrementAndGet());
-                thread.setDaemon(true);
-                return thread;
-            }
-        });
+        final AtomicInteger counter = new AtomicInteger(0);
+        this.consumerThread = new Thread(this, "LogfileTraceAlert-" + counter.incrementAndGet());
+        this.consumerThread.setDaemon(true);
+        this.consumerThread.start();
+        LOGGER.info("### [TraceAlert] dispatch consumer thread started, queueCapacity={}", queue.remainingCapacity());
     }
 
     public static AsyncTraceAlertDispatcher createIfEnabled() {
@@ -66,12 +73,33 @@ public class AsyncTraceAlertDispatcher {
         return new AsyncTraceAlertDispatcher(evaluator, listeners);
     }
 
+    /**
+     * 消费循环：阻塞等待队列中的告警事件，逐一回调监听器。
+     * 线程被中断或 running 置 false 时退出。
+     */
+    @Override
+    public void run() {
+        while (running) {
+            try {
+                final TraceAlertEvent event = queue.take();
+                dispatch(event);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        // 退出前排空队列，确保已入队的事件不丢失
+        TraceAlertEvent remaining;
+        while ((remaining = queue.poll()) != null) {
+            dispatch(remaining);
+        }
+        LOGGER.info("### [TraceAlert] consumer thread exited.");
+    }
+
     public void afterTraceMerged(final String traceId, final Map<String, Object> mergedMap) {
         if (traceId == null || mergedMap == null) {
             return;
         }
-        
-        // TODO: 这里应该是 SLOW or ERROR 有一个就可以了吧 ?
         // 提前判断：若 ERROR 和 SLOW 均已通知过，跳过 snapshot 构建与 evaluate，避免无谓的 span 遍历
         if (notifiedFlags.isAllNotified(traceId)) {
             TraceAlertMetrics.get().recordDispatchSkippedDuplicate();
@@ -102,13 +130,6 @@ public class AsyncTraceAlertDispatcher {
             return;
         }
 
-        TraceAlertMetrics.get().recordDispatchSubmitted();
-/* ==== 减少这种持续性的日志输出
-        LOGGER.info("### [TraceAlert] dispatch traceId={}, alertTypes={}, entryOperation={}, durationMs={}, "
-                        + "thresholdMs={}, errorSpanCount={}",
-                traceId, pending, result.getEntryOperation(), result.getDurationMs(),
-                result.getThresholdMs(), result.getErrorSpanCount());
-*/
         notifiedFlags.markNotified(traceId, pending);
         final TraceAlertEvent event = new TraceAlertEvent(
                 traceId,
@@ -121,35 +142,40 @@ public class AsyncTraceAlertDispatcher {
                 result.getErrorSpanCount(),
                 mergedMap);
 
-        executor.execute(new DispatchTask(event));
+        // 非阻塞投递，队列满则丢弃并计数
+        if (!queue.offer(event)) {
+            TraceAlertMetrics.get().recordDispatchRejected();
+            if (LOGGER.isDebugEnable()) {
+                LOGGER.debug("### [TraceAlert] dispatch queue full, discard trace [{}], alertTypes={}.",
+                        traceId, pending);
+            }
+            return;
+        }
+        TraceAlertMetrics.get().recordDispatchSubmitted();
     }
 
     public void shutdown() {
-        executor.shutdown();
+        running = false;
+        consumerThread.interrupt();
     }
 
-    private final class DispatchTask implements Runnable {
-
-        private final TraceAlertEvent event;
-
-        private DispatchTask(final TraceAlertEvent event) {
-            this.event = event;
-        }
-
-        @Override
-        public void run() {
-            for (TraceAnomalyListener listener : listeners) {
-                if (listener instanceof NoOpTraceAnomalyListener) {
-                    continue;
-                }
-                try {
-                    listener.onTraceAlert(event);
-                } catch (Throwable t) {
-                    TraceAlertMetrics.get().recordListenerInvocationFailed();
-                    LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].",
-                            event.getTraceId());
-                }
+    private void dispatch(final TraceAlertEvent event) {
+        for (TraceAnomalyListener listener : listeners) {
+            if (listener instanceof NoOpTraceAnomalyListener) {
+                continue;
+            }
+            try {
+                listener.onTraceAlert(event);
+            } catch (Throwable t) {
+                TraceAlertMetrics.get().recordListenerInvocationFailed();
+                LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].",
+                        event.getTraceId());
             }
         }
+    }
+
+    private static int resolveDispatchQueueSize() {
+        final Integer configured = 512; //LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DISPATCH_QUEUE_SIZE;
+        return configured != null && configured > 0 ? configured : DEFAULT_DISPATCH_QUEUE_SIZE;
     }
 }
