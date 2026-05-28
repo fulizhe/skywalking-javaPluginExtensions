@@ -78,7 +78,7 @@ public class AsyncTraceAlertDispatcher {
 
         final EnumSet<AlertType> pending = EnumSet.noneOf(AlertType.class);
         for (AlertType type : result.getAlertTypes()) {
-            if (shouldNotify(traceId, type)) {
+            if (notifiedFlags.shouldNotify(traceId, type)) {
                 pending.add(type);
             }
         }
@@ -98,7 +98,7 @@ public class AsyncTraceAlertDispatcher {
                 traceId, pending, result.getEntryOperation(), result.getDurationMs(),
                 result.getThresholdMs(), result.getErrorSpanCount());
 */
-        markNotified(traceId, pending);
+        notifiedFlags.markNotified(traceId, pending);
         final TraceAlertEvent event = new TraceAlertEvent(
                 traceId,
                 snapshot.getService() != null ? snapshot.getService() : Config.Agent.SERVICE_NAME,
@@ -115,14 +115,6 @@ public class AsyncTraceAlertDispatcher {
 
     public void shutdown() {
         executor.shutdown();
-    }
-
-    private boolean shouldNotify(final String traceId, final AlertType type) {
-        return notifiedFlags.shouldNotify(traceId, type);
-    }
-
-    private void markNotified(final String traceId, final EnumSet<AlertType> types) {
-        notifiedFlags.markNotified(traceId, types);
     }
 
     private final class DispatchTask implements Runnable {

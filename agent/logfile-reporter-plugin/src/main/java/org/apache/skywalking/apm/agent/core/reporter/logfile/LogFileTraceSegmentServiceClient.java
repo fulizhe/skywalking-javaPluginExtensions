@@ -267,6 +267,10 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 * 按 traceId 合并：已有则追加到 logs 列表，否则 put 新 LogCollection.toMap()。
 	 * 整段逻辑在 statMap 上同步，保证同一 traceId 的并发合并不会丢 segment 或结构错乱。
 	 * <p>
+	 * 锁释放后，将 mergedEntry 的 logs 列表做防御性拷贝后再传给 afterTraceMerged，
+	 * 避免告警线程遍历 logs 时消费线程同步追加导致 ConcurrentModificationException。
+	 * </p>
+	 * <p>
 	 * <b>性能影响：</b>
 	 * <ul>
 	 * <li>锁本身开销很小：无争用时 synchronized 成本极低，临界区内仅做 map 查写与 list 追加，持锁时间极短。</li>
@@ -281,7 +285,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		final String globalTraceid = log.getTraceId();
 
 		final Map<String, Map<String, Object>> statMap = logfileStatMap;
-		Map<String, Object> mergedEntry = null;
+		Map<String, Object> snapshotForAlert = null;
 		synchronized (statMap) {
 			if (statMap.containsKey(globalTraceid)) {
 				// 已有该traceId，合并log
@@ -296,19 +300,29 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 						logs.add(log.toMap());
 					}
 				}
-				mergedEntry = statMap.get(globalTraceid);
 			} else {
 				// 没有该traceId，直接put一个新的LogCollection.toMap()
-				mergedEntry = new LogCollection(new ArrayList<Log>() {
+				statMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
 					{
 						add(log);
 					}
-				}).toMap();
-				statMap.put(globalTraceid, mergedEntry);
+				}).toMap());
+			}
+			// 在锁内对 logs 列表做防御性拷贝，生成告警用快照，避免锁外遍历与锁内追加并发冲突
+			final Map<String, Object> live = statMap.get(globalTraceid);
+			if (live != null) {
+				final Map<String, Object> snapshot = new HashMap<>(live);
+				final Object logsObj = snapshot.get("logs");
+				if (logsObj instanceof List) {
+					@SuppressWarnings("unchecked")
+					final List<Map<String, Object>> origLogs = (List<Map<String, Object>>) logsObj;
+					snapshot.put("logs", new ArrayList<>(origLogs));
+				}
+				snapshotForAlert = snapshot;
 			}
 		}
-		if (traceAlertDispatcher != null && mergedEntry != null) {
-			traceAlertDispatcher.afterTraceMerged(globalTraceid, mergedEntry);
+		if (traceAlertDispatcher != null && snapshotForAlert != null) {
+			traceAlertDispatcher.afterTraceMerged(globalTraceid, snapshotForAlert);
 		}
 	}
 
