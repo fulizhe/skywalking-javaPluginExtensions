@@ -98,19 +98,37 @@ public class HttpTraceAnomalyListener implements TraceAnomalyListener {
     }
 
     /**
-     * 每次回调时解析 URL，以便读取启动时注入的 {@code WebPort} 等环境变量。
+     * 解析 webhook 目标 URL。
+     * <p>
+     * {@code ${WebPort}} 等占位符从进程环境变量读取；本 Listener 在 Agent 启动早期即创建，
+     * 早于部分业务进程完成环境变量注入。因此采用「解析成功则缓存、未展开则重试」：
+     * </p>
+     * <ul>
+     *   <li>已缓存完整 URL（不含 {@code ${}）时直接返回，避免每条告警重复解析；</li>
+     *   <li>含占位符的模板在每次回调时尝试 {@link WebhookUrlResolver#resolveTemplate}，
+     *       直至得到不含 {@code ${}} 的 URL 后写入 {@link #resolvedWebhookUrl}；</li>
+     *   <li>无占位符的固定 URL 在首次访问时缓存。</li>
+     * </ul>
+     * <p>
+     * 部署侧应通过环境变量提供 {@code WebPort}（如 {@code ${WebPort:9600}} 中的变量名），
+     * 保证首次告警触发前变量已就绪，以便尽快命中缓存。
+     * </p>
      */
     private String resolveWebhookUrl() {
         if (webhookUrlTemplate == null || webhookUrlTemplate.isEmpty()) {
             return null;
         }
-        if (webhookUrlTemplate.indexOf("${") >= 0) {
-            return WebhookUrlResolver.resolveTemplate(webhookUrlTemplate);
+        final String cached = resolvedWebhookUrl;
+        if (cached != null) {
+            return cached;
         }
-        if (resolvedWebhookUrl == null) {
-            resolvedWebhookUrl = webhookUrlTemplate;
+        final String resolved = webhookUrlTemplate.indexOf("${") >= 0
+                ? WebhookUrlResolver.resolveTemplate(webhookUrlTemplate)
+                : webhookUrlTemplate;
+        if (resolved != null && !resolved.isEmpty() && resolved.indexOf("${") < 0) {
+            resolvedWebhookUrl = resolved;
         }
-        return resolvedWebhookUrl;
+        return resolved;
     }
 
     private int resolveConnectTimeout() {
