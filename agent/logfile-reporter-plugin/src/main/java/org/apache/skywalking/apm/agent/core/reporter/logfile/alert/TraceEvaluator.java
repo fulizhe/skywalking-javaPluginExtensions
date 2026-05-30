@@ -10,23 +10,25 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 
 /**
- * 合并 trace 的慢/错判定：L1 span.isError、L2 HTTP 5xx、配置规则、SPI 自定义。
+ * 合并 trace 的慢/错判定：L1 span.isError、L2 HTTP 5xx、error_ignore_rules 白名单、SPI 自定义。
  */
 public class TraceEvaluator {
 
     private static final ILog LOGGER = LogManager.getLogger(TraceEvaluator.class);
 
     private final List<SlowRule> slowRules;
+    private final List<ErrorIgnoreRule> errorIgnoreRules;
     private final long defaultSlowThresholdMs;
     private final int httpErrorStatusMin;
     private final boolean enableSpanIsError;
     private final boolean enableHttpStatusError;
     private final List<TraceAnomalyListener> listeners;
 
-    public TraceEvaluator(final List<SlowRule> slowRules, final long defaultSlowThresholdMs,
-            final int httpErrorStatusMin, final boolean enableSpanIsError, final boolean enableHttpStatusError,
-            final List<TraceAnomalyListener> listeners) {
+    TraceEvaluator(final List<SlowRule> slowRules, final List<ErrorIgnoreRule> errorIgnoreRules,
+            final long defaultSlowThresholdMs, final int httpErrorStatusMin, final boolean enableSpanIsError,
+            final boolean enableHttpStatusError, final List<TraceAnomalyListener> listeners) {
         this.slowRules = slowRules;
+        this.errorIgnoreRules = errorIgnoreRules;
         this.defaultSlowThresholdMs = defaultSlowThresholdMs;
         this.httpErrorStatusMin = httpErrorStatusMin;
         this.enableSpanIsError = enableSpanIsError;
@@ -43,16 +45,24 @@ public class TraceEvaluator {
                 ? LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN : 500;
         final List<SlowRule> slowRules = SlowRuleParser.parse(
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES);
+        final List<ErrorIgnoreRule> errorIgnoreRules = ErrorIgnoreRuleParser.parse(
+                LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ERROR_IGNORE_RULES);
         final boolean enableSpanIsError = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR == null
                 || LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR;
         final boolean enableHttpStatusError = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR == null
                 || LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR;
-        final TraceEvaluator evaluator = new TraceEvaluator(slowRules, defaultSlow, httpMin,
+        TraceAlertMetrics.get().bindErrorIgnoreRules(errorIgnoreRules);
+        final TraceEvaluator evaluator = new TraceEvaluator(slowRules, errorIgnoreRules, defaultSlow, httpMin,
                 enableSpanIsError, enableHttpStatusError, listeners);
         if (slowRules.isEmpty()) {
             LOGGER.info("### [TraceAlert] slow_rules is empty, all traces use defaultSlowThresholdMs={}", defaultSlow);
         } else {
             LOGGER.info("### [TraceAlert] parsed {} slow_rules, defaultSlowThresholdMs={}", slowRules.size(), defaultSlow);
+        }
+        if (errorIgnoreRules.isEmpty()) {
+            LOGGER.info("### [TraceAlert] error_ignore_rules is empty");
+        } else {
+            LOGGER.info("### [TraceAlert] parsed {} error_ignore_rules", errorIgnoreRules.size());
         }
         TraceAlertBootstrapLog.logEvaluatorReady(evaluator);
         return evaluator;
@@ -76,6 +86,10 @@ public class TraceEvaluator {
 
     int getSlowRuleCount() {
         return slowRules == null ? 0 : slowRules.size();
+    }
+
+    int getErrorIgnoreRuleCount() {
+        return errorIgnoreRules == null ? 0 : errorIgnoreRules.size();
     }
 
     public EvaluationResult evaluate(final TraceSnapshot snapshot) {
@@ -105,10 +119,7 @@ public class TraceEvaluator {
                 continue;
             }
             for (Log.SpanInfo span : log.getSpans()) {
-                if (enableSpanIsError && span.getIsError()) {
-                    return true;
-                }
-                if (enableHttpStatusError && isHttpError(span)) {
+                if (spanContributesToError(span)) {
                     return true;
                 }
             }
@@ -121,16 +132,49 @@ public class TraceEvaluator {
         return false;
     }
 
-    private boolean isHttpError(final Log.SpanInfo span) {
+    private boolean spanContributesToError(final Log.SpanInfo span) {
+        final boolean candidate = (enableSpanIsError && span.getIsError())
+                || (enableHttpStatusError && isHttpError(span));
+        if (!candidate) {
+            return false;
+        }
+        return !isIgnoredHttpSpan(span);
+    }
+
+    private boolean isIgnoredHttpSpan(final Log.SpanInfo span) {
+        if (errorIgnoreRules == null || errorIgnoreRules.isEmpty()) {
+            return false;
+        }
+        final Integer status = parseHttpStatus(span);
+        if (status == null) {
+            return false;
+        }
+        final String operation = span.getOperationName();
+        final String url = TraceSpanUtils.getTagValue(span, TraceSpanUtils.TAG_URL);
+        final int ruleIndex = ErrorIgnoreRuleMatcher.findMatchingRuleIndex(errorIgnoreRules, operation, url,
+                status.intValue());
+        if (ruleIndex < 0) {
+            return false;
+        }
+        TraceAlertMetrics.get().recordErrorIgnoreRuleHit(ruleIndex);
+        return true;
+    }
+
+    private Integer parseHttpStatus(final Log.SpanInfo span) {
         final String statusText = TraceSpanUtils.getTagValue(span, TraceSpanUtils.TAG_HTTP_STATUS);
         if (statusText == null || statusText.isEmpty()) {
-            return false;
+            return null;
         }
         try {
-            return Integer.parseInt(statusText.trim()) >= httpErrorStatusMin;
+            return Integer.valueOf(Integer.parseInt(statusText.trim()));
         } catch (NumberFormatException ignored) {
-            return false;
+            return null;
         }
+    }
+
+    private boolean isHttpError(final Log.SpanInfo span) {
+        final Integer status = parseHttpStatus(span);
+        return status != null && status.intValue() >= httpErrorStatusMin;
     }
 
     private boolean isSlow(final TraceSnapshot snapshot, final long durationMs, final long thresholdMs) {

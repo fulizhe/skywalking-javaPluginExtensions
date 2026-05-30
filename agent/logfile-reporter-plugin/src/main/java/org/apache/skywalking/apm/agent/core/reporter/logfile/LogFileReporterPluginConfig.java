@@ -38,6 +38,12 @@ public class LogFileReporterPluginConfig {
                 public static String SLOW_RULES = "";
 
                 /**
+                 * 错误告警白名单：匹配 operation/url 且 HTTP 状态码在列表内时不参与 ERROR 判定。
+                 * 示例见 README-trace-alert.md（error_ignore_rules）。
+                 */
+                public static String ERROR_IGNORE_RULES = "";
+
+                /**
                  * HTTP 回调完整地址，支持 {@code ${WebPort:9600}} 占位符。
                  * 示例：{@code http://127.0.0.1:${WebPort:9600}/inner/sw/trace-alert}
                  */

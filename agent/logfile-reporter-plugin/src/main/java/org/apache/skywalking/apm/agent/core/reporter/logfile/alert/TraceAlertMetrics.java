@@ -1,10 +1,13 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 
@@ -36,7 +39,37 @@ public final class TraceAlertMetrics {
     private volatile String lastTargetUrl;
     private volatile String lastTraceId;
 
+    private volatile AtomicLongArray errorIgnoreRuleHits;
+    private volatile List<String> errorIgnoreRuleDescriptors = new ArrayList<String>();
+
     private TraceAlertMetrics() {
+    }
+
+    /**
+     * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按规则下标累计 span 豁免次数。
+     */
+    public void bindErrorIgnoreRules(final List<ErrorIgnoreRule> rules) {
+        if (rules == null || rules.isEmpty()) {
+            errorIgnoreRuleHits = null;
+            errorIgnoreRuleDescriptors = new ArrayList<String>();
+            return;
+        }
+        final int size = rules.size();
+        final AtomicLongArray hits = new AtomicLongArray(size);
+        final List<String> descriptors = new ArrayList<String>(size);
+        for (ErrorIgnoreRule rule : rules) {
+            descriptors.add(rule.getDescriptor());
+        }
+        errorIgnoreRuleHits = hits;
+        errorIgnoreRuleDescriptors = descriptors;
+    }
+
+    public void recordErrorIgnoreRuleHit(final int ruleIndex) {
+        final AtomicLongArray hits = errorIgnoreRuleHits;
+        if (hits == null || ruleIndex < 0 || ruleIndex >= hits.length()) {
+            return;
+        }
+        hits.incrementAndGet(ruleIndex);
     }
 
     public static TraceAlertMetrics get() {
@@ -108,6 +141,7 @@ public final class TraceAlertMetrics {
         root.put("config", buildConfigSnapshot());
         root.put("dispatcher", buildDispatcherSnapshot());
         root.put("httpWebhook", buildHttpWebhookSnapshot());
+        root.put("errorIgnoreRules", buildErrorIgnoreRulesSnapshot());
         return root;
     }
 
@@ -123,6 +157,7 @@ public final class TraceAlertMetrics {
         config.put("enableHttpStatusError",
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR);
         config.put("slowRules", LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES);
+        config.put("errorIgnoreRules", LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ERROR_IGNORE_RULES);
         config.put("listenerClass", LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.LISTENER_CLASS);
         config.put("webhookUrl", LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_URL);
         config.put("webhookPath", LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PATH);
@@ -157,6 +192,24 @@ public final class TraceAlertMetrics {
         dispatcher.put("dispatchRejected", dispatchRejected.get());
         dispatcher.put("listenerInvocationFailed", listenerInvocationFailed.get());
         return dispatcher;
+    }
+
+    private List<Map<String, Object>> buildErrorIgnoreRulesSnapshot() {
+        final List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        final List<String> descriptors = errorIgnoreRuleDescriptors;
+        final AtomicLongArray hits = errorIgnoreRuleHits;
+        if (descriptors == null || descriptors.isEmpty()) {
+            return items;
+        }
+        for (int i = 0; i < descriptors.size(); i++) {
+            final Map<String, Object> item = new HashMap<String, Object>();
+            item.put("ruleIndex", i);
+            item.put("rule", descriptors.get(i));
+            final long hitCount = hits != null && i < hits.length() ? hits.get(i) : 0L;
+            item.put("hitCount", hitCount);
+            items.add(item);
+        }
+        return items;
     }
 
     private Map<String, Object> buildHttpWebhookSnapshot() {
@@ -213,6 +266,8 @@ public final class TraceAlertMetrics {
         m.lastFailureReason = null;
         m.lastTargetUrl = null;
         m.lastTraceId = null;
+        m.errorIgnoreRuleHits = null;
+        m.errorIgnoreRuleDescriptors = new ArrayList<String>();
     }
 
     private static String abbreviate(final String value, final int maxLen) {

@@ -24,6 +24,7 @@ JVM 示例：
 | `plugin.logfilereporter.alert.enable_span_is_error` | 启用 `span.isError` 判定 | `true` |
 | `plugin.logfilereporter.alert.enable_http_status_error` | 启用 `http.status_code` 判定 | `true` |
 | `plugin.logfilereporter.alert.slow_rules` | 差异化慢请求规则 | 空 |
+| `plugin.logfilereporter.alert.error_ignore_rules` | 错误告警白名单（按 operation/url + 状态码） | 空 |
 | `plugin.logfilereporter.alert.webhook_url` | HTTP 回调完整地址，支持 `${WebPort:9600}` | 空 |
 | `plugin.logfilereporter.alert.webhook_path` | 仅配置路径时与 host + 环境变量端口拼装 | 空 |
 | `plugin.logfilereporter.alert.webhook_host` | 拼装用主机 | `127.0.0.1` |
@@ -43,11 +44,29 @@ operation:GET:/api/order/*=8000;url:.*/export/.*=60000
 - `url:` 前缀 + 正则匹配 Entry Span 的 `url` tag
 - 优先级：`operation` > `url` > 默认阈值
 
+### error_ignore_rules 格式
+
+用于业务探测等「HTTP 404 合法」场景：匹配 operation/url 且状态码在白名单内时，该 span **不参与** trace 级 ERROR 判定（不影响 Agent 对 span 的 `isError` 采集）。
+
+```text
+operation:GET:/api/exists/*=404;url:.*/inner/business-test/.*=404,410
+```
+
+- 语法与 `slow_rules` 类似，等号右侧为逗号分隔的 HTTP 状态码（100–599）
+- 仅当 span 带有 `http.status_code` tag 且状态码命中白名单时才忽略；无状态码 tag 的 `isError` 仍告警
+- 匹配优先级：`operation` > `url`（与 slow_rules 一致）
+
+示例：
+
+```properties
+plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/api/exists/*=404
+```
+
 ## 错误判定
 
-1. **L1**：任一 Span 的 `isError == true`
-2. **L2**：任一 Span 的 tag `http.status_code >= 500`（可配置下限）
-3. **L3**：`TraceAnomalyListener#isError` 自定义 OR 组合
+1. **L1**：任一 Span 的 `isError == true`（可被 `error_ignore_rules` 按 span 豁免）
+2. **L2**：任一 Span 的 tag `http.status_code >= 500`（可配置下限，亦可被白名单豁免）
+3. **L3**：`TraceAnomalyListener#isError` 自定义 OR 组合（不受白名单影响）
 
 ## 扩展方式
 
@@ -170,12 +189,19 @@ Map<String, Object> traceAlert = (Map<String, Object>) status.get("traceAlert");
     "lastFailureReason": "HTTP status 500",
     "lastTargetUrl": "http://127.0.0.1:9600/inner/sw/trace-alert",
     "lastTraceId": "abc123"
-  }
+  },
+  "errorIgnoreRules": [
+    { "ruleIndex": 0, "rule": "operation:GET:/api/exists/*=404", "hitCount": 128 },
+    { "ruleIndex": 1, "rule": "url:.*/probe/.*=404,410", "hitCount": 7 }
+  ]
 }
 ```
 
 | 字段 | 含义 |
 |------|------|
+| `errorIgnoreRules[].ruleIndex` | 配置中的规则序号（从 0 起，与 `error_ignore_rules` 分号分隔顺序一致） |
+| `errorIgnoreRules[].rule` | 规则原文（便于运维对照） |
+| `errorIgnoreRules[].hitCount` | 评估时因该规则豁免 ERROR 的 **span 次数**（同一 trace 内多个 span 分别累计） |
 | `httpWebhook.totalAttempts` | HTTP 回调尝试次数（每次 `onTraceAlert` 计 1） |
 | `httpWebhook.successCount` / `failureCount` | 2xx 成功 / 非 2xx 或 IO 异常 |
 | `httpWebhook.skippedEmptyUrl` | URL 为空跳过 |

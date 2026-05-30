@@ -18,14 +18,15 @@ final class TraceAlertBootstrapLog {
 
     static void logEffectiveAlertConfig() {
         LOGGER.info("### [TraceAlert] effective config: enabled={}, defaultSlowThresholdMs={}, httpErrorStatusMin={}, "
-                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRules=[{}], listenerClass=[{}], "
-                        + "notifiedCacheTtlMs={}",
+                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRules=[{}], errorIgnoreRules=[{}], "
+                        + "listenerClass=[{}], notifiedCacheTtlMs={}",
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLED,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR,
                 abbreviate(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES, 256),
+                abbreviate(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ERROR_IGNORE_RULES, 256),
                 emptyToDash(LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.LISTENER_CLASS),
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.NOTIFIED_CACHE_TTL_MS);
 
@@ -80,12 +81,13 @@ final class TraceAlertBootstrapLog {
 
     static void logEvaluatorReady(final TraceEvaluator evaluator) {
         LOGGER.info("### [TraceAlert] TraceEvaluator ready: defaultSlowThresholdMs={}, httpErrorStatusMin={}, "
-                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRuleCount={}",
+                        + "enableSpanIsError={}, enableHttpStatusError={}, slowRuleCount={}, errorIgnoreRuleCount={}",
                 evaluator.getDefaultSlowThresholdMs(),
                 evaluator.getHttpErrorStatusMin(),
                 evaluator.isEnableSpanIsError(),
                 evaluator.isEnableHttpStatusError(),
-                evaluator.getSlowRuleCount());
+                evaluator.getSlowRuleCount(),
+                evaluator.getErrorIgnoreRuleCount());
     }
 
     private static String emptyToDash(final String value) {
