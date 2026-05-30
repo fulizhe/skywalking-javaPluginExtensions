@@ -83,8 +83,7 @@ public class TraceEvaluatorTest {
 
     @Test
     public void detectSlowByOperationRule() {
-        final List<SlowRule> rules = Collections.singletonList(
-                new SlowRule(SlowRule.MatchType.OPERATION, "GET:/api/order/*", 8000L));
+        final List<SlowRule> rules = SlowRuleParser.parse("operation:GET:/api/order/*=8000");
         final TraceEvaluator evaluator = evaluator(rules, Collections.<ErrorIgnoreRule>emptyList(),
                 1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
         final TraceSnapshot snapshot = snapshotWithSpan(entrySpan("GET:/api/order/123", 0, 5000, false));

@@ -8,7 +8,7 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
 /**
  * Span 元数据提取与 Entry Span 识别。
  */
-public final class TraceSpanUtils {
+final class TraceSpanUtils {
 
     static final String TAG_URL = "url";
     static final String TAG_HTTP_STATUS = "http.status_code";
@@ -17,7 +17,7 @@ public final class TraceSpanUtils {
     private TraceSpanUtils() {
     }
 
-    public static String getTagValue(final Log.SpanInfo span, final String key) {
+    static String getTagValue(final Log.SpanInfo span, final String key) {
         if (span == null || key == null || span.getTagList() == null) {
             return null;
         }
@@ -30,7 +30,7 @@ public final class TraceSpanUtils {
         return null;
     }
 
-    public static boolean isEntrySpan(final Log.SpanInfo span) {
+    static boolean isEntrySpan(final Log.SpanInfo span) {
         if (span == null) {
             return false;
         }
@@ -40,7 +40,7 @@ public final class TraceSpanUtils {
         return span.getParentSpanId() == -1;
     }
 
-    public static long spanDurationMs(final Log.SpanInfo span) {
+    static long spanDurationMs(final Log.SpanInfo span) {
         if (span == null) {
             return 0L;
         }
@@ -48,7 +48,7 @@ public final class TraceSpanUtils {
         return duration < 0 ? 0L : duration;
     }
 
-    public static Log.SpanInfo findPrimaryEntrySpan(final TraceSnapshot snapshot) {
+    static Log.SpanInfo findPrimaryEntrySpan(final TraceSnapshot snapshot) {
         Log.SpanInfo fallback = null;
         long maxDuration = -1L;
         for (Log log : snapshot.getLogs()) {
@@ -69,7 +69,7 @@ public final class TraceSpanUtils {
         return fallback;
     }
 
-    public static long maxDurationMs(final TraceSnapshot snapshot) {
+    static long maxDurationMs(final TraceSnapshot snapshot) {
         long max = 0L;
         for (Log log : snapshot.getLogs()) {
             if (log.getSpans() == null) {
@@ -85,7 +85,7 @@ public final class TraceSpanUtils {
         return max;
     }
 
-    public static int countErrorSpans(final TraceSnapshot snapshot) {
+    static int countErrorSpans(final TraceSnapshot snapshot) {
         int count = 0;
         for (Log log : snapshot.getLogs()) {
             if (log.getSpans() == null) {
@@ -100,7 +100,7 @@ public final class TraceSpanUtils {
         return count;
     }
 
-    public static boolean matchesOperationPattern(final String operation, final String pattern) {
+    static boolean matchesOperationPattern(final String operation, final String pattern) {
         if (operation == null || pattern == null) {
             return false;
         }
@@ -111,14 +111,14 @@ public final class TraceSpanUtils {
         return operation.equals(pattern);
     }
 
-    public static boolean matchesUrlPattern(final String url, final String regex) {
+    static boolean matchesUrlPattern(final String url, final String regex) {
         if (url == null || regex == null || regex.isEmpty()) {
             return false;
         }
         return url.matches(regex);
     }
 
-    public static long resolveSlowThresholdMs(final List<SlowRule> rules, final String operation, final String url,
+    static long resolveSlowThresholdMs(final List<SlowRule> rules, final String operation, final String url,
             final long defaultThresholdMs) {
         Long operationThreshold = null;
         Long urlThreshold = null;

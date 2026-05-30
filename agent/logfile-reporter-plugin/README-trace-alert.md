@@ -14,6 +14,9 @@ JVM 示例：
 
 ```bash
 -Dskywalking.plugin.logfilereporter.alert.enabled=true
+
+# 完整样例
+-javaagent:D:/apps/apache-skywalking-java-agent-9.4.0/skywalking-agent.jar -Dskywalking.agent.keep_tracing=true -Dskywalking.plugin.logfilereporter.alert.enabled=true -Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/api/trace-alert-demo/httpclient-httpbin=400;operation:/status/400=400
 ```
 
 | 配置键 | 说明 | 默认值 |

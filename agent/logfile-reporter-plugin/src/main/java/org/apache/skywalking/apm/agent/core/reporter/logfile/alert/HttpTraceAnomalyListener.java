@@ -17,7 +17,7 @@ import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
  * URL 支持 {@code ${WebPort:9600}} 占位符，或由 {@code webhook_path} + 环境变量端口自动拼装。
  * </p>
  */
-public class HttpTraceAnomalyListener implements TraceAnomalyListener {
+class HttpTraceAnomalyListener implements TraceAnomalyListener {
 
     private static final ILog LOGGER = LogManager.getLogger(HttpTraceAnomalyListener.class);
     private static final Gson GSON = new Gson();
@@ -25,7 +25,7 @@ public class HttpTraceAnomalyListener implements TraceAnomalyListener {
     private final String webhookUrlTemplate;
     private volatile String resolvedWebhookUrl;
 
-    public HttpTraceAnomalyListener(final String webhookUrlTemplate) {
+    HttpTraceAnomalyListener(final String webhookUrlTemplate) {
         this.webhookUrlTemplate = webhookUrlTemplate;
         final String previewResolved = webhookUrlTemplate != null && webhookUrlTemplate.indexOf("${") >= 0
                 ? WebhookUrlResolver.resolveTemplate(webhookUrlTemplate)
@@ -35,7 +35,7 @@ public class HttpTraceAnomalyListener implements TraceAnomalyListener {
                 webhookUrlTemplate, previewResolved, resolveConnectTimeout(), resolveReadTimeout());
     }
 
-    public static HttpTraceAnomalyListener fromConfig() {
+    static HttpTraceAnomalyListener fromConfig() {
         final String template = WebhookUrlResolver.getWebhookUrlTemplate();
         if (template == null || template.isEmpty()) {
             LOGGER.debug("### [TraceAlert] skip HttpTraceAnomalyListener: webhook template is empty.");

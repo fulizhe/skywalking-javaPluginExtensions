@@ -36,7 +36,7 @@ public class AsyncTraceAlertDispatcher implements Runnable {
     private final Thread consumerThread;
     private volatile boolean running = true;
 
-    public AsyncTraceAlertDispatcher(final TraceEvaluator evaluator, final List<TraceAnomalyListener> listeners) {
+    AsyncTraceAlertDispatcher(final TraceEvaluator evaluator, final List<TraceAnomalyListener> listeners) {
         this(evaluator, listeners, NotifiedFlagsCache.fromConfig());
     }
 

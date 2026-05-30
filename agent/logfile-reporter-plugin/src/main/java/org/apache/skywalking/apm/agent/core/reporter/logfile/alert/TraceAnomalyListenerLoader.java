@@ -12,14 +12,14 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPlug
 /**
  * 加载 {@link TraceAnomalyListener}：Java SPI、配置类名、内置 HTTP webhook。
  */
-public final class TraceAnomalyListenerLoader {
+final class TraceAnomalyListenerLoader {
 
     private static final ILog LOGGER = LogManager.getLogger(TraceAnomalyListenerLoader.class);
 
     private TraceAnomalyListenerLoader() {
     }
 
-    public static List<TraceAnomalyListener> loadAll() {
+    static List<TraceAnomalyListener> loadAll() {
         LOGGER.info("### [TraceAlert] loading TraceAnomalyListener implementations...");
         final List<TraceAnomalyListener> listeners = new ArrayList<>();
         final int spiBefore = listeners.size();

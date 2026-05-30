@@ -7,12 +7,12 @@ import java.util.List;
 /**
  * 解析 plugin.logfilereporter.alert.slow_rules 配置，多条规则以分号分隔。
  */
-public final class SlowRuleParser {
+final class SlowRuleParser {
 
     private SlowRuleParser() {
     }
 
-    public static List<SlowRule> parse(final String raw) {
+    static List<SlowRule> parse(final String raw) {
         if (raw == null || raw.trim().isEmpty()) {
             return Collections.emptyList();
         }

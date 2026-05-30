@@ -9,7 +9,7 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPlug
  * 解析 webhook URL 中的 {@code ${ENV}} / {@code ${ENV:default}} 占位符，
  * 以及由 host + 环境变量端口 + path 拼装完整地址。
  */
-public final class WebhookUrlResolver {
+final class WebhookUrlResolver {
 
     private interface EnvProvider {
         String get(String name);
@@ -60,7 +60,7 @@ public final class WebhookUrlResolver {
     /**
      * 返回配置的 webhook URL 模板（仍含 {@code ${...}} 占位符），无法配置时返回 null。
      */
-    public static String getWebhookUrlTemplate() {
+    static String getWebhookUrlTemplate() {
         final String configured = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_URL;
         if (configured != null && !configured.trim().isEmpty()) {
             return configured.trim();
@@ -75,7 +75,7 @@ public final class WebhookUrlResolver {
     /**
      * 解析为最终可请求的 URL。
      */
-    public static String resolveConfiguredUrl() {
+    static String resolveConfiguredUrl() {
         final String template = getWebhookUrlTemplate();
         if (template == null || template.isEmpty()) {
             return null;
@@ -100,7 +100,7 @@ public final class WebhookUrlResolver {
     /**
      * 将模板中的 {@code ${WebPort:9600}} 等占位符替换为环境变量或默认值。
      */
-    public static String resolveTemplate(final String template) {
+    static String resolveTemplate(final String template) {
         if (template == null || template.isEmpty()) {
             return template;
         }

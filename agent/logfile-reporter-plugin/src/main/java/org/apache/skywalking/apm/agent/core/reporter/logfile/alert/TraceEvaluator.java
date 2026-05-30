@@ -12,7 +12,7 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPlug
 /**
  * 合并 trace 的慢/错判定：L1 span.isError、L2 HTTP 5xx、error_ignore_rules 白名单、SPI 自定义。
  */
-public class TraceEvaluator {
+class TraceEvaluator {
 
     private static final ILog LOGGER = LogManager.getLogger(TraceEvaluator.class);
 
@@ -36,7 +36,7 @@ public class TraceEvaluator {
         this.listeners = listeners;
     }
 
-    public static TraceEvaluator fromConfig(final List<TraceAnomalyListener> listeners) {
+    static TraceEvaluator fromConfig(final List<TraceAnomalyListener> listeners) {
         final long defaultSlow = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS != null
                 && LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS > 0
                 ? LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS : 3000L;
@@ -92,7 +92,7 @@ public class TraceEvaluator {
         return errorIgnoreRules == null ? 0 : errorIgnoreRules.size();
     }
 
-    public EvaluationResult evaluate(final TraceSnapshot snapshot) {
+    EvaluationResult evaluate(final TraceSnapshot snapshot) {
         final boolean error = hasError(snapshot);
         final Log.SpanInfo entrySpan = TraceSpanUtils.findPrimaryEntrySpan(snapshot);
         final String entryOperation = entrySpan == null ? null : entrySpan.getOperationName();
@@ -186,7 +186,7 @@ public class TraceEvaluator {
         return durationMs >= thresholdMs;
     }
 
-    public static final class EvaluationResult {
+    static final class EvaluationResult {
         private final Set<AlertType> alertTypes;
         private final String entryOperation;
         private final String url;
@@ -194,7 +194,7 @@ public class TraceEvaluator {
         private final long thresholdMs;
         private final int errorSpanCount;
 
-        public EvaluationResult(final Set<AlertType> alertTypes, final String entryOperation, final String url,
+        EvaluationResult(final Set<AlertType> alertTypes, final String entryOperation, final String url,
                 final long durationMs, final long thresholdMs, final int errorSpanCount) {
             this.alertTypes = alertTypes;
             this.entryOperation = entryOperation;
@@ -204,31 +204,31 @@ public class TraceEvaluator {
             this.errorSpanCount = errorSpanCount;
         }
 
-        public boolean hasAlert() {
+        boolean hasAlert() {
             return alertTypes != null && !alertTypes.isEmpty();
         }
 
-        public Set<AlertType> getAlertTypes() {
+        Set<AlertType> getAlertTypes() {
             return alertTypes;
         }
 
-        public String getEntryOperation() {
+        String getEntryOperation() {
             return entryOperation;
         }
 
-        public String getUrl() {
+        String getUrl() {
             return url;
         }
 
-        public long getDurationMs() {
+        long getDurationMs() {
             return durationMs;
         }
 
-        public long getThresholdMs() {
+        long getThresholdMs() {
             return thresholdMs;
         }
 
-        public int getErrorSpanCount() {
+        int getErrorSpanCount() {
             return errorSpanCount;
         }
     }
