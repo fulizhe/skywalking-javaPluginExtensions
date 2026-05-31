@@ -2,8 +2,10 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 
 import org.junit.Before;
@@ -14,6 +16,7 @@ public class TraceAlertMetricsTest {
     @Before
     public void reset() {
         TraceAlertMetrics.resetForTest();
+        AntPatternCache.resetForTest();
     }
 
     @Test
@@ -53,5 +56,27 @@ public class TraceAlertMetricsTest {
         final Map<String, Object> config = TraceAlertMetrics.buildConfigSnapshot();
         assertNotNull(config.get("enabled"));
         assertNotNull(config.get("webhookResolvedUrl"));
+    }
+
+    @Test
+    public void snapshotContainsUnifiedRules() {
+        final RulesEngine engine = RulesEngine.fromConfig(
+                "operation:GET:/slow/**=8000",
+                "operation:GET:/api/a/**=404");
+        TraceAlertMetrics.get().bindRules(engine);
+        TraceAlertMetrics.get().recordRuleHit(0);
+        TraceAlertMetrics.get().recordRuleHit(1);
+        TraceAlertMetrics.get().recordRuleHit(1);
+
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> rules = (List<Map<String, Object>>) TraceAlertMetrics.get().snapshot()
+                .get("rules");
+        assertEquals(2, rules.size());
+        assertEquals("SLOW", rules.get(0).get("type"));
+        assertEquals("ant", rules.get(0).get("syntax"));
+        assertEquals(1L, rules.get(0).get("hitCount"));
+        assertEquals("ERROR_IGNORE", rules.get(1).get("type"));
+        assertEquals(2L, rules.get(1).get("hitCount"));
+        assertTrue((Integer) TraceAlertMetrics.get().snapshot().get("antPatternCacheSize") >= 1);
     }
 }

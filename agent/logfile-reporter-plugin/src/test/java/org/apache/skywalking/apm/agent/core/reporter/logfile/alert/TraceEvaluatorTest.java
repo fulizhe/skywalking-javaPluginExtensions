@@ -11,14 +11,20 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TraceEvaluatorTest {
 
+    @Before
+    public void reset() {
+        AntPatternCache.resetForTest();
+        TraceAlertMetrics.resetForTest();
+    }
+
     @Test
     public void detectErrorBySpanIsError() {
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(),
-                Collections.<ErrorIgnoreRule>emptyList(), 1000L, 500, true, true,
+        final TraceEvaluator evaluator = evaluator(null, 1000L, 500, true, true,
                 Collections.<TraceAnomalyListener>emptyList());
         final TraceSnapshot snapshot = snapshotWithSpan(entrySpan("GET:/api/test", 0, 100, false));
         assertFalse(evaluator.evaluate(snapshot).hasAlert());
@@ -30,51 +36,48 @@ public class TraceEvaluatorTest {
 
     @Test
     public void detectErrorByHttpStatusCode() {
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(),
-                Collections.<ErrorIgnoreRule>emptyList(), 1000L, 500, false, true,
+        final TraceEvaluator evaluator = evaluator(null, 1000L, 500, false, true,
                 Collections.<TraceAnomalyListener>emptyList());
         final Log.SpanInfo span = entrySpan("GET:/api/test", 0, 100, false);
         span.setTagList(tag("http.status_code", "503"));
-        final TraceSnapshot snapshot = snapshotWithSpan(span);
-        assertTrue(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.ERROR));
+        assertTrue(evaluator.evaluate(snapshotWithSpan(span)).getAlertTypes().contains(AlertType.ERROR));
     }
 
     @Test
     public void ignore404WhenOperationRuleMatches() {
-        final List<ErrorIgnoreRule> ignoreRules = ErrorIgnoreRuleParser.parse("operation:GET:/api/exists/*=404");
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(), ignoreRules,
-                1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
+        final RulesEngine rulesEngine = RulesEngine.fromConfig(null,
+                "operation:GET:/api/exists/**=404");
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
         final Log.SpanInfo span = entrySpan("GET:/api/exists/123", 0, 100, true);
         span.setTagList(tag("http.status_code", "404"));
-        final TraceSnapshot snapshot = snapshotWithSpan(span);
-        assertFalse(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.ERROR));
+        assertFalse(evaluator.evaluate(snapshotWithSpan(span)).getAlertTypes().contains(AlertType.ERROR));
     }
 
     @Test
     public void stillAlert500WhenOperationRuleOnlyAllows404() {
-        final List<ErrorIgnoreRule> ignoreRules = ErrorIgnoreRuleParser.parse("operation:GET:/api/exists/*=404");
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(), ignoreRules,
-                1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
+        final RulesEngine rulesEngine = RulesEngine.fromConfig(null,
+                "operation:GET:/api/exists/**=404");
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
         final Log.SpanInfo span = entrySpan("GET:/api/exists/123", 0, 100, true);
         span.setTagList(tag("http.status_code", "500"));
-        final TraceSnapshot snapshot = snapshotWithSpan(span);
-        assertTrue(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.ERROR));
+        assertTrue(evaluator.evaluate(snapshotWithSpan(span)).getAlertTypes().contains(AlertType.ERROR));
     }
 
     @Test
     public void stillAlert404WhenIsErrorWithoutHttpStatusTag() {
-        final List<ErrorIgnoreRule> ignoreRules = ErrorIgnoreRuleParser.parse("operation:GET:/api/exists/*=404");
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(), ignoreRules,
-                1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
-        final Log.SpanInfo span = entrySpan("GET:/api/exists/123", 0, 100, true);
-        final TraceSnapshot snapshot = snapshotWithSpan(span);
-        assertTrue(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.ERROR));
+        final RulesEngine rulesEngine = RulesEngine.fromConfig(null,
+                "operation:GET:/api/exists/**=404");
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
+        assertTrue(evaluator.evaluate(snapshotWithSpan(entrySpan("GET:/api/exists/123", 0, 100, true)))
+                .getAlertTypes().contains(AlertType.ERROR));
     }
 
     @Test
     public void detectSlowByDefaultThreshold() {
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(),
-                Collections.<ErrorIgnoreRule>emptyList(), 1000L, 500, true, true,
+        final TraceEvaluator evaluator = evaluator(null, 1000L, 500, true, true,
                 Collections.<TraceAnomalyListener>emptyList());
         final TraceSnapshot snapshot = snapshotWithSpan(entrySpan("GET:/api/test", 0, 1500, false));
         assertTrue(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.SLOW));
@@ -82,12 +85,12 @@ public class TraceEvaluatorTest {
     }
 
     @Test
-    public void detectSlowByOperationRule() {
-        final List<SlowRule> rules = SlowRuleParser.parse("operation:GET:/api/order/*=8000");
-        final TraceEvaluator evaluator = evaluator(rules, Collections.<ErrorIgnoreRule>emptyList(),
-                1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
-        final TraceSnapshot snapshot = snapshotWithSpan(entrySpan("GET:/api/order/123", 0, 5000, false));
-        assertFalse(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.SLOW));
+    public void detectSlowByAntOperationRule() {
+        final RulesEngine rulesEngine = RulesEngine.fromConfig("operation:GET:/api/order/**=8000", null);
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
+        assertFalse(evaluator.evaluate(snapshotWithSpan(entrySpan("GET:/api/order/123", 0, 5000, false)))
+                .getAlertTypes().contains(AlertType.SLOW));
 
         final TraceSnapshot slowSnapshot = snapshotWithSpan(entrySpan("GET:/api/order/123", 0, 9000, false));
         assertTrue(evaluator.evaluate(slowSnapshot).getAlertTypes().contains(AlertType.SLOW));
@@ -111,8 +114,7 @@ public class TraceEvaluatorTest {
                 return durationMs > 10;
             }
         };
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(),
-                Collections.<ErrorIgnoreRule>emptyList(), 100000L, 500, false, false,
+        final TraceEvaluator evaluator = evaluator(null, 100000L, 500, false, false,
                 Collections.singletonList(listener));
         final TraceSnapshot snapshot = snapshotWithSpan(entrySpan("GET:/custom", 0, 20, false));
         assertTrue(evaluator.evaluate(snapshot).getAlertTypes().contains(AlertType.ERROR));
@@ -121,12 +123,11 @@ public class TraceEvaluatorTest {
 
     @Test
     public void recordsPerRuleHitCountWhenIgnored() {
-        TraceAlertMetrics.resetForTest();
-        final List<ErrorIgnoreRule> ignoreRules = ErrorIgnoreRuleParser.parse(
-                "operation:GET:/api/a/*=404;operation:GET:/api/b/*=404");
-        TraceAlertMetrics.get().bindErrorIgnoreRules(ignoreRules);
-        final TraceEvaluator evaluator = evaluator(Collections.<SlowRule>emptyList(), ignoreRules,
-                1000L, 500, true, true, Collections.<TraceAnomalyListener>emptyList());
+        final RulesEngine rulesEngine = RulesEngine.fromConfig(null,
+                "operation:GET:/api/a/**=404;operation:GET:/api/b/**=404");
+        TraceAlertMetrics.get().bindRules(rulesEngine);
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
 
         final Log.SpanInfo spanA = entrySpan("GET:/api/a/1", 0, 100, true);
         spanA.setTagList(tag("http.status_code", "404"));
@@ -139,19 +140,37 @@ public class TraceEvaluatorTest {
 
         @SuppressWarnings("unchecked")
         final List<Map<String, Object>> items = (List<Map<String, Object>>) TraceAlertMetrics.get().snapshot()
-                .get("errorIgnoreRules");
+                .get("rules");
         assertEquals(2, items.size());
         assertEquals(0, items.get(0).get("ruleIndex"));
+        assertEquals("ERROR_IGNORE", items.get(0).get("type"));
+        assertEquals("ant", items.get(0).get("syntax"));
         assertEquals(1L, items.get(0).get("hitCount"));
         assertEquals(1, items.get(1).get("ruleIndex"));
         assertEquals(2L, items.get(1).get("hitCount"));
     }
 
-    private TraceEvaluator evaluator(final List<SlowRule> slowRules, final List<ErrorIgnoreRule> errorIgnoreRules,
-            final long defaultSlowMs, final int httpMin, final boolean enableSpanIsError,
-            final boolean enableHttpStatusError, final List<TraceAnomalyListener> listeners) {
-        return new TraceEvaluator(slowRules, errorIgnoreRules, defaultSlowMs, httpMin, enableSpanIsError,
-                enableHttpStatusError, listeners);
+    @Test
+    public void recordsSlowRuleHitWhenThresholdMatched() {
+        final RulesEngine rulesEngine = RulesEngine.fromConfig("operation:GET:/api/order/**=8000", null);
+        TraceAlertMetrics.get().bindRules(rulesEngine);
+        final TraceEvaluator evaluator = evaluator(rulesEngine, 1000L, 500, true, true,
+                Collections.<TraceAnomalyListener>emptyList());
+        evaluator.evaluate(snapshotWithSpan(entrySpan("GET:/api/order/123", 0, 9000, false)));
+
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> items = (List<Map<String, Object>>) TraceAlertMetrics.get().snapshot()
+                .get("rules");
+        assertEquals(1, items.size());
+        assertEquals("SLOW", items.get(0).get("type"));
+        assertEquals(1L, items.get(0).get("hitCount"));
+    }
+
+    private TraceEvaluator evaluator(final RulesEngine rulesEngine, final long defaultSlowMs, final int httpMin,
+            final boolean enableSpanIsError, final boolean enableHttpStatusError,
+            final List<TraceAnomalyListener> listeners) {
+        final RulesEngine engine = rulesEngine == null ? new RulesEngine(null, null) : rulesEngine;
+        return new TraceEvaluator(engine, defaultSlowMs, httpMin, enableSpanIsError, enableHttpStatusError, listeners);
     }
 
     private TraceSnapshot snapshotWithSpan(final Log.SpanInfo span) {

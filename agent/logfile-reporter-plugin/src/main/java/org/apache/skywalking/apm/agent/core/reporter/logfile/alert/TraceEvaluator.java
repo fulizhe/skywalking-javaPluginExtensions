@@ -16,19 +16,17 @@ class TraceEvaluator {
 
     private static final ILog LOGGER = LogManager.getLogger(TraceEvaluator.class);
 
-    private final List<SlowRule> slowRules;
-    private final List<ErrorIgnoreRule> errorIgnoreRules;
+    private final RulesEngine rulesEngine;
     private final long defaultSlowThresholdMs;
     private final int httpErrorStatusMin;
     private final boolean enableSpanIsError;
     private final boolean enableHttpStatusError;
     private final List<TraceAnomalyListener> listeners;
 
-    TraceEvaluator(final List<SlowRule> slowRules, final List<ErrorIgnoreRule> errorIgnoreRules,
-            final long defaultSlowThresholdMs, final int httpErrorStatusMin, final boolean enableSpanIsError,
-            final boolean enableHttpStatusError, final List<TraceAnomalyListener> listeners) {
-        this.slowRules = slowRules;
-        this.errorIgnoreRules = errorIgnoreRules;
+    TraceEvaluator(final RulesEngine rulesEngine, final long defaultSlowThresholdMs, final int httpErrorStatusMin,
+            final boolean enableSpanIsError, final boolean enableHttpStatusError,
+            final List<TraceAnomalyListener> listeners) {
+        this.rulesEngine = rulesEngine == null ? new RulesEngine(null, null) : rulesEngine;
         this.defaultSlowThresholdMs = defaultSlowThresholdMs;
         this.httpErrorStatusMin = httpErrorStatusMin;
         this.enableSpanIsError = enableSpanIsError;
@@ -43,27 +41,28 @@ class TraceEvaluator {
         final int httpMin = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN != null
                 && LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN > 0
                 ? LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.HTTP_ERROR_STATUS_MIN : 500;
-        final List<SlowRule> slowRules = SlowRuleParser.parse(
-                LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES);
-        final List<ErrorIgnoreRule> errorIgnoreRules = ErrorIgnoreRuleParser.parse(
+        final RulesEngine rulesEngine = RulesEngine.fromConfig(
+                LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.SLOW_RULES,
                 LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ERROR_IGNORE_RULES);
         final boolean enableSpanIsError = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR == null
                 || LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_SPAN_IS_ERROR;
         final boolean enableHttpStatusError = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR == null
                 || LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.ENABLE_HTTP_STATUS_ERROR;
-        TraceAlertMetrics.get().bindErrorIgnoreRules(errorIgnoreRules);
-        final TraceEvaluator evaluator = new TraceEvaluator(slowRules, errorIgnoreRules, defaultSlow, httpMin,
-                enableSpanIsError, enableHttpStatusError, listeners);
-        if (slowRules.isEmpty()) {
+        TraceAlertMetrics.get().bindRules(rulesEngine);
+        final TraceEvaluator evaluator = new TraceEvaluator(rulesEngine, defaultSlow, httpMin, enableSpanIsError,
+                enableHttpStatusError, listeners);
+        if (rulesEngine.getSlowRuleCount() == 0) {
             LOGGER.info("### [TraceAlert] slow_rules is empty, all traces use defaultSlowThresholdMs={}", defaultSlow);
         } else {
-            LOGGER.info("### [TraceAlert] parsed {} slow_rules, defaultSlowThresholdMs={}", slowRules.size(), defaultSlow);
+            LOGGER.info("### [TraceAlert] parsed {} slow_rules, defaultSlowThresholdMs={}",
+                    rulesEngine.getSlowRuleCount(), defaultSlow);
         }
-        if (errorIgnoreRules.isEmpty()) {
+        if (rulesEngine.getErrorIgnoreRuleCount() == 0) {
             LOGGER.info("### [TraceAlert] error_ignore_rules is empty");
         } else {
-            LOGGER.info("### [TraceAlert] parsed {} error_ignore_rules", errorIgnoreRules.size());
+            LOGGER.info("### [TraceAlert] parsed {} error_ignore_rules", rulesEngine.getErrorIgnoreRuleCount());
         }
+        rulesEngine.logStartupSummary();
         TraceAlertBootstrapLog.logEvaluatorReady(evaluator);
         return evaluator;
     }
@@ -85,11 +84,11 @@ class TraceEvaluator {
     }
 
     int getSlowRuleCount() {
-        return slowRules == null ? 0 : slowRules.size();
+        return rulesEngine.getSlowRuleCount();
     }
 
     int getErrorIgnoreRuleCount() {
-        return errorIgnoreRules == null ? 0 : errorIgnoreRules.size();
+        return rulesEngine.getErrorIgnoreRuleCount();
     }
 
     EvaluationResult evaluate(final TraceSnapshot snapshot) {
@@ -98,8 +97,12 @@ class TraceEvaluator {
         final String entryOperation = entrySpan == null ? null : entrySpan.getOperationName();
         final String url = entrySpan == null ? null : TraceSpanUtils.getTagValue(entrySpan, TraceSpanUtils.TAG_URL);
         final long durationMs = TraceSpanUtils.maxDurationMs(snapshot);
-        final long thresholdMs = TraceSpanUtils.resolveSlowThresholdMs(slowRules, entryOperation, url,
+        final RulesEngine.SlowMatchResult slowMatch = rulesEngine.matchSlow(entryOperation, url,
                 defaultSlowThresholdMs);
+        final long thresholdMs = slowMatch.getThresholdMs();
+        if (slowMatch.getRuleIndex() >= 0) {
+            TraceAlertMetrics.get().recordRuleHit(slowMatch.getRuleIndex());
+        }
         final boolean slow = isSlow(snapshot, durationMs, thresholdMs);
         final int errorSpanCount = TraceSpanUtils.countErrorSpans(snapshot);
 
@@ -142,7 +145,7 @@ class TraceEvaluator {
     }
 
     private boolean isIgnoredHttpSpan(final Log.SpanInfo span) {
-        if (errorIgnoreRules == null || errorIgnoreRules.isEmpty()) {
+        if (rulesEngine.getErrorIgnoreRuleCount() == 0) {
             return false;
         }
         final Integer status = parseHttpStatus(span);
@@ -151,12 +154,11 @@ class TraceEvaluator {
         }
         final String operation = span.getOperationName();
         final String url = TraceSpanUtils.getTagValue(span, TraceSpanUtils.TAG_URL);
-        final int ruleIndex = ErrorIgnoreRuleMatcher.findMatchingRuleIndex(errorIgnoreRules, operation, url,
-                status.intValue());
+        final int ruleIndex = rulesEngine.matchErrorIgnoreRuleIndex(operation, url, status.intValue());
         if (ruleIndex < 0) {
             return false;
         }
-        TraceAlertMetrics.get().recordErrorIgnoreRuleHit(ruleIndex);
+        TraceAlertMetrics.get().recordRuleHit(ruleIndex);
         return true;
     }
 

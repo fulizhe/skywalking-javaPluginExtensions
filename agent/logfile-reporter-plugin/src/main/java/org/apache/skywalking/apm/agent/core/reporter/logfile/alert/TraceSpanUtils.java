@@ -1,6 +1,5 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
-import java.util.List;
 import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
@@ -98,45 +97,5 @@ final class TraceSpanUtils {
             }
         }
         return count;
-    }
-
-    static boolean matchesOperationPattern(final String operation, final String pattern) {
-        if (operation == null || pattern == null) {
-            return false;
-        }
-        if (pattern.contains("*")) {
-            final String regex = "^" + pattern.replace(".", "\\.").replace("*", ".*") + "$";
-            return operation.matches(regex);
-        }
-        return operation.equals(pattern);
-    }
-
-    static boolean matchesUrlPattern(final String url, final String regex) {
-        if (url == null || regex == null || regex.isEmpty()) {
-            return false;
-        }
-        return url.matches(regex);
-    }
-
-    static long resolveSlowThresholdMs(final List<SlowRule> rules, final String operation, final String url,
-            final long defaultThresholdMs) {
-        Long operationThreshold = null;
-        Long urlThreshold = null;
-        for (SlowRule rule : rules) {
-            if (rule.getMatchType() == SlowRule.MatchType.OPERATION
-                    && matchesOperationPattern(operation, rule.getPattern())) {
-                operationThreshold = rule.getThresholdMs();
-            } else if (rule.getMatchType() == SlowRule.MatchType.URL
-                    && matchesUrlPattern(url, rule.getPattern())) {
-                urlThreshold = rule.getThresholdMs();
-            }
-        }
-        if (operationThreshold != null) {
-            return operationThreshold;
-        }
-        if (urlThreshold != null) {
-            return urlThreshold;
-        }
-        return defaultThresholdMs;
     }
 }

@@ -39,33 +39,37 @@ public final class TraceAlertMetrics {
     private volatile String lastTargetUrl;
     private volatile String lastTraceId;
 
-    private volatile AtomicLongArray errorIgnoreRuleHits;
-    private volatile List<String> errorIgnoreRuleDescriptors = new ArrayList<String>();
+    private volatile AtomicLongArray ruleHits;
+    private volatile List<AlertRuleBinding> ruleBindings = new ArrayList<AlertRuleBinding>();
 
     private TraceAlertMetrics() {
     }
 
     /**
-     * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按规则下标累计 span 豁免次数。
+     * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按全局 ruleIndex 累计命中次数。
      */
-    public void bindErrorIgnoreRules(final List<ErrorIgnoreRule> rules) {
-        if (rules == null || rules.isEmpty()) {
-            errorIgnoreRuleHits = null;
-            errorIgnoreRuleDescriptors = new ArrayList<String>();
+    public void bindRules(final RulesEngine rulesEngine) {
+        if (rulesEngine == null || rulesEngine.getTotalRuleCount() == 0) {
+            ruleHits = null;
+            ruleBindings = new ArrayList<AlertRuleBinding>();
             return;
         }
-        final int size = rules.size();
-        final AtomicLongArray hits = new AtomicLongArray(size);
-        final List<String> descriptors = new ArrayList<String>(size);
-        for (ErrorIgnoreRule rule : rules) {
-            descriptors.add(rule.getDescriptor());
-        }
-        errorIgnoreRuleHits = hits;
-        errorIgnoreRuleDescriptors = descriptors;
+        bindRuleBindings(rulesEngine.getRuleBindings());
     }
 
-    public void recordErrorIgnoreRuleHit(final int ruleIndex) {
-        final AtomicLongArray hits = errorIgnoreRuleHits;
+    void bindRuleBindings(final List<AlertRuleBinding> bindings) {
+        if (bindings == null || bindings.isEmpty()) {
+            ruleHits = null;
+            ruleBindings = new ArrayList<AlertRuleBinding>();
+            return;
+        }
+        final int size = bindings.size();
+        ruleHits = new AtomicLongArray(size);
+        ruleBindings = new ArrayList<AlertRuleBinding>(bindings);
+    }
+
+    public void recordRuleHit(final int ruleIndex) {
+        final AtomicLongArray hits = ruleHits;
         if (hits == null || ruleIndex < 0 || ruleIndex >= hits.length()) {
             return;
         }
@@ -141,7 +145,8 @@ public final class TraceAlertMetrics {
         root.put("config", buildConfigSnapshot());
         root.put("dispatcher", buildDispatcherSnapshot());
         root.put("httpWebhook", buildHttpWebhookSnapshot());
-        root.put("errorIgnoreRules", buildErrorIgnoreRulesSnapshot());
+        root.put("rules", buildRulesSnapshot());
+        root.put("antPatternCacheSize", AntPatternCache.cacheSize());
         return root;
     }
 
@@ -194,17 +199,20 @@ public final class TraceAlertMetrics {
         return dispatcher;
     }
 
-    private List<Map<String, Object>> buildErrorIgnoreRulesSnapshot() {
+    private List<Map<String, Object>> buildRulesSnapshot() {
         final List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
-        final List<String> descriptors = errorIgnoreRuleDescriptors;
-        final AtomicLongArray hits = errorIgnoreRuleHits;
-        if (descriptors == null || descriptors.isEmpty()) {
+        final List<AlertRuleBinding> bindings = ruleBindings;
+        final AtomicLongArray hits = ruleHits;
+        if (bindings == null || bindings.isEmpty()) {
             return items;
         }
-        for (int i = 0; i < descriptors.size(); i++) {
+        for (int i = 0; i < bindings.size(); i++) {
+            final AlertRuleBinding binding = bindings.get(i);
             final Map<String, Object> item = new HashMap<String, Object>();
-            item.put("ruleIndex", i);
-            item.put("rule", descriptors.get(i));
+            item.put("ruleIndex", binding.getRuleIndex());
+            item.put("rule", binding.getDescriptor());
+            item.put("type", binding.getType().name());
+            item.put("syntax", "ant");
             final long hitCount = hits != null && i < hits.length() ? hits.get(i) : 0L;
             item.put("hitCount", hitCount);
             items.add(item);
@@ -266,8 +274,8 @@ public final class TraceAlertMetrics {
         m.lastFailureReason = null;
         m.lastTargetUrl = null;
         m.lastTraceId = null;
-        m.errorIgnoreRuleHits = null;
-        m.errorIgnoreRuleDescriptors = new ArrayList<String>();
+        m.ruleHits = null;
+        m.ruleBindings = new ArrayList<AlertRuleBinding>();
     }
 
     private static String abbreviate(final String value, final int maxLen) {
