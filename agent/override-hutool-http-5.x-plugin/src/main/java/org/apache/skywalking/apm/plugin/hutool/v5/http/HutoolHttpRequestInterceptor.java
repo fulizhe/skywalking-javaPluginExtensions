@@ -96,11 +96,11 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
 
             if (statusCode >= 400) {
                 span.errorOccurred();
-                if (objInst instanceof HttpRequest) {
-                    final HttpRequest request = (HttpRequest) objInst;
-                    LOGGER.warn("### Hutool http request finished with error status, method={}, uri={}, statusCode={}",
-                        request.getMethod().name(), request.getUrl(), statusCode);
-                }
+                // if (objInst instanceof HttpRequest) {
+                //     final HttpRequest request = (HttpRequest) objInst;
+                //     LOGGER.warn("### Hutool http request finished with error status, method={}, uri={}, statusCode={}",
+                //         request.getMethod().name(), request.getUrl(), statusCode);
+                // }
             } else if (LOGGER.isDebugEnable() && objInst instanceof HttpRequest) {
                 final HttpRequest request = (HttpRequest) objInst;
                 LOGGER.debug("### Hutool http request finished, method={}, uri={}, statusCode={}",
@@ -132,9 +132,9 @@ public class HutoolHttpRequestInterceptor implements InstanceMethodsAroundInterc
                                       final Object[] allArguments,
                                       final Class<?>[] argumentsTypes,
                                       final Throwable t) {
-        LOGGER.error(t, "### Hutool http interceptor failed, method={}, requestUrl={}",
-            method == null ? null : method.getName(),
-            objInst instanceof HttpRequest ? ((HttpRequest) objInst).getUrl() : null);
+        // LOGGER.error(t, "### Hutool http interceptor failed, method={}, requestUrl={}",
+        //     method == null ? null : method.getName(),
+        //     objInst instanceof HttpRequest ? ((HttpRequest) objInst).getUrl() : null);
         ContextManager.activeSpan().log(t);
     }
 
