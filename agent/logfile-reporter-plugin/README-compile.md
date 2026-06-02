@@ -12,6 +12,8 @@ cp ./logfile-reporter-plugin/target/logfile-reporter-plugin-1.0.0.jar D:\apps\ap
 ls D:\apps\apache-skywalking-java-agent-9.4.0\plugins\ | findstr logfile-reporter-plugin-
 // 验证加载成功
 cat D:\apps\apache-skywalking-java-agent-9.4.0\logs\skywalking-api.log | findstr logfile-reporter-plugin-
+// 打开拷贝目录
+ii D:\apps\apache-skywalking-java-agent-9.4.0\plugins\
 
 // 验证
 
