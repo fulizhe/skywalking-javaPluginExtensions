@@ -28,7 +28,7 @@ public class TraceAlertEvent {
         this.traceId = traceId;
         this.service = service;
         this.serviceInstance = serviceInstance;
-        this.alertTypes = alertTypes == null ? EnumSet.<AlertType>noneOf(AlertType.class)
+        this.alertTypes = alertTypes == null ? EnumSet.noneOf(AlertType.class)
                 : EnumSet.copyOf(alertTypes);
         this.entryOperation = entryOperation;
         this.url = url;

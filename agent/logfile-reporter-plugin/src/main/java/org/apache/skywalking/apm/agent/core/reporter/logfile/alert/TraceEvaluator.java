@@ -148,13 +148,13 @@ class TraceEvaluator {
         if (rulesEngine.getErrorIgnoreRuleCount() == 0) {
             return false;
         }
-        final Integer status = parseHttpStatus(span);
-        if (status == null) {
+        final int status = parseHttpStatus(span);
+        if (status == STATUS_UNKNOWN) {
             return false;
         }
         final String operation = span.getOperationName();
         final String url = TraceSpanUtils.getTagValue(span, TraceSpanUtils.TAG_URL);
-        final int ruleIndex = rulesEngine.matchErrorIgnoreRuleIndex(operation, url, status.intValue());
+        final int ruleIndex = rulesEngine.matchErrorIgnoreRuleIndex(operation, url, status);
         if (ruleIndex < 0) {
             return false;
         }
@@ -162,21 +162,23 @@ class TraceEvaluator {
         return true;
     }
 
-    private Integer parseHttpStatus(final Log.SpanInfo span) {
+    private static final int STATUS_UNKNOWN = -1;
+
+    private int parseHttpStatus(final Log.SpanInfo span) {
         final String statusText = TraceSpanUtils.getTagValue(span, TraceSpanUtils.TAG_HTTP_STATUS);
         if (statusText == null || statusText.isEmpty()) {
-            return null;
+            return STATUS_UNKNOWN;
         }
         try {
-            return Integer.valueOf(Integer.parseInt(statusText.trim()));
+            return Integer.parseInt(statusText.trim());
         } catch (NumberFormatException ignored) {
-            return null;
+            return STATUS_UNKNOWN;
         }
     }
 
     private boolean isHttpError(final Log.SpanInfo span) {
-        final Integer status = parseHttpStatus(span);
-        return status != null && status.intValue() >= httpErrorStatusMin;
+        final int status = parseHttpStatus(span);
+        return status >= httpErrorStatusMin;
     }
 
     private boolean isSlow(final TraceSnapshot snapshot, final long durationMs, final long thresholdMs) {

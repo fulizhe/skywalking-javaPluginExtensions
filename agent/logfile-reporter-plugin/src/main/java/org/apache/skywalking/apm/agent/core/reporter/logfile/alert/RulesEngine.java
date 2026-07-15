@@ -20,16 +20,13 @@ final class RulesEngine {
 
     RulesEngine(final List<SlowCompiledRule> slowRules, final List<ErrorIgnoreCompiledRule> errorIgnoreRules,
             final List<AlertRuleBinding> ruleBindings) {
-        this.slowRules = slowRules == null ? Collections.<SlowCompiledRule>emptyList()
-                : Collections.unmodifiableList(new ArrayList<SlowCompiledRule>(slowRules));
-        this.errorIgnoreRules = errorIgnoreRules == null ? Collections.<ErrorIgnoreCompiledRule>emptyList()
-                : Collections.unmodifiableList(new ArrayList<ErrorIgnoreCompiledRule>(errorIgnoreRules));
-        this.ruleBindings = ruleBindings == null ? Collections.<AlertRuleBinding>emptyList()
-                : Collections.unmodifiableList(new ArrayList<AlertRuleBinding>(ruleBindings));
+        this.slowRules = safeCopy(slowRules);
+        this.errorIgnoreRules = safeCopy(errorIgnoreRules);
+        this.ruleBindings = safeCopy(ruleBindings);
     }
 
     RulesEngine(final List<SlowCompiledRule> slowRules, final List<ErrorIgnoreCompiledRule> errorIgnoreRules) {
-        this(slowRules, errorIgnoreRules, buildBindings(slowRules, errorIgnoreRules));
+        this(slowRules, errorIgnoreRules, new ArrayList<AlertRuleBinding>());
     }
 
     static RulesEngine fromConfig(final String slowRulesRaw, final String errorIgnoreRulesRaw) {
@@ -61,9 +58,9 @@ final class RulesEngine {
      */
     SlowMatchResult matchSlow(final String operation, final String url, final long defaultThresholdMs) {
         Long operationThreshold = null;
-        Integer operationRuleIndex = null;
+        int operationRuleIndex = -1;
         Long urlThreshold = null;
-        Integer urlRuleIndex = null;
+        int urlRuleIndex = -1;
         for (SlowCompiledRule rule : slowRules) {
             if (!rule.matches(operation, url)) {
                 continue;
@@ -77,10 +74,10 @@ final class RulesEngine {
             }
         }
         if (operationThreshold != null) {
-            return new SlowMatchResult(operationThreshold.longValue(), operationRuleIndex.intValue());
+            return new SlowMatchResult(operationThreshold, operationRuleIndex);
         }
         if (urlThreshold != null) {
-            return new SlowMatchResult(urlThreshold.longValue(), urlRuleIndex.intValue());
+            return new SlowMatchResult(urlThreshold, urlRuleIndex);
         }
         return new SlowMatchResult(defaultThresholdMs, -1);
     }
@@ -110,19 +107,10 @@ final class RulesEngine {
                 slowRules.size(), errorIgnoreRules.size(), ruleBindings.size(), AntPatternCache.cacheSize());
     }
 
-    private static List<AlertRuleBinding> buildBindings(final List<SlowCompiledRule> slowRules,
-            final List<ErrorIgnoreCompiledRule> errorIgnoreRules) {
-        final List<SlowCompiledRule> slow = slowRules == null ? Collections.<SlowCompiledRule>emptyList() : slowRules;
-        final List<ErrorIgnoreCompiledRule> error = errorIgnoreRules == null ? Collections.<ErrorIgnoreCompiledRule>emptyList()
-                : errorIgnoreRules;
-        final List<AlertRuleBinding> bindings = new ArrayList<AlertRuleBinding>();
-        for (SlowCompiledRule rule : slow) {
-            bindings.add(new AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), AlertRuleType.SLOW));
-        }
-        for (ErrorIgnoreCompiledRule rule : error) {
-            bindings.add(new AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), AlertRuleType.ERROR_IGNORE));
-        }
-        return bindings;
+    @SuppressWarnings("unchecked")
+    private static <T> List<T> safeCopy(final List<? extends T> list) {
+        return list == null ? Collections.<T>emptyList()
+                : Collections.unmodifiableList(new ArrayList<T>(list));
     }
 
     static final class SlowMatchResult {

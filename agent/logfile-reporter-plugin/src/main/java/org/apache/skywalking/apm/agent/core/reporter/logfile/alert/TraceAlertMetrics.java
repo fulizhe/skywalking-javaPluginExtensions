@@ -49,22 +49,13 @@ public final class TraceAlertMetrics {
      * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按全局 ruleIndex 累计命中次数。
      */
     public void bindRules(final RulesEngine rulesEngine) {
-        if (rulesEngine == null || rulesEngine.getTotalRuleCount() == 0) {
-            ruleHits = null;
-            ruleBindings = new ArrayList<AlertRuleBinding>();
-            return;
-        }
-        bindRuleBindings(rulesEngine.getRuleBindings());
-    }
-
-    void bindRuleBindings(final List<AlertRuleBinding> bindings) {
+        final List<AlertRuleBinding> bindings = rulesEngine == null ? null : rulesEngine.getRuleBindings();
         if (bindings == null || bindings.isEmpty()) {
             ruleHits = null;
             ruleBindings = new ArrayList<AlertRuleBinding>();
             return;
         }
-        final int size = bindings.size();
-        ruleHits = new AtomicLongArray(size);
+        ruleHits = new AtomicLongArray(bindings.size());
         ruleBindings = new ArrayList<AlertRuleBinding>(bindings);
     }
 

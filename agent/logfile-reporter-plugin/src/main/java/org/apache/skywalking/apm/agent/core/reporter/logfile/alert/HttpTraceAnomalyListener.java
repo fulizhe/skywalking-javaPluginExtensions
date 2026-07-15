@@ -66,11 +66,8 @@ class HttpTraceAnomalyListener implements TraceAnomalyListener {
 
             final byte[] body = GSON.toJson(event.toMap()).getBytes(StandardCharsets.UTF_8);
             connection.setRequestProperty("Content-Length", String.valueOf(body.length));
-            final OutputStream outputStream = connection.getOutputStream();
-            try {
+            try (OutputStream outputStream = connection.getOutputStream()) {
                 outputStream.write(body);
-            } finally {
-                outputStream.close();
             }
 
             final int status = connection.getResponseCode();

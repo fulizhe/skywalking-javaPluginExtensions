@@ -1,7 +1,6 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.ServiceLoader;
 
@@ -22,24 +21,9 @@ final class TraceAnomalyListenerLoader {
     static List<TraceAnomalyListener> loadAll() {
         LOGGER.info("### [TraceAlert] loading TraceAnomalyListener implementations...");
         final List<TraceAnomalyListener> listeners = new ArrayList<>();
-        final int spiBefore = listeners.size();
         loadFromServiceLoader(listeners);
-        LOGGER.info("### [TraceAlert] ServiceLoader loaded {} listener(s).", listeners.size() - spiBefore);
-
-        final int beforeConfigClass = listeners.size();
         loadFromConfigClass(listeners);
-        if (listeners.size() > beforeConfigClass) {
-            LOGGER.info("### [TraceAlert] configured listener_class loaded: {}",
-                    LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.LISTENER_CLASS);
-        }
-
-        final int beforeHttp = listeners.size();
         loadHttpListenerIfConfigured(listeners);
-        if (listeners.size() > beforeHttp) {
-            LOGGER.info("### [TraceAlert] HttpTraceAnomalyListener registered.");
-        } else {
-            LOGGER.warn("### [TraceAlert] HttpTraceAnomalyListener not registered (no webhook_url/webhook_path).");
-        }
 
         if (listeners.isEmpty()) {
             LOGGER.warn("### [TraceAlert] no listener found, fallback to NoOpTraceAnomalyListener.");
@@ -50,10 +34,8 @@ final class TraceAnomalyListenerLoader {
 
     private static void loadFromServiceLoader(final List<TraceAnomalyListener> listeners) {
         try {
-            final Iterator<TraceAnomalyListener> iterator = ServiceLoader.load(TraceAnomalyListener.class,
-                    TraceAnomalyListener.class.getClassLoader()).iterator();
-            while (iterator.hasNext()) {
-                final TraceAnomalyListener listener = iterator.next();
+            for (TraceAnomalyListener listener : ServiceLoader.load(TraceAnomalyListener.class,
+                    TraceAnomalyListener.class.getClassLoader())) {
                 listeners.add(listener);
                 LOGGER.info("### [TraceAlert] SPI listener: {}", listener.getClass().getName());
             }

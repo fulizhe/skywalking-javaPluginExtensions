@@ -4,7 +4,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.skywalking.apm.agent.core.conf.Config;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
@@ -47,8 +46,7 @@ public class AsyncTraceAlertDispatcher implements Runnable {
         this.notifiedFlags = notifiedFlags;
         this.queue = new ArrayBlockingQueue<>(resolveDispatchQueueSize());
 
-        final AtomicInteger counter = new AtomicInteger(0);
-        this.consumerThread = new Thread(this, "LogfileTraceAlert-" + counter.incrementAndGet());
+        this.consumerThread = new Thread(this, "LogfileTraceAlert");
         this.consumerThread.setDaemon(true);
         this.consumerThread.start();
         LOGGER.info("### [TraceAlert] dispatch consumer thread started, queueCapacity={}", queue.remainingCapacity());
@@ -168,9 +166,7 @@ public class AsyncTraceAlertDispatcher implements Runnable {
                 listener.onTraceAlert(event);
             } catch (Throwable t) {
                 TraceAlertMetrics.get().recordListenerInvocationFailed();
-                LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].",
-                        event.getTraceId());
-                LOGGER.error("### [TraceAlert] TraceAnomalyListener failed for trace.", t);
+                LOGGER.error(t, "### [TraceAlert] TraceAnomalyListener failed for trace [{}].", event.getTraceId());
             }
         }
     }

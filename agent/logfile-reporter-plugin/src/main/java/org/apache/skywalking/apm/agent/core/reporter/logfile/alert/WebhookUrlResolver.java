@@ -2,6 +2,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 
@@ -11,50 +12,22 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPlug
  */
 final class WebhookUrlResolver {
 
-    private interface EnvProvider {
-        String get(String name);
-    }
-
-    private static EnvProvider envProvider = new EnvProvider() {
-        @Override
-        public String get(final String name) {
-            return System.getenv(name);
-        }
-    };
+    private static volatile Function<String, String> envProvider = System::getenv;
 
     private WebhookUrlResolver() {
     }
 
-    /**
-     * 单测注入环境变量，模拟用户启动时设置的 WebPort 等。
-     * 传入 {@code null} 或空 Map 表示不注入任何环境变量。
-     */
     static void setEnvForTest(final Map<String, String> env) {
         if (env == null || env.isEmpty()) {
-            envProvider = new EnvProvider() {
-                @Override
-                public String get(final String name) {
-                    return null;
-                }
-            };
+            envProvider = k -> null;
             return;
         }
-        final Map<String, String> copy = new HashMap<String, String>(env);
-        envProvider = new EnvProvider() {
-            @Override
-            public String get(final String name) {
-                return copy.get(name);
-            }
-        };
+        final Map<String, String> copy = new HashMap<>(env);
+        envProvider = copy::get;
     }
 
     static void resetEnvProviderForTest() {
-        envProvider = new EnvProvider() {
-            @Override
-            public String get(final String name) {
-                return System.getenv(name);
-            }
-        };
+        envProvider = System::getenv;
     }
 
     /**
@@ -136,7 +109,7 @@ final class WebhookUrlResolver {
             envName = placeholder.trim();
             defaultValue = "";
         }
-        final String envValue = envProvider.get(envName);
+        final String envValue = envProvider.apply(envName);
         if (envValue != null && !envValue.trim().isEmpty()) {
             return envValue.trim();
         }

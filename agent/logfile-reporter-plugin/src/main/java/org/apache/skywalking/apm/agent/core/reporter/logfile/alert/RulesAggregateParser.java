@@ -27,7 +27,7 @@ final class RulesAggregateParser {
         if (raw == null || raw.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        final List<SlowCompiledRule> rules = new ArrayList<SlowCompiledRule>();
+        final List<SlowCompiledRule> rules = new ArrayList<>();
         int index = startIndex;
         for (String part : raw.split(";")) {
             final String trimmed = part.trim();
@@ -38,24 +38,19 @@ final class RulesAggregateParser {
             if (eqIndex <= 0 || eqIndex == trimmed.length() - 1) {
                 continue;
             }
-            final String left = trimmed.substring(0, eqIndex).trim();
-            final String thresholdText = trimmed.substring(eqIndex + 1).trim();
-            final ParsedRuleHeader header = parseRuleHeader(left);
+            final ParsedRuleHeader header = parseRuleHeader(trimmed.substring(0, eqIndex).trim());
             if (header == null) {
                 continue;
             }
             try {
-                final long thresholdMs = Long.parseLong(thresholdText);
+                final long thresholdMs = Long.parseLong(trimmed.substring(eqIndex + 1).trim());
                 if (thresholdMs <= 0) {
                     continue;
                 }
-                final TracePatternMatcher matcher = PatternMatcherFactory.createAnt(header.pattern);
-                rules.add(new SlowCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT, matcher, thresholdMs));
+                rules.add(new SlowCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT,
+                        PatternMatcherFactory.createAnt(header.pattern), thresholdMs));
                 index++;
-            } catch (NumberFormatException ignored) {
-                // skip invalid threshold
             } catch (IllegalArgumentException ignored) {
-                // skip invalid pattern
             }
         }
         return rules;
@@ -65,7 +60,7 @@ final class RulesAggregateParser {
         if (raw == null || raw.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        final List<ErrorIgnoreCompiledRule> rules = new ArrayList<ErrorIgnoreCompiledRule>();
+        final List<ErrorIgnoreCompiledRule> rules = new ArrayList<>();
         int index = startIndex;
         for (String part : raw.split(";")) {
             final String trimmed = part.trim();
@@ -76,23 +71,20 @@ final class RulesAggregateParser {
             if (eqIndex <= 0 || eqIndex == trimmed.length() - 1) {
                 continue;
             }
-            final String left = trimmed.substring(0, eqIndex).trim();
-            final String statusText = trimmed.substring(eqIndex + 1).trim();
-            final ParsedRuleHeader header = parseRuleHeader(left);
+            final ParsedRuleHeader header = parseRuleHeader(trimmed.substring(0, eqIndex).trim());
             if (header == null) {
                 continue;
             }
-            final Set<Integer> statusCodes = parseStatusCodes(statusText);
-            if (statusCodes.isEmpty() || header.pattern.isEmpty()) {
+            final Set<Integer> statusCodes = parseStatusCodes(trimmed.substring(eqIndex + 1).trim());
+            if (statusCodes.isEmpty()) {
                 continue;
             }
             try {
-                final TracePatternMatcher matcher = PatternMatcherFactory.createAnt(header.pattern);
-                rules.add(new ErrorIgnoreCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT, matcher,
+                rules.add(new ErrorIgnoreCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT,
+                        PatternMatcherFactory.createAnt(header.pattern),
                         new StatusCodeAllowlist(statusCodes)));
                 index++;
             } catch (IllegalArgumentException ignored) {
-                // skip invalid pattern
             }
         }
         return rules;
@@ -118,7 +110,7 @@ final class RulesAggregateParser {
     }
 
     private static Set<Integer> parseStatusCodes(final String statusText) {
-        final Set<Integer> codes = new HashSet<Integer>();
+        final Set<Integer> codes = new HashSet<>();
         for (String segment : statusText.split(",")) {
             final String codeText = segment.trim();
             if (codeText.isEmpty()) {
@@ -138,7 +130,7 @@ final class RulesAggregateParser {
 
     private static List<AlertRuleBinding> buildBindings(final List<SlowCompiledRule> slowRules,
             final List<ErrorIgnoreCompiledRule> errorIgnoreRules) {
-        final List<AlertRuleBinding> bindings = new ArrayList<AlertRuleBinding>();
+        final List<AlertRuleBinding> bindings = new ArrayList<>();
         for (SlowCompiledRule rule : slowRules) {
             bindings.add(new AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), AlertRuleType.SLOW));
         }
