@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — logfile-reporter-plugin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .badge-strong { background: #059669; }
+      .badge-worth { background: #d97706; }
+      .badge-spec { background: #64748b; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="border-b border-slate-200 pb-6">
+        <p class="text-xs uppercase tracking-wider text-slate-500">Architecture review &middot; 2026-08-08</p>
+        <h1 class="text-3xl font-serif mt-1">logfile-reporter-plugin</h1>
+        <div class="mt-4 flex flex-wrap gap-4 text-xs text-slate-600">
+          <span class="flex items-center gap-1"><span class="inline-block w-4 h-4 border border-slate-400 bg-white"></span> module</span>
+          <span class="flex items-center gap-1"><svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#64748b" stroke-width="2" stroke-dasharray="4 4"/></svg> seam</span>
+          <span class="flex items-center gap-1"><span class="text-red-600 font-bold">&rarr;</span> leakage</span>
+          <span class="flex items-center gap-1"><span class="inline-block w-4 h-4 deep rounded"></span> deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- ============================================================ -->
+        <!-- CANDIDATE A                                                    -->
+        <!-- ============================================================ -->
+        <article class="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-serif">Collapse the rule chain into one deep RulesEngine</h2>
+              <div class="mt-2 flex gap-2">
+                <span class="badge-strong text-white text-xs px-2 py-0.5 rounded-full">Strong</span>
+                <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">in-process</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Files</p>
+            <p class="font-mono text-sm text-slate-700">alert/RulesAggregateParser &middot; RulesEngine &middot; TraceEvaluator &middot; CompiledRule &middot; SlowCompiledRule &middot; ErrorIgnoreCompiledRule &middot; AlertRuleBinding &middot; AlertRuleType &middot; MatchKind &middot; RuleSyntax &middot; PatternMatcherFactory &middot; TracePatternMatcher &middot; AntTracePatternMatcher &middot; CompiledAntPattern &middot; AntPatternCache &middot; FastPathAntMatcher &middot; StatusCodeAllowlist &middot; UrlPathExtractor</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <pre class="mermaid">
+                  flowchart LR
+                    Cfg[config strings] --> P[RulesAggregateParser]
+                    P --> F[PatternMatcherFactory]
+                    F --> M[AntTracePatternMatcher]
+                    M --> C[AntPatternCache]
+                    C --> CA[CompiledAntPattern]
+                    CA --> FP[FastPathAntMatcher]
+                    P --> E[RulesEngine]
+                    E --> EV[TraceEvaluator]
+                    EV --> DISP[AsyncTraceAlertDispatcher]
+                    classDef hop fill:#f8fafc,stroke:#cbd5e1;
+                    class F,M,C,CA,FP hop
+                </pre>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <pre class="mermaid">
+                  flowchart LR
+                    Cfg[config strings] --> RE
+                    subgraph RE[RulesEngine - deep module]
+                      PA[parse + compile]
+                      MT[match ant / fast-path]
+                      BK[rule bindings]
+                    end
+                    RE --> EV[TraceEvaluator]
+                    EV --> DISP[AsyncTraceAlertDispatcher]
+                    classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+                    class RE deep
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><span class="font-semibold">Problem.</span> One concept — "a rule is a parsed config string that matches an operation/url and carries a payload" — is spread across 18 small files in the alert package. The matcher plumbing is three shallow hops, each adding exactly one line of logic: <span class="font-mono text-xs">PatternMatcherFactory</span> only does <span class="font-mono text-xs">new AntTracePatternMatcher(...)</span>, <span class="font-mono text-xs">AntTracePatternMatcher</span> only does <span class="font-mono text-xs">AntPatternCache.get(...)</span>. Understanding the whole concept means reading all 18; the logic itself is ~600 lines.</p>
+            <p><span class="font-semibold">Solution.</span> Deepen <span class="font-mono text-xs">RulesEngine</span> into the module that owns parse + compile + match + bindings. Callers cross one interface: <span class="font-mono text-xs">RulesEngine.fromConfig(...)</span>, then <span class="font-mono text-xs">matchSlow</span> / <span class="font-mono text-xs">matchErrorIgnoreRuleIndex</span>. The factory/cache/fast-path chain becomes implementation detail.</p>
+          </div>
+
+          <ul class="text-sm space-y-1">
+            <li>&bull; <b>locality</b> — rule semantics live in one module, bugs concentrate</li>
+            <li>&bull; <b>leverage</b> — one interface, N match call sites</li>
+            <li>&bull; Delete 3 shallow pass-throughs (deletion test: complexity just moves, never concentrates)</li>
+            <li>&bull; Newcomer reads 1 file instead of 18</li>
+          </ul>
+        </article>
+
+        <!-- ============================================================ -->
+        <!-- CANDIDATE B                                                    -->
+        <!-- ============================================================ -->
+        <article class="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-serif">One bounded LocalStore module behind every sender</h2>
+              <div class="mt-2 flex gap-2">
+                <span class="badge-strong text-white text-xs px-2 py-0.5 rounded-full">Strong</span>
+                <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">in-process</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Files</p>
+            <p class="font-mono text-sm text-slate-700">toolkit/CircularBlockingQueue &middot; override/JVMMetricsLocalSender &middot; MeterLocalSender &middot; LogReportServiceLocalClient &middot; ProfileSnapshotLocalSender &middot; reporter/logfile/LogFileTraceSegmentServiceClient</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before &mdash; 5 divergent stores</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+                <div class="border border-slate-300 rounded p-2 text-xs">JVM &rarr; CircularBlockingQueue &lt;Map&gt; (cap 1000)</div>
+                <div class="border border-slate-300 rounded p-2 text-xs">Meter &rarr; CircularBlockingQueue &lt;MeterDataSnapshot&gt; (cap 300)</div>
+                <div class="border border-slate-300 rounded p-2 text-xs">Log &rarr; CircularBlockingQueue &lt;Map&gt; (cap 1000)</div>
+                <div class="border border-slate-300 rounded p-2 text-xs">Profile &rarr; CircularBlockingQueue &lt;Map&gt; (cap 500)</div>
+                <div class="border border-red-400 rounded p-2 text-xs">Trace &rarr; synchronized LinkedHashMap, accessOrder=false<br/><span class="text-red-600">README calls it "LRU" &mdash; it's FIFO</span></div>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After &mdash; one deep store</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <div class="deep rounded p-3 text-white text-xs">
+                  <div class="text-xs uppercase tracking-wider text-slate-300 mb-1">LocalStore &lt;T&gt;</div>
+                  <div class="font-mono">add(T) &middot; snapshot() &middot; size()</div>
+                  <div class="mt-2 text-slate-400 text-[11px]">eviction policy &middot; boundedness &middot; snapshot copy &middot; locking &mdash; one place</div>
+                </div>
+                <div class="mt-2 space-y-1">
+                  <div class="border border-slate-200 rounded p-1.5 text-xs bg-slate-50">JVM adapter (cap 1000)</div>
+                  <div class="border border-slate-200 rounded p-1.5 text-xs bg-slate-50">Meter adapter (cap 300)</div>
+                  <div class="border border-slate-200 rounded p-1.5 text-xs bg-slate-50">Log / Profile / Trace adapters</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><span class="font-semibold">Problem.</span> The "bounded cache that evicts oldest and serves a defensive snapshot" shape is re-implemented five times with divergent containers and semantics. The ring queue implements the <b>entire</b> <span class="font-mono text-xs">BlockingQueue</span> interface (201 lines) for one behavior, with its lock guarding only <span class="font-mono text-xs">insert</span> while reads (<span class="font-mono text-xs">drainTo</span>, <span class="font-mono text-xs">iterator</span>) skip it. The trace store claims LRU but is FIFO. Eviction, boundedness, threading, and snapshot-copy live in five places.</p>
+            <p><span class="font-semibold">Solution.</span> One deep <span class="font-mono text-xs">LocalStore&lt;T&gt;</span> module: interface <span class="font-mono text-xs">add / snapshot / size</span>. Implementation absorbs the eviction policy, capacity, snapshot copy, and locking. Each sender becomes a thin adapter that declares its capacity. The ring queue's public surface shrinks to three methods.</p>
+          </div>
+
+          <ul class="text-sm space-y-1">
+            <li>&bull; <b>locality</b> — boundedness/threading/eviction verified once, not five times</li>
+            <li>&bull; <b>leverage</b> — 5 call sites, one interface to learn and test</li>
+            <li>&bull; FIFO-vs-LRU lie settled in one place</li>
+            <li>&bull; Concurrent <span class="font-mono text-xs">snapshot()</span> guarded behind the seam</li>
+          </ul>
+        </article>
+
+        <!-- ============================================================ -->
+        <!-- CANDIDATE C                                                    -->
+        <!-- ============================================================ -->
+        <article class="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-serif">Give the status-expose seam a compiled interface</h2>
+              <div class="mt-2 flex gap-2">
+                <span class="badge-worth text-white text-xs px-2 py-0.5 rounded-full">Worth exploring</span>
+                <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">ports &amp; adapters</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Files</p>
+            <p class="font-mono text-sm text-slate-700">plugin/logfilereporter/LogfileReporterStatusExposeInterceptor &middot; LogfileReporterEnableRuntimeInterceptor &middot; LogfileReporterDisableRuntimeInterceptor &middot; plugin/localprofile/LocalProfileStatusExposeInterceptor &middot; the 6 sender getters</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before &mdash; string reflection as the seam</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <pre class="mermaid">
+                  flowchart LR
+                    TK[statisticStatus] --> I1[StatusExposeInterceptor]
+                    I1 -->|"getLogfileStatMap"| S1[TraceSegmentServiceClient]
+                    I1 -->|"getMetrics"| S2[JVMMetricsSender]
+                    I1 -->|"getMeterDatas"| S3[MeterSender]
+                    I1 -->|"getLogDatas"| S4[LogReportServiceClient]
+                    I1 -->|"getTraceAlertMetrics"| S5[...]
+                    classDef leak stroke:#dc2626,stroke-width:2px;
+                    class I1 leak
+                </pre>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After &mdash; one compiled contract</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4">
+                <pre class="mermaid">
+                  flowchart LR
+                    TK[statisticStatus] --> I1[StatusExposeInterceptor]
+                    I1 -->|"snapshot()"| LS[LocalStatusSnapshot - deep module]
+                    LS --> S1[6 senders behind one interface]
+                    classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+                    class LS deep
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><span class="font-semibold">Problem.</span> The agent-classloader &harr; plugin-classloader seam is crossed by <span class="font-mono text-xs">cn.hutool</span> string reflection (<span class="font-mono text-xs">getLogfileStatMap</span>, <span class="font-mono text-xs">toggleEnable</span>, <span class="font-mono text-xs">snapshotQueue</span>). Renaming a method silently breaks the plugin at runtime, and the interceptor itself warns "不要尝试进行类型转换". Two classloaders means two real adapters — the seam is real, but it's untyped.</p>
+            <p><span class="font-semibold">Solution.</span> A compiled contract module both sides satisfy: the interceptor calls one method (<span class="font-mono text-xs">snapshot()</span>) on a BootService-registered <span class="font-mono text-xs">LocalStatusSnapshot</span>; the six senders' getters become its implementation. Reflection collapses to one well-named call.</p>
+            <p class="text-xs text-slate-500">Constraint: SkyWalking's classloader model caps what crosses the seam — the contract must live in the agent-core classloader. Not an interface-design task yet; the seam placement is the decision to grill.</p>
+          </div>
+
+          <ul class="text-sm space-y-1">
+            <li>&bull; <b>leverage</b> — one interface across both loaders</li>
+            <li>&bull; <b>locality</b> — status assembly lives in one module</li>
+            <li>&bull; Rename failures become compile errors, not silent gaps</li>
+          </ul>
+        </article>
+
+        <!-- ============================================================ -->
+        <!-- CANDIDATE D                                                    -->
+        <!-- ============================================================ -->
+        <article class="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-serif">Move thread lifecycle out of the dispatcher constructor</h2>
+              <div class="mt-2 flex gap-2">
+                <span class="badge-worth text-white text-xs px-2 py-0.5 rounded-full">Worth exploring</span>
+                <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">mock</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-1">Files</p>
+            <p class="font-mono text-sm text-slate-700">alert/AsyncTraceAlertDispatcher</p>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Before</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1 text-xs">
+                <div class="border border-slate-300 rounded p-2">constructor &rarr; <span class="font-mono">new Thread(this).start()</span></div>
+                <div class="border border-red-300 rounded p-2">no test: constructing starts a live thread</div>
+                <div class="border border-red-300 rounded p-2"><span class="font-mono">resolveDispatchQueueSize()</span> hard-codes <span class="font-mono">512</span>, config read commented out</div>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">After</p>
+              <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1 text-xs">
+                <div class="deep rounded p-2 text-white"><span class="font-mono">DispatchPipeline</span> — evaluate + dedup + offer, constructed without threads</div>
+                <div class="border border-slate-200 rounded p-2 bg-slate-50">thin boot-owner starts the consumer; tests drive the pipeline</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 text-sm">
+            <p><span class="font-semibold">Problem.</span> <span class="font-mono text-xs">afterTraceMerged(traceId, mergedMap)</span> is actually a deep interface — evaluate, dedup, queue, metrics in one call. But the constructor spawns a daemon thread and hard-codes the queue size with the config read commented out (<span class="font-mono text-xs">AsyncTraceAlertDispatcher.java:174-177</span>). The module is untestable through its interface because constructing it starts live infrastructure.</p>
+            <p><span class="font-semibold">Solution.</span> Split construction from lifecycle: a pure pipeline module (evaluator + notified-flags + bounded queue) testable through <span class="font-mono text-xs">afterTraceMerged</span>, and a thin owner that starts/stops the consumer thread.</p>
+          </div>
+
+          <ul class="text-sm space-y-1">
+            <li>&bull; <b>the interface is the test surface</b> — drive pipeline without threads</li>
+            <li>&bull; Config read restored, not commented out</li>
+            <li>&bull; <b>locality</b> — dispatch logic concentrates, lifecycle stays thin</li>
+          </ul>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="bg-slate-900 text-white rounded-xl p-6">
+        <h2 class="text-xl font-serif mb-2">Top recommendation</h2>
+        <p class="text-sm text-slate-300">
+          <a href="#candidates" class="text-emerald-400 underline">Collapse the rule chain into one deep RulesEngine</a>.
+          It hits the package this repo is actively changing (the alert hot spot in recent commits) and the deletion test is unambiguous — the factory and matcher hops are pure pass-throughs whose complexity would just move. The other three candidates are real but land elsewhere: B is foundational and worth doing next, C and D are seam-placement questions that belong in a grilling session.
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
