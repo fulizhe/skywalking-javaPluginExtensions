@@ -78,6 +78,12 @@
             <artifactId>hutool-json</artifactId>
             <version>5.4.1</version>
         </dependency>
+
+        <!-- trace 告警验证:httpclient exit span(agent httpclient 插件可观测),版本由 spring-boot 管理 -->
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

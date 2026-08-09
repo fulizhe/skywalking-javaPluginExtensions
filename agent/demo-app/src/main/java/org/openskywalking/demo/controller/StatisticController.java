@@ -103,6 +103,23 @@ public class StatisticController {
         return StatisticStatus.value("instanceProperties");
     }
 
+    /** trace 告警运行指标读口(agent 侧 traceAlert 节点);插件未挂载时返回提示,插件挂载但告警未启用时返回 enabled=false */
+    @GetMapping("/statisticTraceAlert")
+    public Object statisticTraceAlert() {
+        Map<String, Object> status = StatisticStatus.get();
+        if (StatisticStatus.isHint(status)) {
+            return status;
+        }
+        Object traceAlert = status.get("traceAlert");
+        if (traceAlert != null) {
+            return traceAlert;
+        }
+        Map<String, Object> fallback = new HashMap<>(4);
+        fallback.put("enabled", false);
+        fallback.put("hint", "未检测到 traceAlert 节点:请确认已挂载含 Alert 的 logfile-reporter-plugin,且 plugin.logfilereporter.alert.enabled=true");
+        return fallback;
+    }
+
     /** 运行时开关:POST /toggle?enable=true|false,关闭后链路段统计快照停止增长,开启后恢复 */
     @PostMapping("/toggle")
     public Object toggle(@RequestParam("enable") Boolean enable) {

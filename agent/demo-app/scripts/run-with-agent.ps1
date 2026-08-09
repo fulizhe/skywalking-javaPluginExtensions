@@ -124,10 +124,14 @@ Remove-Item (Join-Path $agentDir "logs\skywalking-api.log") -Force -ErrorAction 
 Remove-Item (Join-Path $agentDir "logs\skywalking-agent.log") -Force -ErrorAction SilentlyContinue
 
 # ---- 7. 启动演示应用 ----
+# 告警参数与 src/main/resources/agent.trace-alert.config.sample 对齐;
+# 规则必须带 METHOD 前缀(Spring MVC 端点 operation 名恒带 GET:/POST: 前缀,省略则豁免/阈值不生效)
 $swArgs = @(
     "-javaagent:$agentJar",
     "-Dskywalking.agent.keep_tracing=true",
-    "-Dskywalking.plugin.logfilereporter.alert.enabled=true"
+    "-Dskywalking.plugin.logfilereporter.alert.enabled=true",
+    "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/export/**=60000",
+    "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410"
 )
 $env:WebPort = "$Port"
 $outLog = Join-Path $demoAppDir "target\run-with-agent-out.log"

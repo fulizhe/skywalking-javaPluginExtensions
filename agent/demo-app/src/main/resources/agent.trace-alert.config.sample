@@ -1,0 +1,40 @@
+# 复制到 skywalking-agent/config/agent.config,或通过 JVM -Dskywalking.plugin.* 覆盖
+# 与 demo-app 验证端配套(server.port=9600,webhook 契约 /inner/sw/trace-alert)
+# run-with-agent.ps1 已内置 alert.enabled + slow_rules + error_ignore_rules(见 scripts/run-with-agent.ps1)
+
+# --- 基础 ---
+plugin.logfilereporter.enabled=true
+plugin.logfilereporter.alert.enabled=true
+plugin.logfilereporter.alert.default_slow_threshold_ms=3000
+plugin.logfilereporter.alert.http_error_status_min=500
+plugin.logfilereporter.alert.enable_span_is_error=true
+plugin.logfilereporter.alert.enable_http_status_error=true
+
+# --- slow_rules / error_ignore_rules(Ant 通配符,不再支持 url: 正则)---
+# 语法:operation:[METHOD:]路径=值
+#   - 路径 Ant:* 匹配单层,** 匹配多层
+#   - METHOD 可省略(匹配任意 HTTP 方法)
+#   - slow_rules 等号右侧为毫秒阈值;多条规则分号分隔,先匹配先生效
+#   - error_ignore_rules 等号右侧为逗号分隔 HTTP 状态码(100-599)
+#
+# 注意(Spring MVC):端点 operation 名恒带方法前缀(如 GET:/status/{code}),规则应写全 METHOD;
+# 省略 METHOD 的规则只能匹配无前缀的 operation(如 exit span 的 uri 路径),否则豁免不生效。
+#
+# JVM 示例(与本地验证端 /status/*、/.well-known/** 对应):
+#   -Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000
+#   -Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400
+
+plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/export/**=60000
+
+plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410
+
+# --- Webhook(默认契约即指向演示应用自身 9600,无需改动)---
+# 默认:http://127.0.0.1:${WebPort:9600}/inner/sw/trace-alert
+plugin.logfilereporter.alert.webhook_url=http://127.0.0.1:${WebPort:9600}/inner/sw/trace-alert
+
+# plugin.logfilereporter.alert.webhook_path=/inner/sw/trace-alert
+# plugin.logfilereporter.alert.webhook_host=127.0.0.1
+# plugin.logfilereporter.alert.webhook_port_env=WebPort
+# plugin.logfilereporter.alert.webhook_port_default=9600
+
+# plugin.logfilereporter.alert.listener_class=com.example.DbTraceAnomalyListener
