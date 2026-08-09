@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-This directory stores architecture‑decision‑records for `agent/logfile‑reporter‑plugin`.
+This directory stores architecture‑decision‑records for the active modules: `agent/logfile‑reporter‑plugin`, `agent/override-httpclient-4.x-plugin`, `agent/override-hutool-http-5.x-plugin`.
 All archived modules are out‑of‑scope.
 
 Naming convention:
