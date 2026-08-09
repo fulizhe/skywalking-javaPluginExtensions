@@ -55,6 +55,31 @@ public class TraceAlertVerifyController {
     @Autowired
     private CloseableHttpClient skyWalkingDemoHttpClient;
 
+    /** 本地自调用:经 Apache HttpClient 请求应用自身端点,同一 traceId 下产生入口+出口两个 segment(不依赖外部网络) */
+    @GetMapping("/api/trace-alert-demo/self-call")
+    public Map<String, Object> selfCall() throws IOException {
+        String targetUrl = "http://127.0.0.1:" + System.getenv().getOrDefault("WebPort", "9600") + "/api/trace-alert-demo/ok";
+        HttpGet get = new HttpGet(targetUrl);
+        int httpStatus;
+        String bodySnippet;
+        try (CloseableHttpResponse response = skyWalkingDemoHttpClient.execute(get)) {
+            httpStatus = response.getStatusLine().getStatusCode();
+            if (response.getEntity() == null) {
+                bodySnippet = "";
+            } else {
+                String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                bodySnippet = body.length() > 200 ? body.substring(0, 200) + "..." : body;
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("client", "apache-httpclient");
+        result.put("targetUrl", targetUrl);
+        result.put("httpStatus", httpStatus);
+        result.put("bodySnippet", bodySnippet);
+        result.put("verificationHint", "同一 traceId 下应出现 2 个 segment(入口 + 出口),/statistic.data[traceId].logs 长度应为 2");
+        return result;
+    }
+
     /** HttpClient 调 httpbin 指定状态码(默认 400):验证客户端 exit span 是否触发 trace 级 ERROR */
     @GetMapping("/api/trace-alert-demo/httpclient-httpbin")
     public Map<String, Object> httpClientHttpbin(@RequestParam(defaultValue = "400") int status) throws IOException {
