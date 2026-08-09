@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>demo-app 仪表盘</title>
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<header class="topbar">
+    <span class="brand"><a href="index.html">demo-app 仪表盘</a></span>
+    <nav class="page-nav" id="page-nav"></nav>
+    <span class="topbar-right">
+        <span id="updated">-</span>
+        <button id="refresh-btn" type="button">刷新</button>
+    </span>
+</header>
+<main>
+    <div class="page-title-row">
+        <h2 id="page-title"></h2>
+        <span id="poll-state" class="poll-state">自动刷新 3s</span>
+    </div>
+    <div id="hint" class="hint hidden"></div>
+    <div id="content"></div>
+</main>
+<script src="dashboard.js"></script>
+</body>
+</html>

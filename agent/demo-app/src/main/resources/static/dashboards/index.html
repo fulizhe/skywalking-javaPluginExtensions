@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>demo-app 仪表盘导航</title>
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body class="nav-body">
+<header class="nav-header">
+    <h1>demo-app 数据流仪表盘</h1>
+    <p>logfile-reporter-plugin 六类数据流(链路段 / JVM / meter / 实例属性 / 告警 / profile)的本地内存报告可视化。
+    页面轮询与验证回路(<code>scripts/validate.ps1</code>)同一批 JSON 契约,静态资源随应用打包,无外部网络依赖。</p>
+</header>
+<main class="nav-grid">
+    <a class="nav-card" href="dashboard.html?p=statistic">
+        <div class="nav-num">01</div>
+        <div class="nav-title">Trace 缓存统计</div>
+        <div class="nav-desc">链路段按 traceId 合并的缓存表与 span 时间线,含运行时开关状态</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=jvm">
+        <div class="nav-num">02</div>
+        <div class="nav-title">JVM 指标</div>
+        <div class="nav-desc">CPU / 堆内存 / 线程 折线图,GC、内存池与类加载明细</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=meter">
+        <div class="nav-num">03</div>
+        <div class="nav-title">Meter 指标</div>
+        <div class="nav-desc">micrometer 桥接的单值与直方图指标,支持按名称过滤</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=instance">
+        <div class="nav-num">04</div>
+        <div class="nav-title">实例属性</div>
+        <div class="nav-desc">心跳携带的应用/OS/环境属性键值表</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=alert">
+        <div class="nav-num">05</div>
+        <div class="nav-title">Trace 告警</div>
+        <div class="nav-desc">告警运行指标、规则命中计数与 webhook 收讫事件流</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=profile">
+        <div class="nav-num">06</div>
+        <div class="nav-title">Profile 快照</div>
+        <div class="nav-desc">线程采样触发与带方法栈的快照列表</div>
+    </a>
+</main>
+<footer class="nav-footer">运行方式:<code>pwsh ./scripts/validate.ps1</code>(一键验证)或 <code>pwsh ./scripts/run-with-agent.ps1</code>(手动模式,保持运行后浏览器打开本页)</footer>
+</body>
+</html>
