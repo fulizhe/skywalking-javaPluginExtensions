@@ -37,12 +37,46 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>1.8</java.version>
+        <!-- 与 agent 发行包版本强一致(见 scripts/run-with-agent.ps1 的 agent 目录约定) -->
+        <skywalking.toolkit.version>9.4.0</skywalking.toolkit.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- 应用日志流:logback 1.x toolkit appender,agent 挂载后日志进入 agent 的 LogReportServiceClient -->
+        <dependency>
+            <groupId>org.apache.skywalking</groupId>
+            <artifactId>apm-toolkit-logback-1.x</artifactId>
+            <version>${skywalking.toolkit.version}</version>
+        </dependency>
+
+        <!-- meter 指标流:micrometer 桥接,toolkit 编译于 micrometer 1.5,排除后由 spring-boot 管理版本(1.7.x,API 兼容) -->
+        <dependency>
+            <groupId>org.apache.skywalking</groupId>
+            <artifactId>apm-toolkit-micrometer-registry</artifactId>
+            <version>${skywalking.toolkit.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.micrometer</groupId>
+                    <artifactId>micrometer-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+
+        <!-- 插件拦截器运行时引用 hutool(core 经 json 传递);与插件模块 hutool.version 5.4.1 对齐,
+             挂载 agent 时插件类经 PluginClassLoader 回落到应用类路径解析 -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-json</artifactId>
+            <version>5.4.1</version>
         </dependency>
     </dependencies>
 

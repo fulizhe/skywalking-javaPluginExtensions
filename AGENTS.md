@@ -23,3 +23,7 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 - `agent/demo-app`: initial validation scope is logfile-reporter-plugin only; extend to override-httpclient-4.x and override-hutool-http-5.x later (structure already multi-plugin ready)
 
 When invoking toolchains (to-tickets / triage / to-spec / domain-modeling), plan context & features for the active modules.
+
+## Execution environment (Windows)
+
+Run commands with `pwsh` (PowerShell 7): UTF-8 end-to-end, so Chinese script output round-trips cleanly. The default Windows PowerShell 5.1 console decodes output as GBK and garbles UTF-8 text — run scripts and long verifications via `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe` rather than the 5.1 shell.
