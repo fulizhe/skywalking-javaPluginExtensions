@@ -78,15 +78,26 @@ function Send-Traffic($path, [int]$TimeoutSec = 30) {
     } catch { }
 }
 
+# 就绪探测:优先 curl.exe(Windows 10 1803+ 自带)——不走 .NET/IE 代理、不受 Profile 对
+# Invoke-WebRequest 的默认参数覆盖影响;回环地址用 --noproxy "*" 强制直连。
+# 2s 超时对冷启动(agent 装配 + 首个被追踪请求)偏紧,放宽到 connect 3s / total 5s。
 function Test-Ready($url, $seconds) {
     for ($i = 0; $i -lt $seconds; $i++) {
         Start-Sleep -Seconds 1
-        try {
-            $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
-            if ($r.StatusCode -eq 200) { return $true }
-        } catch { }
+        if (Test-HttpOnce $url) { return $true }
     }
     return $false
+}
+
+function Test-HttpOnce($url) {
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        $code = & curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" --connect-timeout 3 --max-time 5 $url 2>$null
+        return "$code" -eq "200"
+    }
+    try {
+        $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+        return $r.StatusCode -eq 200
+    } catch { return $false }
 }
 
 function Stop-App {
@@ -178,8 +189,18 @@ try {
         -WorkingDirectory $demoAppDir -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 
     if (-not (Test-Ready "$base/" 90)) {
-        Write-Host "[FAIL] 应用 90 秒内未就绪。stderr 尾部:"
-        Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 15
+        Write-Host "[FAIL] 应用 90 秒内未就绪。"
+        # 诊断:区分"应用根本没起/崩了"与"应用在听但探测不通"
+        $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+        if ($listener) {
+            Write-Host "       [诊断] TCP $Port 正在监听(应用进程存活),但 curl 探测未拿到 200——"
+            Write-Host "               请检查是否浏览器/IDE 也能正常访问 $base/(若可,则问题出在本脚本的探测路径,非应用本身)。"
+        } else {
+            Write-Host "       [诊断] TCP $Port 无监听,应用未成功启动。stderr 尾部:"
+            Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 15
+            Write-Host "       stdout 尾部(应用日志):"
+            Get-Content $outLog -ErrorAction SilentlyContinue | Select-Object -Last 15
+        }
         exit 2
     }
     Write-Host "[OK] 应用就绪"

@@ -51,15 +51,25 @@ function Resolve-JavaHome {
     throw "未找到 JDK。请用 -JavaHome 指定,或设置 JAVA_HOME。"
 }
 
+# 就绪探测:优先 curl.exe(Windows 10 1803+ 自带),回环地址 --noproxy "*" 直连,
+# 不受 .NET/IE 代理与 Profile 默认参数覆盖影响;超时放宽以容纳冷启动首请求。
 function Test-Ready($url, $seconds) {
     for ($i = 0; $i -lt $seconds; $i++) {
         Start-Sleep -Seconds 1
-        try {
-            $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
-            if ($r.StatusCode -eq 200) { return $true }
-        } catch { }
+        if (Test-HttpOnce $url) { return $true }
     }
     return $false
+}
+
+function Test-HttpOnce($url) {
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        $code = & curl.exe -s -o NUL -w "%{http_code}" --noproxy "*" --connect-timeout 3 --max-time 5 $url 2>$null
+        return "$code" -eq "200"
+    }
+    try {
+        $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+        return $r.StatusCode -eq 200
+    } catch { return $false }
 }
 
 # ---- 1. 应用 jar(缺失则构建)----
@@ -143,8 +153,14 @@ Write-Host "[OK] demo-app PID=$($proc.Id), 日志: $outLog / $errLog"
 
 # ---- 8. 就绪检查 ----
 if (-not (Test-Ready "http://127.0.0.1:$Port/" 90)) {
-    Write-Host "[FAIL] 应用 90 秒内未就绪。stderr 尾部:"
-    Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 15
+    Write-Host "[FAIL] 应用 90 秒内未就绪。"
+    $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($listener) {
+        Write-Host "       [诊断] TCP $Port 正在监听(应用进程存活),但探测未拿到 200——请确认浏览器可访问 http://127.0.0.1:$Port/。"
+    } else {
+        Write-Host "       [诊断] TCP $Port 无监听。stderr 尾部:"
+        Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 15
+    }
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     exit 2
 }

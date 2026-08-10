@@ -23,3 +23,4 @@
   - 实测:正向一轮全绿 24 项断言 exit 0(约 4 分钟,含 8.5s 慢请求与开关等待);负向 `-SkipPluginInstall`(移除插件 jar 启动)在插件加载检查处大声失败 exit 3,原因明确。
   - IDE 手动模式即 `scripts/run-with-agent.ps1`,与 validate.ps1 共享同一套参数(`-AgentDir`/`-JavaHome`/`-SkipPluginBuild`/`-Port`)与同一份启动参数(-javaagent + -Dskywalking.* + WebPort),脚本头有指引。
   - 实现要点:造数请求用 Send-Traffic 忽略响应状态码(4xx/5xx 端点本就是断言对象,`$ErrorActionPreference=Stop` 下 Invoke-WebRequest 会抛异常);告警事件异步投递,收讫断言带轮询等待(最长 40s)。
+- 2026-08-10 就绪探测加固:实测用户环境出现"浏览器能开页面、脚本 90s 探测失败"现象——应用日志证明应用已就绪且服务过一次请求(即用户浏览器那次),而脚本侧 Invoke-WebRequest 连续 90s 拿不到 200。复现实验(.NET 对回环永远绕过代理,死代理下仍 200)排除了代理因素,定位为 PowerShell 探测路径受环境影响的偶发问题。修法:Test-Ready 优先用 `curl.exe --noproxy "*" --connect-timeout 3 --max-time 5`(Windows 10 1803+ 自带,不走 .NET/IE 代理、不受 Profile 默认参数覆盖),兜底 Invoke-WebRequest(超时 2s→5s,容纳 agent 冷启动首请求);失败时新增诊断——区分"TCP 在听但探测不通"与"应用未启动",分别打印 stderr/stdout 尾部。validate.ps1 与 run-with-agent.ps1 同步修复,回归全绿。
