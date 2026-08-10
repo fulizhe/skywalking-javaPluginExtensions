@@ -67,15 +67,31 @@ function Assert($name, $cond, $detail) {
     else { $script:failures++; Write-Host "[FAIL] $name`n       $detail" }
 }
 
+# 本地 HTTP 统一走 curl.exe --noproxy "*":交互式 profile 可能给 Invoke-WebRequest/RestMethod
+# 注入默认 Proxy 参数,把回环请求误送外部代理 -> 代理够不到本机 127.0.0.1,回 502(Bad Gateway),
+# 应用端日志无任何到达记录。curl 直连可彻底绕开(见 ticket 05 实测)。
+function Invoke-LocalHttp($path, [string]$Method = "GET") {
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        $args = @("-s", "-o", "-", "--noproxy", "*", "-X", $Method, "--max-time", "30",
+            "-w", "`n%{http_code}")
+        $raw = @(& curl.exe @args "$base$path" 2>$null)
+        $code = $raw[-1]
+        $body = if ($raw.Count -gt 1) { ($raw[0..($raw.Count - 2)] -join "`n") } else { "" }
+        return @{ StatusCode = "$code"; Content = $body }
+    }
+    $r = Invoke-WebRequest "$base$path" -Method $Method -UseBasicParsing -TimeoutSec 30
+    return @{ StatusCode = "$($r.StatusCode)"; Content = "$($r.Content)" }
+}
+
 function Get-Json($path) {
-    Invoke-RestMethod "$base$path" -Method Get -TimeoutSec 30
+    $r = Invoke-LocalHttp $path
+    if ($r.Content) { return $r.Content | ConvertFrom-Json }
+    return $null
 }
 
 # 造数请求:忽略响应状态码(4xx/5xx 端点本就是被断言的对象)
 function Send-Traffic($path, [int]$TimeoutSec = 30) {
-    try {
-        Invoke-WebRequest "$base$path" -UseBasicParsing -TimeoutSec $TimeoutSec | Out-Null
-    } catch { }
+    $null = Invoke-LocalHttp $path
 }
 
 # 就绪探测:优先 curl.exe(Windows 10 1803+ 自带)——不走 .NET/IE 代理、不受 Profile 对
@@ -224,7 +240,7 @@ try {
     Write-Host ""
     Write-Host "---- 断言 A: trace 缓存合并(同一 traceId 多 segment 合并 + 字段齐全)----"
 
-    $null = Invoke-WebRequest "$base/api/trace-alert-demo/self-call" -UseBasicParsing -TimeoutSec 30
+    $null = Invoke-LocalHttp "/api/trace-alert-demo/self-call"
     Start-Sleep -Seconds 3
     $stat = Get-Json "/statistic"
     $merged = $null
@@ -258,7 +274,7 @@ try {
     Write-Host ""
     Write-Host "---- 断言 B: 告警链端到端(slow / error / ignore-rule / webhook 收讫)----"
 
-    $null = Invoke-WebRequest "$base/inner/sw/trace-alert/clear" -Method POST -UseBasicParsing -TimeoutSec 10
+    $null = Invoke-LocalHttp "/inner/sw/trace-alert/clear" "POST"
     Send-Traffic "/api/trace-alert-demo/slow?ms=4000"
     Send-Traffic "/api/order/1"
     Send-Traffic "/api/trace-alert-demo/error"
@@ -295,14 +311,14 @@ try {
         return @($s.data.PSObject.Properties).Count
     }
     $c1 = DataCount
-    $null = Invoke-WebRequest "$base/toggle?enable=false" -Method Post -UseBasicParsing -TimeoutSec 10
+    $null = Invoke-LocalHttp "/toggle?enable=false" "POST"
     Start-Sleep -Seconds 4
-    1..3 | ForEach-Object { $null = Invoke-WebRequest "$base/" -UseBasicParsing -TimeoutSec 10 }
+    1..3 | ForEach-Object { $null = Invoke-LocalHttp "/" }
     Start-Sleep -Seconds 4
     $c2 = DataCount
-    $null = Invoke-WebRequest "$base/toggle?enable=true" -Method Post -UseBasicParsing -TimeoutSec 10
+    $null = Invoke-LocalHttp "/toggle?enable=true" "POST"
     Start-Sleep -Seconds 4
-    1..3 | ForEach-Object { $null = Invoke-WebRequest "$base/" -UseBasicParsing -TimeoutSec 10 }
+    1..3 | ForEach-Object { $null = Invoke-LocalHttp "/" }
     Start-Sleep -Seconds 4
     $c3 = DataCount
     Assert "关闭后统计快照停止增长(容忍自读噪声 +2)" (($c2 - $c1) -le 2) "before=$c1 disabled=$c2 grow=$($c2 - $c1)"
