@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>logfile-reporter-plugin 能力导览</title>
+<link rel="stylesheet" href="dashboards/dashboard.css">
+<style>
+    .land-hero { text-align: center; padding: 56px 20px 12px; max-width: 960px; margin: 0 auto; }
+    .land-hero h1 { margin: 0 0 14px; font-size: 28px; }
+    .land-hero p { color: var(--muted); line-height: 1.9; max-width: 760px; margin: 0 auto; }
+    .land-section { max-width: 960px; margin: 28px auto; padding: 0 20px; }
+    .land-section h2 { font-size: 20px; margin: 0 0 6px; }
+    .land-section > p, .land-section li { color: #374151; line-height: 1.8; }
+    .land-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .land-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+    @media (max-width: 720px) { .land-compare { grid-template-columns: 1fr; } }
+    .flow { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+    .flow h3 { margin: 0 0 4px; font-size: 15px; }
+    .flow .flow-endpoint { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .flow .flow-desc { color: #374151; font-size: 13px; line-height: 1.7; margin-top: 4px; }
+    .land-cmd { background: #0f172a; color: #cbd5e1; font-family: var(--mono); font-size: 13px; border-radius: 8px; padding: 12px 16px; margin: 8px 0; overflow-x: auto; white-space: nowrap; }
+    .land-cmd .prompt { color: #64748b; }
+</style>
+</head>
+<body class="nav-body">
+<header class="nav-header land-hero">
+    <h1>logfile-reporter-plugin 能力导览</h1>
+    <p>一个 SkyWalking Java Agent 的<strong>本地内存报告</strong>插件:把 agent 采集的监控数据从"发往 OAP"改写为"存进应用进程内",无 OAP 后端也能自查全链路与指标。<br>
+    本页是演示应用 demo-app 的入口——下面告诉你插件是什么、名字从哪来、怎么跑。</p>
+</header>
+
+<main>
+    <section class="land-section">
+        <h2>插件是什么</h2>
+        <p>默认情况下,SkyWalking agent 通过 gRPC 把监控数据上报给 OAP(Observability Analysis Platform)后端。本插件拦截并改写这条通路:数据不再外发,而是写入应用进程内的有界缓存,通过宿主工具类暴露的 JSON 接口实时可查,并支持不重启的运行时开关。</p>
+        <div class="land-compare">
+            <div class="flow">
+                <h3>OAP 模式(默认)</h3>
+                <p class="flow-desc">agent 采集 → gRPC 上报 → OAP 聚合存储 → SkyWalking UI 可视化。生产级全链路,但需要独立部署后端。</p>
+            </div>
+            <div class="flow">
+                <h3>本地内存报告(本插件)</h3>
+                <p class="flow-desc">agent 采集 → 进程内有界缓存 → 应用自带 JSON 接口自读(统计接口 + 自建仪表盘)。OAP-less:gRPC 通道禁用,单应用自足,适合开发调试、离线自查与能力演示。</p>
+            </div>
+        </div>
+        <p style="margin-top:14px;">插件接管并缓存的六类 agent→OAP 数据流,每类都有独立统计读口,多数配有仪表盘:</p>
+        <div class="land-grid">
+            <div class="flow">
+                <h3>链路段 trace segment</h3>
+                <div class="flow-endpoint">GET /statistic</div>
+                <div class="flow-desc">同一 traceId 的多 segment 合并缓存,span 时间线可查。</div>
+                <div><a href="dashboards/dashboard.html?p=statistic">查看仪表盘 →</a></div>
+            </div>
+            <div class="flow">
+                <h3>JVM 指标</h3>
+                <div class="flow-endpoint">GET /statisticJVM</div>
+                <div class="flow-desc">CPU / 堆内存 / 线程 / GC 等 JVM 运行时指标。</div>
+                <div><a href="dashboards/dashboard.html?p=jvm">查看仪表盘 →</a></div>
+            </div>
+            <div class="flow">
+                <h3>meter 指标</h3>
+                <div class="flow-endpoint">GET /statisticMeter</div>
+                <div class="flow-desc">micrometer 桥接的自定义单值与直方图指标。</div>
+                <div><a href="dashboards/dashboard.html?p=meter">查看仪表盘 →</a></div>
+            </div>
+            <div class="flow">
+                <h3>应用日志</h3>
+                <div class="flow-endpoint">GET /statisticLogs</div>
+                <div class="flow-desc">agent 采集的应用日志条目,本地可回看(读口无独立仪表盘)。</div>
+            </div>
+            <div class="flow">
+                <h3>心跳 / 实例属性</h3>
+                <div class="flow-endpoint">GET /statisticInstanceProperties</div>
+                <div class="flow-desc">实例心跳与应用/OS/环境属性键值对。</div>
+                <div><a href="dashboards/dashboard.html?p=instance">查看仪表盘 →</a></div>
+            </div>
+            <div class="flow">
+                <h3>profile 快照</h3>
+                <div class="flow-endpoint">POST /profile</div>
+                <div class="flow-desc">线程采样触发与带方法栈的快照列表。</div>
+                <div><a href="dashboards/dashboard.html?p=profile">查看仪表盘 →</a></div>
+            </div>
+        </div>
+        <p>另有两项附加能力:<strong>Trace 告警</strong>——基于已合并链路的慢/错识别规则,命中后经 HTTP webhook 通知外部(默认关闭);<strong>运行时开关</strong>——不重启即可启用/禁用数据流写入缓存,便于对比验证。</p>
+    </section>
+
+    <section class="land-section">
+        <h2>"logfile" 命名来历</h2>
+        <p>名字有误导性——它<strong>不读取日志文件</strong>。最初设想是把监控数据写入日志文件,实现中受 Alibaba Druid 内存缓存思路启发,改为进程内内存存储,名字沿用至今。</p>
+    </section>
+
+    <section class="land-section">
+        <h2>怎么跑</h2>
+        <p>前置:JDK 8、Maven、本机已装 SkyWalking Java Agent 9.4.0(详见 <code>README.md</code> 快速上手)。一条命令完成 构建插件 → 安装进 agent → 启动 → 造数 → 断言 → 报告:</p>
+        <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/validate.ps1</div>
+        <p>想边跑边看实时数据,用手动模式(保持运行后刷新本页与仪表盘):</p>
+        <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/run-with-agent.ps1 -SkipPluginBuild</div>
+        <p>仪表盘导航页:<a href="dashboards/index.html">/dashboards/index.html</a>(汇总全部六个数据流仪表盘)。</p>
+    </section>
+</main>
+
+<footer class="nav-footer">验证入口:<code>scripts/validate.ps1</code>(一键验证回路)·<code>scripts/run-with-agent.ps1</code>(IDE/手动调试)· 术语指引见仓库根 <code>CONTEXT.md</code></footer>
+</body>
+</html>
