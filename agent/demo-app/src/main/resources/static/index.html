@@ -92,7 +92,9 @@
 
     <section class="land-section">
         <h2>怎么跑</h2>
-        <p>前置:JDK 8、Maven、本机已装 SkyWalking Java Agent 9.4.0(详见 <code>README.md</code> 快速上手)。一条命令完成 构建插件 → 安装进 agent → 启动 → 造数 → 断言 → 报告:</p>
+        <p>前置:JDK 8、Maven。agent 与插件环境用 setup 一步备齐(检测/下载 agent 9.4.0、安装插件、产出启动命令):</p>
+        <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/setup.ps1</div>
+        <p>然后一条命令完成 构建插件 → 安装进 agent → 启动 → 造数 → 断言 → 报告:</p>
         <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/validate.ps1</div>
         <p>想边跑边看实时数据,用手动模式(保持运行后刷新本页与仪表盘):</p>
         <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/run-with-agent.ps1 -SkipPluginBuild</div>

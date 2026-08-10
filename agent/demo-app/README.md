@@ -25,7 +25,15 @@ OAP 模式与本地内存报告模式的对比如下:
 
 ## 快速上手
 
-前置要求:JDK 8、Maven 3、本机已安装 SkyWalking Java Agent **9.4.0**(版本与插件锁定一致)。环境自足的 setup 脚本(自动检测/下载 agent、安装插件)见工单 08,尚未落地;当前请先准备 agent。
+前置要求:JDK 8、Maven 3。SkyWalking Java Agent **9.4.0** 可由 setup 脚本自动安装(见方式一);版本与插件锁定一致。
+
+### 方式零:环境自足(setup,推荐首跑)
+
+```powershell
+pwsh ./scripts/setup.ps1
+```
+
+在任意 Windows 机器上跑一次即可备齐环境:检测本机 agent 9.4.0,缺失时从 Apache 官方发行包下载(`.tgz`,校验 SHA512,解压到默认 `D:\apps\apache-skywalking-java-agent-9.4.0`,可用 `-AgentDir` 指定);构建并安装插件 jar 至 `plugins/`;构建 demo-app;最后产出与 `run-with-agent.ps1` 同构的启动命令。重复执行幂等——agent 已存在则跳过下载。
 
 ### 方式 A:一键验证(推荐)
 
@@ -109,11 +117,12 @@ agent/demo-app/
 │       ├── agent.trace-alert.config.sample
 │       └── application.yml
 └── scripts/
-    ├── validate.ps1            # 验证回路(构建→安装→启动→造数→断言→报告)
-    ├── run-with-agent.ps1      # IDE/手动模式(同参,保持运行)
-    └── start-demo.ps1          # 纯应用启动(无 agent)
+    ├── setup.ps1              # 环境自足:检测/下载 agent、装插件、产出启动命令
+    ├── validate.ps1           # 验证回路(构建→安装→启动→造数→断言→报告)
+    ├── run-with-agent.ps1     # IDE/手动模式(同参,保持运行)
+    └── start-demo.ps1         # 纯应用启动(无 agent)
 ```
 
 ## 相关工单
 
-见 `.scratch/demo-app/issues/`:`01` 骨架、`02` agent 装配、`03` 统计读口、`04` 告警表面、`05` 验证回路、`06` 仪表盘、`07` 本页与导览、`08` setup 脚本(待实现)、`09` 旧项目清理(待办)。
+见 `.scratch/demo-app/issues/`:`01` 骨架、`02` agent 装配、`03` 统计读口、`04` 告警表面、`05` 验证回路、`06` 仪表盘、`07` 导览首页与 README、`08` setup 脚本、`09` 旧项目清理(待办)。
