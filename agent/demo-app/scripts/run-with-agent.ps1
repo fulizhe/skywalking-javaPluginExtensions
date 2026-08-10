@@ -1,7 +1,7 @@
 ﻿# 02 运行底座:构建插件 -> 装入 agent -> 启动演示应用 -> 验证插件加载(手动模式)
 #
 # 一条命令让"在真实 agent 下跑起来"成为可能。默认行为:
-#   1) 若 demo-app jar 缺失,先构建应用(独立 pom,mvn -f)
+#   1) 始终构建 demo-app(mvn -f,保证源码变更必然生效;快速路径用 -SkipAppBuild 复用已有 jar)
 #   2) 复用现有 maven 精确选择构建编译 logfile-reporter-plugin 并拷贝到 agent plugins
 #   3) 以 -javaagent + -Dskywalking.* 参数启动演示应用(WebPort=<Port>),轮询端口就绪
 #   4) 清空 agent 日志后启动,验证 skywalking-api.log 出现 "logfile-reporter-plugin-*.jar loaded"
@@ -11,6 +11,7 @@
 #   pwsh ./scripts/run-with-agent.ps1                  # 全流程,端口 9600
 #   pwsh ./scripts/run-with-agent.ps1 -Port 9601       # 换端口
 #   pwsh ./scripts/run-with-agent.ps1 -SkipPluginBuild # 插件已构建过,跳过 maven
+#   pwsh ./scripts/run-with-agent.ps1 -SkipAppBuild    # 复用已有 demo-app jar,跳过重建
 #   pwsh ./scripts/run-with-agent.ps1 -AgentDir D:\apps\apache-skywalking-java-agent-9.4.0
 #
 # 退出码:0 全流程通过;1 前置失败(路径/构建/拷贝);2 应用未就绪;3 插件加载未验证
@@ -18,6 +19,7 @@ param(
     [string]$AgentDir = "",
     [string]$JavaHome = "",
     [switch]$SkipPluginBuild,
+    [switch]$SkipAppBuild,
     [int]$Port = 9600
 )
 
@@ -72,15 +74,16 @@ function Test-HttpOnce($url) {
     } catch { return $false }
 }
 
-# ---- 1. 应用 jar(缺失则构建)----
-if (-not (Test-Path $appJar)) {
-    Write-Host "[..] demo-app jar 缺失,开始构建: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
+# ---- 1. 应用 jar(默认每次重建,保证源码变更必然生效)----
+if (-not $SkipAppBuild) {
+    Write-Host "[..] 构建 demo-app: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
     Push-Location $demoAppDir
     mvn -f "$demoAppDir\pom.xml" clean package -DskipTests -q
     $code = $LASTEXITCODE
     Pop-Location
     if ($code -ne 0) { Write-Host "[FAIL] demo-app 构建失败 (exit=$code)"; exit 1 }
 }
+if (-not (Test-Path $appJar)) { Write-Host "[FAIL] demo-app jar 不存在: $appJar(请去掉 -SkipAppBuild)"; exit 1 }
 Write-Host "[OK] demo-app jar: $appJar"
 
 # ---- 2. agent 目录 ----

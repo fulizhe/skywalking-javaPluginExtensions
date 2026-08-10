@@ -15,4 +15,4 @@
 - `/` 路由:删除 `HomeController`(原返回纯文本),改由 Spring 静态欢迎页直接 200 返回 `static/index.html`——不能做成 302 重定向,就绪探测与断言 C 只认 200。
 - `README.md`(demo-app 目录):快速上手(方式 A 一键验证 / B 手动调试 / C 纯应用启动)、验证回路用法(断言范围、告警端点、退出码)、术语指引表、目录结构、工单索引。
 - 注意:setup 脚本(工单 08)未落地,README 快速上手当前按"本机已有 agent 9.4.0"书写,08 落地后需回填 setup 小节。
-- 遗留坑(已向用户说明,不在本工单范围):validate.ps1 只在 jar 缺失时重建 demo-app,源码变更后直接跑会复用旧 jar;本次手动 `mvn clean package` 重建。
+- 遗留坑(已处理,2026-08-10):validate.ps1 只在 jar 缺失时重建 demo-app,源码变更后直接跑会复用旧 jar。已修复为默认每次重建(`mvn clean package`),快速路径改为显式 `-SkipAppBuild`;run-with-agent.ps1 与 setup.ps1 同款逻辑一并修复,README 参数表同步更新。

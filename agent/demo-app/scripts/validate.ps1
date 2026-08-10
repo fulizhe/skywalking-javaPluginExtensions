@@ -10,6 +10,7 @@
 # 用法(建议用 PowerShell 7 / pwsh 运行,避免 Windows PowerShell 5.1 控制台编码问题):
 #   pwsh ./scripts/validate.ps1                     # 全流程(构建插件 -> 安装 -> 启动 -> 验证),端口 9600
 #   pwsh ./scripts/validate.ps1 -SkipPluginBuild    # 插件已构建,跳过 maven 直接安装启动
+#   pwsh ./scripts/validate.ps1 -SkipAppBuild       # 复用已有 demo-app jar,跳过重建(源码变更不生效)
 #   pwsh ./scripts/validate.ps1 -Port 9601 -AgentDir D:\apps\apache-skywalking-java-agent-9.4.0
 #
 # 负向测试(验证"插件未安装时大声失败"):
@@ -151,16 +152,17 @@ try {
         exit 1
     }
 
-    # ---- 2. 构建:应用 jar(缺失时)+ 插件 jar + 安装进 agent plugins ----
-    if (-not (Test-Path $appJar) -and -not $SkipAppBuild) {
-        Write-Host "[..] demo-app jar 缺失,构建: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
+    # ---- 2. 构建:应用 jar(默认每次重建,保证源码变更必然生效)+ 插件 jar + 安装进 agent plugins ----
+    # 只想要复用已有 jar 的快速路径时用 -SkipAppBuild(自担过期风险)。
+    if (-not $SkipAppBuild) {
+        Write-Host "[..] 构建 demo-app: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
         Push-Location $demoAppDir
         mvn -f "$demoAppDir\pom.xml" clean package -DskipTests -q
         $code = $LASTEXITCODE
         Pop-Location
         if ($code -ne 0) { Write-Host "[FAIL] demo-app 构建失败 (exit=$code)"; exit 1 }
     }
-    if (-not (Test-Path $appJar)) { Write-Host "[FAIL] demo-app jar 不存在: $appJar"; exit 1 }
+    if (-not (Test-Path $appJar)) { Write-Host "[FAIL] demo-app jar 不存在: $appJar(请去掉 -SkipAppBuild)"; exit 1 }
     Write-Host "[OK] demo-app jar: $appJar"
 
     $agentPluginJar = Join-Path $agentDir "plugins\$pluginJarName"

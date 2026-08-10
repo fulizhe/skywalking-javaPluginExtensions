@@ -48,7 +48,7 @@ pwsh ./scripts/validate.ps1
 | 参数 | 说明 |
 | --- | --- |
 | `-SkipPluginBuild` | 插件已构建,跳过 maven 直接安装启动 |
-| `-SkipAppBuild` | demo 应用 jar 已存在,跳过构建 |
+| `-SkipAppBuild` | 复用已有 demo-app jar,跳过重建(快速路径;源码变更不会生效,自担过期风险) |
 | `-SkipPluginInstall` | 负向模式:故意不安装插件,预期在加载检查处大声失败(exit 3) |
 | `-Port <n>` | 应用端口,默认 9600(全仓库统一) |
 | `-AgentDir <dir>` | agent 目录,默认 `D:\apps\apache-skywalking-java-agent-9.4.0`(或 `SKYWALKING_AGENT_DIR`) |

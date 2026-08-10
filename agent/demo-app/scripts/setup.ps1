@@ -4,7 +4,7 @@
 #   1) 检测本机 skywalking-java-agent 9.4.0:存在(目录含 skywalking-agent.jar)则跳过;
 #      缺失则从 Apache 官方发行包下载(.tgz,校验 SHA512,解压到目标目录)
 #   2) 构建 logfile-reporter-plugin(JDK 8 + Maven)并拷贝进 agent plugins/
-#   3) 构建 demo-app jar(缺失时)
+#   3) 构建 demo-app jar(默认每次重建,保证源码变更必然生效;-SkipAppBuild 快速路径)
 #   4) 产出与 scripts/run-with-agent.ps1 同构的启动命令
 #
 # 幂等:重复执行不产生副作用——agent 已存在则跳过下载,插件/应用构建结果以 -Force 拷贝覆盖。
@@ -19,6 +19,7 @@ param(
     [string]$AgentDir = "",
     [string]$JavaHome = "",
     [switch]$SkipPluginBuild,
+    [switch]$SkipAppBuild,
     [int]$Port = 9600
 )
 
@@ -168,15 +169,16 @@ Copy-Item $pluginJar $agentPluginJar -Force
 if (-not (Test-Path $agentPluginJar)) { Write-Host "[FAIL] 插件 jar 拷贝失败"; exit 1 }
 Write-Host "[OK] 插件已装入: $agentPluginJar"
 
-# ---- 4. demo-app jar(缺失则构建,保证启动命令可直接执行)----
-if (-not (Test-Path $appJar)) {
-    Write-Host "[..] demo-app jar 缺失,开始构建: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
+# ---- 4. demo-app jar(默认每次重建,保证源码变更必然生效;快速路径 -SkipAppBuild)----
+if (-not $SkipAppBuild) {
+    Write-Host "[..] 构建 demo-app: mvn -f $demoAppDir\pom.xml clean package -DskipTests"
     Push-Location $demoAppDir
     mvn -f "$demoAppDir\pom.xml" clean package -DskipTests -q
     $code = $LASTEXITCODE
     Pop-Location
     if ($code -ne 0) { Write-Host "[FAIL] demo-app 构建失败 (exit=$code)"; exit 1 }
 }
+if (-not (Test-Path $appJar)) { Write-Host "[FAIL] demo-app jar 不存在: $appJar(请去掉 -SkipAppBuild)"; exit 1 }
 Write-Host "[OK] demo-app jar: $appJar"
 
 # ---- 5. 产出启动命令(与 scripts/run-with-agent.ps1 同构)----
