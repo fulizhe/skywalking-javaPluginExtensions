@@ -298,6 +298,53 @@ RENDER.jvm = function (results, box) {
 };
 
 /* ---- 03 Meter ---- */
+
+/*
+ * Meter 指标参考词典(移植自旧项目 sb-skywalking 的 SWStatisticMeter.html):
+ * 指标经 SkywalkingMeterRegistry 桥接自 Micrometer,常见 Spring Boot/JVM/连接池指标含义如下。
+ * 旧版仪表盘曾按"指标名前缀分组 + 展开/折叠 + 精确忽略/前缀忽略 + 描述展示"渲染;
+ * 新版简化为全部卡片 + 名称过滤,词典保留作指标含义参考。
+ *
+ * 【优先展示的指标(旧版 PRIORITY_PREFIXES)】
+ *   process_cpu_usage / system_cpu_usage / jvm_memory_used / jvm_memory_committed /
+ *   jvm_memory_max / jvm_threads_live / jvm_threads_states / jvm_gc_pause /
+ *   http_server_requests / hikaricp_connections / tracing_context_performance /
+ *   thread_pool / process_uptime / logback_events
+ *
+ * 【分组依据】分组名 = 指标名的第一个单词(第一个 "_" 之前),如 jvm_memory_used → jvm;
+ *            无下划线时整名即分组名(如 datasource)。
+ * 【忽略建议(旧版默认忽略,时间戳/恒定值不适合折线图)】
+ *   process_start_time(启动时刻)、process_uptime(运行秒数)、system_cpu_count(核心数)
+ *
+ * 【常用指标含义】
+ *   process_cpu_usage:当前 Java 进程 CPU 占用(0~1)
+ *   system_cpu_usage:整机 CPU 使用率(0~1)
+ *   process_uptime:进程已运行时长(秒)
+ *   process_start_time:进程启动时刻(毫秒时间戳,一般不做趋势图)
+ *   system_cpu_count:可用逻辑 CPU 核数(多为固定值)
+ *   jvm_memory_used / _committed / _max:JVM 内存已用/已提交/上限(-1=无固定上限,如 Metaspace)
+ *   jvm_memory_used labels:area=heap/nonheap,id=各内存区域名
+ *   jvm_threads_live:存活线程总数; _peak:峰值; _daemon:守护线程数
+ *   jvm_threads_states:各线程状态数量(labels 中 state=runnable/waiting 等)
+ *   jvm_classes_loaded:已加载类数; jvm_classes_unloaded:累计卸载类数
+ *   jvm_gc_memory_allocated:年轻代累计分配内存; _promoted:晋升老年代量
+ *   jvm_gc_max_data_size:老年代最大可用空间; jvm_gc_live_data_size:Full GC 后存活估计
+ *   jvm_gc_pause_count/_sum/_max:GC 暂停次数/总耗时/单次最大(按 action、cause 区分)
+ *   http_server_requests_count/_sum/_max:入站 HTTP 请求次数/总耗时/单次最大(按 method、uri、status)
+ *   http_client_requests_*:出站 HTTP 客户端请求(维度同 server)
+ *   hikaricp_connections:连接池当前连接总数
+ *   hikaricp_connections_active/_idle/_pending/_timeout/_min/_max:活跃/空闲/等待/超时/下限/上限
+ *   hikaricp_connections_acquire_count/_sum/_max:获取连接次数/累计耗时/单次最大
+ *   hikaricp_connections_creation_count/_sum/_max:新建物理连接次数/累计耗时/单次最大
+ *   hikaricp_connections_usage_count/_sum/_max:连接被使用次数/累计耗时/单次最大
+ *   jdbc_connections_active/_idle/_min/_max:JDBC 数据源活跃/空闲/最小/最大连接
+ *   tomcat_sessions_active_current/_max/_alive_max/_created/_expired/_rejected:Session 统计
+ *   logback_events:Logback 日志输出条数(labels 中 level=info/warn/error 等)
+ *   tracing_context_performance:链路上下文处理耗时分布(直方图,单位纳秒/微秒档)
+ *   finished_tracing_context_counter / created_tracing_context_counter:SW 链路上下文结束/创建计数
+ *   datasource(前缀):数据源连接池状态快照(labels:status=activeConnections、maximumPoolSize 等)
+ *   thread_pool(前缀):线程池指标(labels:metric_type=active_size、queue_size 等)
+ */
 RENDER.meter = function (results, box) {
     var data = results[0];
     if (isPluginHint(data)) { showHint(data, box); return; }
