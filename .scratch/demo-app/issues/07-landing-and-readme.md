@@ -4,7 +4,7 @@
 
 **Blocked by:** 06 — 静态仪表盘移植
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 首页包含三块叙事:插件是什么(六类数据流地图 + 与 OAP 模式对比)、logfile 命名来历、怎么跑
 - [x] README 覆盖快速上手(setup 或手动)、验证回路用法、术语指引

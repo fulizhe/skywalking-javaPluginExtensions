@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 演示应用骨架与宿主工具类桩
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 脚本完成插件构建(复用现有 maven 精确选择构建)并拷贝 jar 至 agent plugins 目录
 - [x] 脚本以 `-javaagent` + `-Dskywalking.*` 参数启动演示应用,等待端口就绪

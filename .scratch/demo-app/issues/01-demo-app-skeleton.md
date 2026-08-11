@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] 演示应用以独立 pom 构建(Spring Boot 2.5.4、Java 8),不挂 agent parent、不进 reactor;插件构建命令不受影响
 - [x] 应用可在 9600 端口启动,根路径返回 200;无 agent 时也能正常启动(骨架期独立可验证的前提)
