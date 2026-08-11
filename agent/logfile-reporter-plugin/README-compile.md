@@ -17,7 +17,7 @@ $root = if (Test-Path 'E:\') { 'E:' } else { 'D:' }
 
 # 2. 变量（agent 目录、JDK 版本号按本机微调，盘符已自动）
 $agentDir = "$root\apps\apache-skywalking-java-agent-9.4.0"
-$jdk8     = "$root\apps\java\jdk1.8.0_172"    # 按实际安装路径
+$jdk17    = "$root\apps\java\jdk-17.0.8"     # 构建工具链（release 8 需 JDK 9+ 编译器，见 docs/adr/adr-01-jdk17-migration.md）
 
 # 3. 定位仓库根目录（兼容 E/D 盘及带/不带下划线的目录名）
 $repo = @(
@@ -27,15 +27,24 @@ $repo = @(
   'D:\gitRepository\skywalking-javaPluginExtensions'
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-# 4. 启用 JDK 8（若已是默认 JDK 可跳过）
-$env:path = "$jdk8\bin;$env:path"
+# 4. 启用 JDK 17 构建工具链（若已是默认 JDK 可跳过）
+$env:path = "$jdk17\bin;$env:path"
 
-# 5. 编译（模块内联到 agent 聚合模块，需带 -am）
+# 5. 编译（模块内联到 agent 聚合模块，需带 -am；产物字节码经 release 8 保持基线 8）
 cd "$repo\agent"
 mvn clean package '-Dmaven.test.skip=true' -T 2C -pl logfile-reporter-plugin -am
 ```
 
-产物：`logfile-reporter-plugin/target/logfile-reporter-plugin-1.0.0.jar`
+产物：`logfile-reporter-plugin/target/logfile-reporter-plugin-1.0.0.jar`（class 版本仍为 8，可运行于 JDK 8 应用）
+
+## 演示运行时
+
+插件在两种应用 JVM 下都受支持（运行兼容，见 `docs/adr/adr-01-jdk17-migration.md`）：
+
+- **JDK 8（默认）**：`demo-app/scripts/run-with-agent.ps1` 默认扫描 `D:\apps\java\jdk1.8*`；
+- **JDK 17（显式）**：`pwsh ./scripts/run-with-agent.ps1 -JavaHome D:\apps\java\jdk-17.0.8`。
+
+构建工具链与演示运行时解耦：无论演示运行时用 8 还是 17，插件均以 JDK 17 工具链构建（`-BuildJavaHome` 可覆盖）。
 
 ## 拷贝到 SkyWalking Agent
 

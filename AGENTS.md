@@ -16,6 +16,12 @@ Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agent
 
 - **Active**: `agent/logfile-reporter-plugin`, `agent/override-httpclient-4.x-plugin`, `agent/override-hutool-http-5.x-plugin` — ongoing iteration (bugfix & feature)
 - **Sample & validation**: `agent/demo-app` — plugin capability demo + one-command validation loop for the active modules. Standalone pom, deliberately NOT in the agent reactor, so plugin builds (`-pl <plugin> -am`) and CI paths stay untouched
+
+### Build & demo runtime convention (adr-01)
+
+- **Build toolchain**: JDK 17 (plugin artifacts keep bytecode baseline 8 via `release 8`; building with JDK 8 is no longer supported)
+- **Demo runtime**: JDK 8 default + JDK 17 explicit (`run-with-agent.ps1 -JavaHome <jdk17>`); scripts auto-pick a JDK 17 build toolchain via `-BuildJavaHome` / `jdk-17*` scan
+- See `docs/adr/adr-01-jdk17-migration.md` for the full decision record
 - **Archived**: all other modules — critical bugfix only; feature work needs pre-approval
 
 ### Known TODOs

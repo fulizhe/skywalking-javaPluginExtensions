@@ -1,3 +1,4 @@
 
 1. 剥离对于hutool的依赖
-2. 同时支持JDK21/JDK17/JDK8
+2. 同时支持JDK21/JDK17/JDK8(当前 17 已落地,见 docs/adr/adr-01-jdk17-migration.md;21 待需求到来)
+3. 集成 GITHUB workflow CI(已完成:JDK 17 构建+测试门禁,见 .github/workflows/build-and-test.yml)

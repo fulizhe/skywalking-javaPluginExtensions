@@ -1,4 +1,4 @@
-﻿# 02 运行底座:构建插件 -> 装入 agent -> 启动演示应用 -> 验证插件加载(手动模式)
+# 02 运行底座:构建插件 -> 装入 agent -> 启动演示应用 -> 验证插件加载(手动模式)
 #
 # 一条命令让"在真实 agent 下跑起来"成为可能。默认行为:
 #   1) 始终构建 demo-app(mvn -f,保证源码变更必然生效;快速路径用 -SkipAppBuild 复用已有 jar)
@@ -8,16 +8,19 @@
 #   5) 手动模式:验证通过后保持运行,可手动观察(日志、探针、仪表盘)
 #
 # 用法(建议用 PowerShell 7 / pwsh 运行,避免 Windows PowerShell 5.1 控制台编码问题):
-#   pwsh ./scripts/run-with-agent.ps1                  # 全流程,端口 9600
+#   pwsh ./scripts/run-with-agent.ps1                  # 全流程,端口 9600(演示运行时默认 JDK 8)
 #   pwsh ./scripts/run-with-agent.ps1 -Port 9601       # 换端口
 #   pwsh ./scripts/run-with-agent.ps1 -SkipPluginBuild # 插件已构建过,跳过 maven
 #   pwsh ./scripts/run-with-agent.ps1 -SkipAppBuild    # 复用已有 demo-app jar,跳过重建
 #   pwsh ./scripts/run-with-agent.ps1 -AgentDir D:\apps\apache-skywalking-java-agent-9.4.0
+#   pwsh ./scripts/run-with-agent.ps1 -JavaHome D:\apps\java\jdk-17.0.8   # 演示运行时用 JDK 17
+#   pwsh ./scripts/run-with-agent.ps1 -BuildJavaHome D:\apps\java\jdk-17.0.8  # 构建工具链用 JDK 17
 #
 # 退出码:0 全流程通过;1 前置失败(路径/构建/拷贝);2 应用未就绪;3 插件加载未验证
 param(
     [string]$AgentDir = "",
     [string]$JavaHome = "",
+    [string]$BuildJavaHome = "",
     [switch]$SkipPluginBuild,
     [switch]$SkipAppBuild,
     [int]$Port = 9600
@@ -45,12 +48,30 @@ function Resolve-AgentDir {
 
 function Resolve-JavaHome {
     if ($JavaHome) { return $JavaHome }
-    # 仓库约定 JDK 8 为演示运行环境(见 logfile-reporter-plugin/README-compile.md),优先于全局 JAVA_HOME
+    # 演示运行时约定 JDK 8 为默认(见 logfile-reporter-plugin/README-compile.md),JDK 17 用 -JavaHome 显式指定;
+    # 若本机无 JDK 8 则回落到全局 JAVA_HOME
     $jdk8Candidates = Get-ChildItem "$(Get-DriveRoot)\apps\java" -Directory -Filter "jdk1.8*" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending | Select-Object -First 1
     if ($jdk8Candidates) { return $jdk8Candidates.FullName }
     if ($env:JAVA_HOME) { return $env:JAVA_HOME }
     throw "未找到 JDK。请用 -JavaHome 指定,或设置 JAVA_HOME。"
+}
+
+function Resolve-BuildJavaHome {
+    # 构建工具链约定 JDK 17:插件产物经 release 8 保持字节码基线 8,需 JDK 9+ 编译器(见 adr-01);
+    # 显式 -BuildJavaHome 优先,其次扫描本机 jdk-17*,最后兜底演示运行时 JDK
+    if ($BuildJavaHome) { return $BuildJavaHome }
+    $jdk17Candidates = Get-ChildItem "$(Get-DriveRoot)\apps\java" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^jdk[-_.]?17' } |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if ($jdk17Candidates) { return $jdk17Candidates.FullName }
+    return $javaHome
+}
+
+function Test-Release8Capable([string]$jdkHome) {
+    # release 8 需 JDK 9+ 编译器;JDK 8 工具链会在 javac 报不透明的 --release 错误,提前给可读提示
+    $verLine = & (Join-Path $jdkHome "bin\java.exe") -version 2>&1 | Select-Object -First 1
+    return ($verLine -match '"(\d+)' -and [int]$Matches[1] -ge 9)
 }
 
 # 就绪探测:优先 curl.exe(Windows 10 1803+ 自带),回环地址 --noproxy "*" 直连,
@@ -96,7 +117,7 @@ if (-not (Test-Path $agentJar)) {
 }
 Write-Host "[OK] agent: $agentDir"
 
-# ---- 3. JDK 8 ----
+# ---- 3. 演示运行时 JDK(默认 JDK 8,-JavaHome 显式 JDK 17)----
 $javaHome = Resolve-JavaHome
 $javaExe = Join-Path $javaHome "bin\java.exe"
 if (-not (Test-Path $javaExe)) {
@@ -113,10 +134,15 @@ if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyCon
 
 # ---- 5. 构建插件并拷贝 ----
 if (-not $SkipPluginBuild) {
-    # 与 README-compile.md 一致:构建环境用 JDK 8(前置到 PATH)
-    $env:JAVA_HOME = $javaHome
-    $env:PATH = "$javaHome\bin;$env:PATH"
-    Write-Host "[..] 构建插件: mvn clean package -Dmaven.test.skip=true -T 2C -pl logfile-reporter-plugin -am (JDK8)"
+    # 构建工具链用 JDK 17(release 8,产物字节码 8;见 adr-01),默认扫描本机 jdk-17*,可用 -BuildJavaHome 覆盖
+    $buildJavaHome = Resolve-BuildJavaHome
+    if (-not (Test-Release8Capable $buildJavaHome)) {
+        Write-Host "[FAIL] 插件构建工具链需 JDK 9+($buildJavaHome 不支持 release 8)。请用 -BuildJavaHome 指定 JDK 17。"
+        exit 1
+    }
+    $env:JAVA_HOME = $buildJavaHome
+    $env:PATH = "$buildJavaHome\bin;$env:PATH"
+    Write-Host "[..] 构建插件: mvn clean package -Dmaven.test.skip=true -T 2C -pl logfile-reporter-plugin -am (toolchain=$buildJavaHome)"
     Push-Location $agentModuleDir
     mvn clean package "-Dmaven.test.skip=true" -T 2C -pl logfile-reporter-plugin -am -q
     $code = $LASTEXITCODE

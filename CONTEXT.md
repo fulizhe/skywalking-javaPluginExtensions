@@ -35,3 +35,23 @@ _Avoid_: 样例项目(与验证回路混为一谈)
 **验证回路 (validation loop)**:
 面向插件作者的快速反馈通道:一条命令完成构建、安装、启动、造数、断言与报告,使改动尽快被验证。
 _Avoid_: 手动验证流程
+
+## Compatibility (兼容性)
+
+**运行兼容 (runtime compatibility)**:
+agent 与插件在应用 JVM 为 JDK 17 时正常工作的能力;与插件产物字节码版本无关。
+_Avoid_: 运行环境兼容
+
+**构建兼容 (build compatibility)**:
+用 JDK 17 工具链编译插件的能力,产物经 `release 8` 保持在字节码基线。
+_Avoid_: 编译环境
+
+**测试兼容 (test compatibility)**:
+插件测试套件在 JDK 17 下全部通过的能力。
+
+**字节码基线 (bytecode baseline)**:
+插件产物兼容的最低 Java 版本(8),由 `maven-compiler-plugin` 的 `release` 参数保证;独立于构建工具链版本。
+_Avoid_: 编译版本、target 版本
+
+**演示运行时 (demo runtime)**:
+demo-app 实际启动所用的 JDK 版本;验证回路同时支持 JDK 8 与 JDK 17 两种运行时。

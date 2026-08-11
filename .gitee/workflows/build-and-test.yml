@@ -1,0 +1,37 @@
+name: Build and Test Active Plugins (JDK 17)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build and test active plugins (release 8 bytecode)
+        working-directory: ./agent
+        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin -am

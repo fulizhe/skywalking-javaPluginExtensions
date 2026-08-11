@@ -3,7 +3,7 @@
 # 不依赖作者机器:在任意 Windows 机器上跑一次即可把环境备齐。流程:
 #   1) 检测本机 skywalking-java-agent 9.4.0:存在(目录含 skywalking-agent.jar)则跳过;
 #      缺失则从 Apache 官方发行包下载(.tgz,校验 SHA512,解压到目标目录)
-#   2) 构建 logfile-reporter-plugin(JDK 8 + Maven)并拷贝进 agent plugins/
+#   2) 构建 logfile-reporter-plugin(JDK 17 工具链 + Maven,产物字节码 8)并拷贝进 agent plugins/
 #   3) 构建 demo-app jar(默认每次重建,保证源码变更必然生效;-SkipAppBuild 快速路径)
 #   4) 产出与 scripts/run-with-agent.ps1 同构的启动命令
 #
@@ -18,6 +18,7 @@
 param(
     [string]$AgentDir = "",
     [string]$JavaHome = "",
+    [string]$BuildJavaHome = "",
     [switch]$SkipPluginBuild,
     [switch]$SkipAppBuild,
     [int]$Port = 9600
@@ -50,12 +51,30 @@ function Resolve-AgentDir {
 
 function Resolve-JavaHome {
     if ($JavaHome) { return $JavaHome }
-    # 仓库约定 JDK 8 为演示运行环境(见 logfile-reporter-plugin/README-compile.md),优先于全局 JAVA_HOME
+    # 演示运行时约定 JDK 8 为默认(见 logfile-reporter-plugin/README-compile.md),JDK 17 用 -JavaHome 显式指定;
+    # 若本机无 JDK 8 则回落到全局 JAVA_HOME
     $jdk8Candidates = Get-ChildItem "$(Get-DriveRoot)\apps\java" -Directory -Filter "jdk1.8*" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending | Select-Object -First 1
     if ($jdk8Candidates) { return $jdk8Candidates.FullName }
     if ($env:JAVA_HOME) { return $env:JAVA_HOME }
     throw "未找到 JDK。请用 -JavaHome 指定,或设置 JAVA_HOME。"
+}
+
+function Resolve-BuildJavaHome {
+    # 构建工具链约定 JDK 17:插件产物经 release 8 保持字节码基线 8,需 JDK 9+ 编译器(见 adr-01);
+    # 显式 -BuildJavaHome 优先,其次扫描本机 jdk-17*,最后兜底演示运行时 JDK
+    if ($BuildJavaHome) { return $BuildJavaHome }
+    $jdk17Candidates = Get-ChildItem "$(Get-DriveRoot)\apps\java" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^jdk[-_.]?17' } |
+        Sort-Object Name -Descending | Select-Object -First 1
+    if ($jdk17Candidates) { return $jdk17Candidates.FullName }
+    return $javaHome
+}
+
+function Test-Release8Capable([string]$jdkHome) {
+    # release 8 需 JDK 9+ 编译器;JDK 8 工具链会在 javac 报不透明的 --release 错误,提前给可读提示
+    $verLine = & (Join-Path $jdkHome "bin\java.exe") -version 2>&1 | Select-Object -First 1
+    return ($verLine -match '"(\d+)' -and [int]$Matches[1] -ge 9)
 }
 
 # 下载:优先 curl.exe(带 -L/--fail/重试);失败兜底 Invoke-WebRequest(走系统/IE 代理)。
@@ -138,7 +157,7 @@ if (Test-Path $agentJar) {
     if (-not (Test-Path $agentJar)) { Write-Host "[FAIL] agent 安装未生效: $agentDir"; exit 1 }
 }
 
-# ---- 2. JDK 8 + Maven ----
+# ---- 2. JDK + Maven(演示运行时默认 JDK 8;构建工具链默认 JDK 17,见 Resolve-BuildJavaHome)----
 $javaHome = Resolve-JavaHome
 $javaExe = Join-Path $javaHome "bin\java.exe"
 if (-not (Test-Path $javaExe)) { Write-Host "[FAIL] 无效的 JDK 目录: $javaHome"; exit 1 }
@@ -151,9 +170,15 @@ Write-Host "[OK] Maven: $((Get-Command mvn).Source)"
 
 # ---- 3. 构建并安装插件 ----
 if (-not $SkipPluginBuild) {
-    $env:JAVA_HOME = $javaHome
-    $env:PATH = "$javaHome\bin;$env:PATH"
-    Write-Host "[..] 构建插件: mvn clean package -Dmaven.test.skip=true -T 2C -pl logfile-reporter-plugin -am (JDK8)"
+    # 构建工具链用 JDK 17(release 8,产物字节码 8;见 adr-01),默认扫描本机 jdk-17*,可用 -BuildJavaHome 覆盖
+    $buildJavaHome = Resolve-BuildJavaHome
+    if (-not (Test-Release8Capable $buildJavaHome)) {
+        Write-Host "[FAIL] 插件构建工具链需 JDK 9+($buildJavaHome 不支持 release 8)。请用 -BuildJavaHome 指定 JDK 17。"
+        exit 1
+    }
+    $env:JAVA_HOME = $buildJavaHome
+    $env:PATH = "$buildJavaHome\bin;$env:PATH"
+    Write-Host "[..] 构建插件: mvn clean package -Dmaven.test.skip=true -T 2C -pl logfile-reporter-plugin -am (toolchain=$buildJavaHome)"
     Push-Location $agentModuleDir
     mvn clean package "-Dmaven.test.skip=true" -T 2C -pl logfile-reporter-plugin -am -q
     $code = $LASTEXITCODE

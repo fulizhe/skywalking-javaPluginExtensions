@@ -6,12 +6,12 @@ rem Build and export the custom SkyWalking override plugins used in this repo.
 rem
 rem Usage:
 rem   build-export-skywalking-override-plugins.bat
-rem   build-export-skywalking-override-plugins.bat "D:\apps\apache-skywalking-java-agent-9.4.0" "D:\apps\java\jdk1.8.0_172"
+rem   build-export-skywalking-override-plugins.bat "D:\apps\apache-skywalking-java-agent-9.4.0" "D:\apps\java\jdk-17.0.8"
 rem
 rem Arg1: SkyWalking agent home. Default:
 rem       D:\apps\apache-skywalking-java-agent-9.4.0
-rem Arg2: JDK home. Default:
-rem       D:\apps\java\jdk1.8.0_172
+rem Arg2: JDK home (build toolchain, release 8 requires JDK 9+). Default:
+rem       D:\apps\java\jdk-17.0.8
 rem ---------------------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
@@ -24,7 +24,7 @@ if "%~1"=="" (
 )
 
 if "%~2"=="" (
-    set "JDK_HOME=D:\apps\java\jdk1.8.0_172"
+    set "JDK_HOME=D:\apps\java\jdk-17.0.8"
 ) else (
     set "JDK_HOME=%~2"
 )

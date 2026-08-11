@@ -13,7 +13,7 @@ You can also pass explicit paths:
 ```bat
 E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-override-plugins.bat ^
   "D:\apps\apache-skywalking-java-agent-9.4.0" ^
-  "D:\apps\java\jdk1.8.0_172"
+  "D:\apps\java\jdk-17.0.8"
 ```
 
 The script will:

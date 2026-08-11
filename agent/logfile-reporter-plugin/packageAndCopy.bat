@@ -13,8 +13,8 @@ if exist E:\ (
 )
 
 set AGENT_DIR=%ROOT%\apps\apache-skywalking-java-agent-9.4.0
-rem set JDK8=%ROOT%\apps\java\jdk1.8.0_172
-rem if defined JDK8 set "PATH=%JDK8%\bin;%PATH%"
+rem set JDK17=%ROOT%\apps\java\jdk-17.0.8
+rem if defined JDK17 set "PATH=%JDK17%\bin;%PATH%"
 
 rem 仓库 agent 目录 = 脚本目录的上一级
 set REPO_AGENT=%~dp0..

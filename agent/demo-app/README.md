@@ -25,7 +25,7 @@ OAP 模式与本地内存报告模式的对比如下:
 
 ## 快速上手
 
-前置要求:JDK 8、Maven 3。SkyWalking Java Agent **9.4.0** 可由 setup 脚本自动安装(见方式一);版本与插件锁定一致。
+前置要求:JDK 8(演示运行时默认)或 JDK 17(经 `-JavaHome`);插件构建工具链需 JDK 17(见 `logfile-reporter-plugin/README-compile.md`)、Maven 3。SkyWalking Java Agent **9.4.0** 可由 setup 脚本自动安装(见方式一);版本与插件锁定一致。
 
 ### 方式零:环境自足(setup,推荐首跑)
 
@@ -52,7 +52,8 @@ pwsh ./scripts/validate.ps1
 | `-SkipPluginInstall` | 负向模式:故意不安装插件,预期在加载检查处大声失败(exit 3) |
 | `-Port <n>` | 应用端口,默认 9600(全仓库统一) |
 | `-AgentDir <dir>` | agent 目录,默认 `D:\apps\apache-skywalking-java-agent-9.4.0`(或 `SKYWALKING_AGENT_DIR`) |
-| `-JavaHome <dir>` | JDK 目录,默认扫描 `D:\apps\java` 下 JDK8 或取 `JAVA_HOME` |
+| `-JavaHome <dir>` | 演示运行时 JDK,默认扫描 `D:\apps\java` 下 JDK8,或取 `JAVA_HOME`;JDK 17 显式传入(如 `D:\apps\java\jdk-17.0.8`) |
+| `-BuildJavaHome <dir>` | 插件构建工具链 JDK,默认扫描本机 `jdk-17*`,或取演示运行时 JDK;产物字节码恒为 8 |
 
 退出码:`0` 全绿;`1` 前置失败(路径/构建/安装);`2` 应用未就绪;`3` 插件未安装/未加载;`5` 断言失败。
 
