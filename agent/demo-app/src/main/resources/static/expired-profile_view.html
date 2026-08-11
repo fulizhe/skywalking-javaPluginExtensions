@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SkyWalking Profile Visualization</title>
+    <!-- 引入 D3.js 和 d3-flame-graph -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        #chart { width: 100%; height: 600px; }
+        .header { margin-bottom: 20px; }
+        .details { margin-top: 10px; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h2>Profile Flame Graph</h2>
+    <p>Trace ID: <span id="traceIdDisplay"></span></p>
+</div>
+
+<div id="chart"></div>
+<div id="details" class="details">Hover over a block to see details</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-flame-graph@4.1.3/dist/d3-flamegraph.min.js"></script>
+
+<script type="text/javascript">
+
+    // ---------------------------------------------------------
+    // 将 Java 后端生成的 JSON 放在这里
+    // ---------------------------------------------------------
+    var profileData = {
+        "name": "Root",
+        "value": 1,
+        "children": [
+            {
+                "name": "Thread.run:745",
+                "value": 1,
+                "children": [
+                    {
+                        "name": "TaskThread$WrappingRunnable.run:61",
+                        "value": 1,
+                        "children": [
+                            // ... 此处省略中间层级，为了演示直接到最底层 ...
+                            {
+                                "name": "HelloController.helloBlock:62",
+                                "value": 1,
+                                "children": [
+                                    {
+                                        "name": "ThreadUtil.safeSleep:320",
+                                        "value": 1,
+                                        "children": [
+                                            {
+                                                "name": "Thread.sleep:-2",
+                                                "value": 1,
+                                                "children": []
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    };
+
+    // 使用 AJAX 获取后端数据
+    fetch('/profileData2')
+        .then(response => response.json())
+        .then(data => {
+            // 将返回的数据赋值给 profileData
+            profileData = data;
+
+            // 渲染火焰图
+            d3.select("#chart")
+                .datum(profileData)
+                .call(chart);
+        })
+        .catch(error => console.error('Error fetching profile data:', error));
+
+    // 配置采样间隔 (ms)
+    const DUMP_PERIOD = 10;
+
+    var chart = flamegraph()
+        .width(1200)
+        .cellHeight(18)
+        .transitionDuration(750)
+        .minFrameSize(5)
+        .transitionEase(d3.easeCubic)
+        .sort(true) // 排序让火焰图看起来更整齐
+        .title("")
+        .onClick(onClick)
+        .selfValue(false); // SkyWalking 的栈包含所有层级，不需要 selfValue
+
+    // 格式化 Tooltip 显示
+    var tip = d3.create("div")
+        .style("position", "absolute")
+        .style("display", "none")
+        .style("background", "rgba(0, 0, 0, 0.7)")
+        .style("color", "white")
+        .style("padding", "5px")
+        .style("border-radius", "4px")
+        .style("pointer-events", "none");
+    document.body.appendChild(tip.node());
+
+    chart.tooltip(false); // 禁用默认，如果你想用上面的自定义逻辑
+
+    d3.select("#chart")
+        .datum(profileData)
+        .call(chart);
+
+    // 交互逻辑
+    function onClick(d) {
+        console.info("Clicked on " + d.data.name);
+    }
+
+    // 简单的详细信息展示
+    d3.selectAll(".d3-flame-graph-label")
+        .on("mouseover", function(event, d) {
+            const duration = d.data.value * DUMP_PERIOD;
+            const percentage = ((d.data.value / profileData.value) * 100).toFixed(2);
+            document.getElementById("details").innerHTML =
+                `<strong>Method:</strong> ${d.data.name} <br/>` +
+                `<strong>Samples:</strong> ${d.data.value} <br/>` +
+                `<strong>Est. Duration:</strong> ${duration} ms (${percentage}%)`;
+        });
+
+</script>
+</body>
+</html>

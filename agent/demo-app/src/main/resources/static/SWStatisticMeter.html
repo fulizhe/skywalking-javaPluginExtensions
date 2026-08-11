@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Meter 指标监控大盘</title>
+    <link rel="stylesheet" href="./lib/bootstrap.min.css">
+    <style>
+        body {
+            background: #fff;
+            color: #222;
+        }
+        .dashboard-title {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #222;
+        }
+        .meta-bar {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 1rem;
+        }
+        .meta-bar span {
+            margin-right: 1.5rem;
+        }
+        .panel-card {
+            background: #f7f7fa;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            cursor: pointer;
+            transition: box-shadow 0.2s;
+            border: 1px solid #e5e6eb;
+        }
+        .panel-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+        }
+        .panel-title {
+            font-size: 1.05rem;
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            color: #333;
+            word-break: break-all;
+        }
+        .panel-subtitle {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 0.25rem;
+        }
+        .panel-desc {
+            font-size: 0.78rem;
+            color: #666;
+            line-height: 1.4;
+            margin-bottom: 0.5rem;
+            padding: 0.35rem 0.5rem;
+            background: #fff;
+            border-radius: 4px;
+            border-left: 3px solid #b8daff;
+        }
+        .refresh-bar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+            gap: 0.5rem;
+        }
+        .refresh-bar .ml-auto {
+            margin-left: auto;
+        }
+        .no-data {
+            color: #888;
+            text-align: center;
+            padding: 2rem 0;
+        }
+        .btn-outline-info {
+            color: #007bff;
+            border-color: #b8daff;
+        }
+        .btn-outline-info:hover {
+            background: #e3f0ff;
+            color: #0056b3;
+        }
+        .modal-content.bg-dark.text-light {
+            background: #fff !important;
+            color: #222 !important;
+        }
+        .close.text-light {
+            color: #222 !important;
+        }
+        .filter-bar input {
+            max-width: 280px;
+        }
+        .metric-group {
+            border: 1px solid #e5e6eb;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+            background: #fff;
+        }
+        .group-header {
+            display: flex;
+            align-items: center;
+            padding: 0.65rem 1rem;
+            background: #f7f7fa;
+            cursor: pointer;
+            user-select: none;
+            border-bottom: 1px solid transparent;
+        }
+        .group-header:hover {
+            background: #eef1f6;
+        }
+        .group-header[aria-expanded="true"] {
+            border-bottom-color: #e5e6eb;
+        }
+        .group-chevron {
+            display: inline-block;
+            width: 1rem;
+            margin-right: 0.5rem;
+            color: #888;
+            transition: transform 0.2s;
+            font-size: 0.75rem;
+        }
+        .group-header[aria-expanded="false"] .group-chevron {
+            transform: rotate(-90deg);
+        }
+        .group-name {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #333;
+            text-transform: lowercase;
+        }
+        .group-badge {
+            font-size: 0.8rem;
+            color: #888;
+            margin-left: 0.5rem;
+            font-weight: normal;
+        }
+        .group-body {
+            padding: 1rem 0.75rem 0.25rem;
+        }
+        .group-toolbar .btn {
+            margin-right: 0.35rem;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-3">
+    <div class="dashboard-title">Meter 指标监控大盘</div>
+    <div class="meta-bar" id="metaBar">
+        <span id="metaService">服务：—</span>
+        <span id="metaInstance">实例：—</span>
+        <span id="metaSnapshots">快照数：0</span>
+        <span id="metaMeters">指标种类：0</span>
+    </div>
+    <div class="refresh-bar">
+        <span id="refreshCountdown">距离下次刷新还需 30 秒</span>
+        <button id="manualRefreshBtn" class="btn btn-sm btn-outline-info ml-2">手动刷新</button>
+        <button id="toggleRefreshPauseBtn" class="btn btn-sm btn-outline-warning ml-1">暂停刷新</button>
+        <div class="filter-bar ml-2">
+            <input type="text" id="metricFilter" class="form-control form-control-sm" placeholder="过滤指标名（如 jvm_memory）">
+        </div>
+        <div class="group-toolbar ml-2">
+            <button type="button" id="expandAllGroupsBtn" class="btn btn-sm btn-outline-secondary">全部展开</button>
+            <button type="button" id="collapseAllGroupsBtn" class="btn btn-sm btn-outline-secondary">全部折叠</button>
+        </div>
+        <span id="lastError" class="ml-auto text-danger" style="display:none;"></span>
+    </div>
+    <div id="dashboardGroupsWrap"></div>
+</div>
+
+<div class="modal fade" id="panelZoomModal" tabindex="-1" role="dialog" aria-labelledby="panelZoomModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl" role="document">
+    <div class="modal-content bg-dark text-light">
+      <div class="modal-header">
+        <h5 class="modal-title" id="panelZoomModalLabel">图表详情</h5>
+        <button type="button" class="close text-light" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="zoomChartContainer" style="min-height: 500px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="./lib/jquery.min.js"></script>
+<script src="./lib/bootstrap.bundle.min.js"></script>
+<script src="./lib/apexcharts-v4.5.0.js"></script>
+<script>
+const API_URL = './statisticMeter';
+const REFRESH_INTERVAL = 30;
+const TIME_WINDOW = 5 * 60 * 1000;
+
+/** 优先展示的指标名前缀（其余按字母序排在后面） */
+const PRIORITY_PREFIXES = [
+    'process_cpu_usage', 'system_cpu_usage',
+    'jvm_memory_used', 'jvm_memory_committed', 'jvm_memory_max',
+    'jvm_threads_live', 'jvm_threads_states', 'jvm_gc_pause',
+    'http_server_requests', 'hikaricp_connections',
+    'tracing_context_performance', 'thread_pool',
+    'process_uptime', 'logback_events'
+];
+
+// =============================================================================
+// 【用户可调】分组（Tab）排序 — 显式写在前面的分组越靠上
+// -----------------------------------------------------------------------------
+// GROUP_SORT_ORDER：按数组顺序从上到下排列；只写你关心的即可
+// 未出现在本列表里的分组，统一排在后面，彼此之间按字母序
+// =============================================================================
+
+/** 【排序】分组名从上到下对应页面从上到下（与展开/折叠无关） */
+const GROUP_SORT_ORDER = [
+    'jvm',
+    'http',
+    'logback',
+    'process',
+    'system',
+    'hikaricp',
+    'jdbc',
+    'tomcat',
+    'thread',
+    'tracing',
+    'demo',
+    'datasource',
+    'finished',
+    'created',
+    'user'
+];
+
+// =============================================================================
+// 【用户可调】分组默认展开 / 折叠（每次自动刷新、手动刷新后都会按这里恢复）
+// -----------------------------------------------------------------------------
+// 分组名 = 指标名的第一个单词，即第一个 "_" 前面的部分，例如：
+//   jvm_memory_used     → 分组 jvm
+//   process_cpu_usage   → 分组 process
+//   datasource          → 无下划线时，整名即分组名 datasource
+//
+// 优先级：DEFAULT_EXPANDED_GROUPS > DEFAULT_COLLAPSED_GROUPS > DEFAULT_COLLAPSE_FOR_UNKNOWN
+// =============================================================================
+
+/** 【默认展开】写在这里的分组，刷新后是展开的 */
+const DEFAULT_EXPANDED_GROUPS = [
+    'jvm', 'http', 'logback', 'process', 'system'
+];
+
+/** 【默认折叠】写在这里的分组，刷新后是折叠的（若也在上面 EXPANDED 里，仍以展开为准） */
+const DEFAULT_COLLAPSED_GROUPS = [
+    'http', 'hikaricp', 'jdbc', 'tomcat', 'thread', 'tracing',
+    'logback', 'demo', 'datasource', 'finished', 'created', 'user', 'other'
+];
+
+/**
+ * 【兜底】新来的分组（两个数组都没写到的）：
+ *   true  → 默认折叠
+ *   false → 默认展开
+ */
+const DEFAULT_COLLAPSE_FOR_UNKNOWN = true;
+
+// =============================================================================
+// 【用户可调】忽略指标（不生成图表；精确名 + 前缀两种写法）
+// -----------------------------------------------------------------------------
+// IGNORE_METRIC_NAMES：完整指标名，与接口里 singleValue.name / histogram.name 一致
+// IGNORE_METRIC_PREFIXES：前缀匹配，凡以该字符串开头的指标一律忽略，例如 'tomcat_sessions_'
+// =============================================================================
+
+/** 【精确忽略】完整指标名列表 */
+const IGNORE_METRIC_NAMES = [
+    'process_start_time'   // 进程启动时刻（时间戳），不适合折线图
+    ,'process_uptime' // 进程运行时间（时间戳），不适合折线图
+    ,'system_cpu_count' // 系统CPU核心数，不适合折线图
+    // 'tomcat_sessions_expired',
+    // 'jvm_classes_unloaded',
+];
+
+/** 【前缀忽略】以这些前缀开头的指标一律不展示 */
+const IGNORE_METRIC_PREFIXES = [
+    // 'demo_',
+    // 'tomcat_sessions_',
+];
+
+// =============================================================================
+// 【参考】指标含义说明（显示在图表标题下方，可按需增改）
+// 未配置的指标不显示说明；也可用 METRIC_DESCRIPTION_PREFIXES 按前缀匹配
+// =============================================================================
+
+const METRIC_DESCRIPTIONS = {
+    'process_cpu_usage': '当前 Java 进程的 CPU 占用比例（0~1，图表中已换算为 %）',
+    'process_uptime': '进程已运行时长（秒，通常为累计值）',
+    'process_start_time': '进程启动时刻（毫秒时间戳，一般不做趋势图）',
+    'system_cpu_usage': '整机 CPU 使用率（0~1，图表中已换算为 %）',
+    'system_cpu_count': '操作系统可用逻辑 CPU 核数（多为固定值）',
+
+    'jvm_threads_live': 'JVM 当前存活线程总数',
+    'jvm_threads_peak': '自启动以来线程数峰值',
+    'jvm_threads_daemon': '守护线程数量',
+    'jvm_threads_states': '各线程状态的数量（labels 中 state：runnable/waiting 等）',
+    'jvm_classes_loaded': '当前已加载的类数量',
+    'jvm_classes_unloaded': '累计已卸载的类数量',
+
+    'jvm_gc_memory_allocated': '年轻代累计分配的对象内存量（分配速率相关）',
+    'jvm_gc_memory_promoted': '从年轻代晋升到老年代的对象量',
+    'jvm_gc_max_data_size': '老年代最大可用数据空间',
+    'jvm_gc_live_data_size': 'Full GC 后老年代仍存活的数据量估计',
+    'jvm_gc_pause_count': 'GC 暂停次数（按 action、cause 等 labels 区分）',
+    'jvm_gc_pause_sum': 'GC 暂停总耗时（毫秒，按 action、cause 区分）',
+    'jvm_gc_pause_max': '单次 GC 暂停最大耗时（毫秒）',
+
+    'http_server_requests_count': '入站 HTTP 请求次数（按 method、uri、status 等维度）',
+    'http_server_requests_sum': '入站 HTTP 请求总耗时（毫秒，常与 count 配合算平均 RT）',
+    'http_server_requests_max': '入站 HTTP 请求单次最大耗时（毫秒）',
+
+    'hikaricp_connections': 'HikariCP 连接池当前连接总数',
+    'hikaricp_connections_active': '连接池中正在使用的连接数',
+    'hikaricp_connections_idle': '连接池中空闲连接数',
+    'hikaricp_connections_pending': '等待获取连接的线程数',
+    'hikaricp_connections_timeout': '获取连接超时的累计次数',
+    'hikaricp_connections_min': '连接池配置的最小连接数',
+    'hikaricp_connections_max': '连接池配置的最大连接数',
+    'hikaricp_connections_acquire_count': '从池中获取连接的次数',
+    'hikaricp_connections_acquire_sum': '获取连接累计等待/耗时（视 Micrometer 绑定而定）',
+    'hikaricp_connections_acquire_max': '获取连接单次最大耗时',
+    'hikaricp_connections_creation_count': '新建物理连接的次数',
+    'hikaricp_connections_creation_sum': '创建连接累计耗时',
+    'hikaricp_connections_creation_max': '创建连接单次最大耗时',
+    'hikaricp_connections_usage_count': '连接被使用的次数',
+    'hikaricp_connections_usage_sum': '连接使用累计耗时',
+    'hikaricp_connections_usage_max': '连接使用单次最大耗时',
+
+    'jdbc_connections_active': 'JDBC 数据源当前活跃连接数',
+    'jdbc_connections_idle': 'JDBC 数据源空闲连接数',
+    'jdbc_connections_min': 'JDBC 池最小连接数配置',
+    'jdbc_connections_max': 'JDBC 池最大连接数配置',
+
+    'tomcat_sessions_active_current': 'Tomcat 当前活跃 Session 数',
+    'tomcat_sessions_active_max': 'Tomcat 活跃 Session 历史峰值',
+    'tomcat_sessions_alive_max': 'Session 最长存活时间（秒）',
+    'tomcat_sessions_created': '累计创建的 Session 数',
+    'tomcat_sessions_expired': '累计过期的 Session 数',
+    'tomcat_sessions_rejected': '因超限等原因被拒绝的 Session 数',
+
+    'logback_events': 'Logback 日志输出条数（labels 中 level：info/warn/error 等）',
+
+    'demo_request_count': '示例/demo 接口调用次数',
+    'demo_request_duration_count': '示例请求耗时直方图采样次数',
+    'demo_request_duration_sum': '示例请求耗时累计（毫秒）',
+    'demo_request_duration_max': '示例请求单次最大耗时（毫秒）',
+
+    'user.login.count': '登录次数（示例业务 Counter，labels 如 result=success）',
+
+    'finished_tracing_context_counter': '已结束的 SkyWalking 链路上下文数量',
+    'created_tracing_context_counter': '创建的链路上下文数量（labels 如 created_by=sampler）',
+    'tracing_context_performance': '链路上下文处理耗时分布（直方图，单位一般为纳秒或微秒档）'
+};
+
+/** 前缀匹配说明（先匹配更长的前缀）；未命中则看 METRIC_DESCRIPTIONS */
+const METRIC_DESCRIPTION_PREFIXES = [
+    ['jvm_memory_used', 'JVM 已使用内存（labels：area=heap/nonheap，id=各内存区域名）'],
+    ['jvm_memory_committed', 'JVM 已向操作系统提交的内存'],
+    ['jvm_memory_max', 'JVM 内存区域上限（-1 表示无固定上限，如 Metaspace）'],
+    ['jvm_buffer_memory_used', 'NIO 缓冲池已用内存（labels：id=direct/mapped）'],
+    ['jvm_buffer_count', 'NIO 缓冲池对象个数'],
+    ['jvm_buffer_total_capacity', 'NIO 缓冲池总容量'],
+    ['datasource', '数据源连接池状态快照（labels：status=activeConnections、maximumPoolSize 等）'],
+    ['thread_pool', '业务/框架线程池指标（labels：metric_type=active_size、queue_size 等）'],
+    ['http_client_requests', '出站 HTTP 客户端请求（count/sum/max，维度同 server）']
+];
+
+// =============================================================================
+// 【用户可调】结束 — 下方逻辑一般不用改
+// =============================================================================
+
+let countdownTimer = null;
+let countdown = REFRESH_INTERVAL;
+let refreshPaused = false;
+let chartObjs = {};
+let panelStore = {};
+let lastRawData = null;
+let metricFilterText = '';
+
+function isMetricIgnored(name) {
+    if (!name) return true;
+    if (IGNORE_METRIC_NAMES.indexOf(name) >= 0) return true;
+    for (let i = 0; i < IGNORE_METRIC_PREFIXES.length; i++) {
+        if (name.startsWith(IGNORE_METRIC_PREFIXES[i])) return true;
+    }
+    return false;
+}
+
+function getMetricDescription(name) {
+    if (!name) return '';
+    if (METRIC_DESCRIPTIONS[name]) return METRIC_DESCRIPTIONS[name];
+    const prefixes = METRIC_DESCRIPTION_PREFIXES.slice().sort((a, b) => b[0].length - a[0].length);
+    for (let i = 0; i < prefixes.length; i++) {
+        if (name.startsWith(prefixes[i][0])) return prefixes[i][1];
+    }
+    return '';
+}
+
+/** 以指标名第一个 _ 之前的前缀作为分组依据 */
+function metricGroupKey(metricName) {
+    if (!metricName) return 'other';
+    const idx = metricName.indexOf('_');
+    if (idx <= 0) return metricName;
+    return metricName.substring(0, idx);
+}
+
+function groupDomId(group) {
+    return 'group-collapse-' + group.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function isGroupExpandedByDefault(group) {
+    if (DEFAULT_EXPANDED_GROUPS.indexOf(group) >= 0) return true;
+    if (DEFAULT_COLLAPSED_GROUPS.indexOf(group) >= 0) return false;
+    return !DEFAULT_COLLAPSE_FOR_UNKNOWN;
+}
+
+function sortMetricGroups(groups) {
+    const sortRank = function(g) {
+        const i = GROUP_SORT_ORDER.indexOf(g);
+        return i === -1 ? GROUP_SORT_ORDER.length + 1 : i;
+    };
+    return groups.sort((a, b) => {
+        const ra = sortRank(a);
+        const rb = sortRank(b);
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);
+    });
+}
+
+function groupPanelsByKey(panels) {
+    const map = {};
+    panels.forEach(p => {
+        const g = metricGroupKey(p.metricName);
+        if (!map[g]) map[g] = [];
+        map[g].push(p);
+    });
+    return map;
+}
+
+function resizeChartsInGroup($collapseEl) {
+    $collapseEl.find('[id^="chart_"]').each(function() {
+        const panelId = this.id.replace(/^chart_/, '');
+        if (chartObjs[panelId] && typeof chartObjs[panelId].resize === 'function') {
+            chartObjs[panelId].resize();
+        }
+    });
+}
+
+function setAllGroupsCollapsed(collapsed) {
+    $('.metric-group .collapse').each(function() {
+        if (collapsed) {
+            $(this).collapse('hide');
+        } else {
+            $(this).collapse('show');
+        }
+    });
+}
+
+function formatTime(ts) {
+    const d = new Date(ts);
+    return d.getHours().toString().padStart(2, '0') + ':' +
+        d.getMinutes().toString().padStart(2, '0') + ':' +
+        d.getSeconds().toString().padStart(2, '0');
+}
+
+function labelsToKey(labels) {
+    if (!labels || typeof labels !== 'object') return '';
+    return Object.keys(labels).sort().map(k => k + '=' + labels[k]).join(',');
+}
+
+function labelsToSeriesName(labels) {
+    const s = labelsToKey(labels);
+    return s || '(default)';
+}
+
+/** 取序列最新时间点的数值，用于排序 */
+function latestPointValue(seriesItem) {
+    const data = seriesItem.data;
+    if (!data || !data.length) return Number.NEGATIVE_INFINITY;
+    let maxT = -1;
+    let val = Number.NEGATIVE_INFINITY;
+    data.forEach(pt => {
+        if (!Array.isArray(pt) || pt.length < 2) return;
+        const t = pt[0];
+        if (t >= maxT) {
+            maxT = t;
+            val = pt[1];
+        }
+    });
+    if (val == null || Number.isNaN(val)) return Number.NEGATIVE_INFINITY;
+    return val;
+}
+
+/** 序列按最新值从大到小排（图例、折线顺序） */
+function sortSeriesByLatestValueDesc(series) {
+    return series.slice().sort((a, b) => latestPointValue(b) - latestPointValue(a));
+}
+
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function formatSeriesDisplayValue(panel, v) {
+    const u = yaxisUnit(panel.metricName);
+    if (v == null || Number.isNaN(v)) return '—';
+    return v.toFixed(u.decimals) + u.suffix;
+}
+
+/** 悬停提示按当前时间点数值从大到小排列 */
+function buildChartTooltip(panel) {
+    return {
+        shared: true,
+        intersect: false,
+        custom: function({ series, dataPointIndex, w }) {
+            if (dataPointIndex == null || dataPointIndex < 0) return '';
+            const xs = w.globals.seriesX[0];
+            const ts = xs && xs[dataPointIndex];
+            const items = [];
+            for (let i = 0; i < series.length; i++) {
+                const v = series[i][dataPointIndex];
+                if (v == null || v === undefined || Number.isNaN(v)) continue;
+                items.push({
+                    name: w.globals.seriesNames[i],
+                    value: v,
+                    color: w.globals.colors[i]
+                });
+            }
+            items.sort((a, b) => b.value - a.value);
+            let html = '<div class="apexcharts-tooltip-title" style="font-family:inherit;font-size:12px;">' +
+                (ts != null ? formatTime(ts) : '') + '</div>';
+            html += '<div style="padding:4px 10px 8px;max-height:280px;overflow-y:auto;">';
+            items.forEach(item => {
+                html += '<div style="display:flex;align-items:flex-start;padding:3px 0;font-size:12px;line-height:1.35;">' +
+                    '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + item.color +
+                    ';margin-right:6px;margin-top:3px;flex-shrink:0;"></span>' +
+                    '<span style="flex:1;word-break:break-all;">' + escapeHtml(item.name) + ':</span>' +
+                    '<strong style="margin-left:8px;white-space:nowrap;">' + formatSeriesDisplayValue(panel, item.value) + '</strong></div>';
+            });
+            html += '</div>';
+            return html;
+        }
+    };
+}
+
+function meterSeriesKey(name, labels, type) {
+    return name + '||' + labelsToKey(labels) + '||' + type;
+}
+
+function transformValue(name, value) {
+    if (value == null || Number.isNaN(value)) return null;
+    if (name === 'process_cpu_usage' || name === 'system_cpu_usage') {
+        return value * 100;
+    }
+    if (/^jvm_memory_|^jvm_buffer_memory_|^jvm_buffer_total_capacity|^jvm_gc_memory_|^jvm_gc_max_data_size|^jvm_gc_live_data_size/.test(name)) {
+        if (Math.abs(value) >= 1024) return value / 1024 / 1024;
+    }
+    return value;
+}
+
+function yaxisUnit(name) {
+    if (name === 'process_cpu_usage' || name === 'system_cpu_usage') {
+        return { suffix: '%', decimals: 2 };
+    }
+    if (/^jvm_memory_|^jvm_buffer_memory_|^jvm_buffer_total_capacity|^jvm_gc_memory_|^jvm_gc_max_data_size|^jvm_gc_live_data_size/.test(name)) {
+        return { suffix: ' MB', decimals: 1 };
+    }
+    return { suffix: '', decimals: 2 };
+}
+
+function parseMeterSnapshots(raw) {
+    if (!raw || typeof raw !== 'object') return { snapshots: [], seriesByName: {}, histogramByName: {} };
+
+    const snapshots = Object.keys(raw).map(k => raw[k]).filter(Boolean);
+    snapshots.sort((a, b) => (a.time || 0) - (b.time || 0));
+
+    const seriesByName = {};
+    const histogramByName = {};
+
+    snapshots.forEach(snap => {
+        const t = snap.time;
+        (snap.meters || []).forEach(meter => {
+            if (meter.type === 'SINGLEVALUE' && meter.singleValue) {
+                const sv = meter.singleValue;
+                const name = sv.name;
+                if (isMetricIgnored(name)) return;
+                const key = meterSeriesKey(name, sv.labels, 'SINGLEVALUE');
+                if (!seriesByName[name]) seriesByName[name] = {};
+                if (!seriesByName[name][key]) {
+                    seriesByName[name][key] = {
+                        name: name,
+                        labels: sv.labels || {},
+                        type: 'line',
+                        data: []
+                    };
+                }
+                const v = transformValue(name, sv.value);
+                seriesByName[name][key].data.push([t, v]);
+            } else if (meter.type === 'HISTOGRAM' && meter.histogram) {
+                const h = meter.histogram;
+                const name = h.name;
+                if (isMetricIgnored(name)) return;
+                const key = meterSeriesKey(name, h.labels, 'HISTOGRAM');
+                if (!histogramByName[name]) histogramByName[name] = {};
+                if (!histogramByName[name][key]) {
+                    histogramByName[name][key] = {
+                        name: name,
+                        labels: h.labels || {},
+                        type: 'histogram',
+                        timeline: []
+                    };
+                }
+                const buckets = h.buckets || [];
+                const total = buckets.length ? buckets[buckets.length - 1].count : 0;
+                histogramByName[name][key].timeline.push({
+                    time: t,
+                    buckets: buckets,
+                    total: total
+                });
+            }
+        });
+    });
+
+    return { snapshots, seriesByName, histogramByName };
+}
+
+function buildPanelList(seriesByName, histogramByName) {
+    const panels = [];
+
+    Object.keys(seriesByName).forEach(name => {
+        const seriesList = Object.values(seriesByName[name]);
+        panels.push({
+            id: 'sv_' + name.replace(/[^a-zA-Z0-9_]/g, '_'),
+            title: name,
+            description: getMetricDescription(name),
+            subtitle: 'SINGLEVALUE · ' + seriesList.length + ' 条序列',
+            chartType: 'line',
+            metricName: name,
+            getSeries: (points) => {
+                const now = Date.now();
+                return sortSeriesByLatestValueDesc(seriesList.map(s => ({
+                    name: labelsToSeriesName(s.labels),
+                    data: s.data.filter(pt => now - pt[0] <= TIME_WINDOW)
+                })));
+            },
+            yaxis: (() => {
+                const u = yaxisUnit(name);
+                return {
+                    labels: {
+                        formatter: v => (v == null ? '' : v.toFixed(u.decimals)),
+                        style: { color: '#333' }
+                    }
+                };
+            })(),
+            tooltip: (() => {
+                const u = yaxisUnit(name);
+                return { y: { formatter: v => (v == null ? '' : v.toFixed(u.decimals) + u.suffix) } };
+            })()
+        });
+    });
+
+    Object.keys(histogramByName).forEach(name => {
+        const histList = Object.values(histogramByName[name]);
+        panels.push({
+            id: 'hist_' + name.replace(/[^a-zA-Z0-9_]/g, '_'),
+            title: name,
+            description: getMetricDescription(name),
+            subtitle: 'HISTOGRAM · 累计样本趋势 + 最新分布',
+            chartType: 'line',
+            metricName: name,
+            isHistogram: true,
+            histList: histList,
+            getSeries: () => {
+                const now = Date.now();
+                return sortSeriesByLatestValueDesc(histList.map(h => ({
+                    name: labelsToSeriesName(h.labels) + ' (total)',
+                    data: h.timeline
+                        .filter(item => now - item.time <= TIME_WINDOW)
+                        .map(item => [item.time, item.total])
+                })));
+            },
+            getLatestBuckets: () => {
+                const result = [];
+                histList.forEach(h => {
+                    if (!h.timeline.length) return;
+                    const latest = h.timeline[h.timeline.length - 1];
+                    result.push({
+                        label: labelsToSeriesName(h.labels),
+                        buckets: latest.buckets
+                    });
+                });
+                return result;
+            },
+            yaxis: {
+                min: 0,
+                labels: { formatter: v => (v == null ? '' : v.toFixed(0)), style: { color: '#333' } }
+            },
+            tooltip: { y: { formatter: v => (v == null ? '' : v.toFixed(0)) } }
+        });
+    });
+
+    panels.sort((a, b) => {
+        const pa = PRIORITY_PREFIXES.findIndex(p => a.metricName === p || a.metricName.startsWith(p));
+        const pb = PRIORITY_PREFIXES.findIndex(p => b.metricName === p || b.metricName.startsWith(p));
+        const ra = pa === -1 ? 999 : pa;
+        const rb = pb === -1 ? 999 : pb;
+        if (ra !== rb) return ra - rb;
+        return a.metricName.localeCompare(b.metricName);
+    });
+
+    return panels;
+}
+
+function isSeriesEmpty(series) {
+    return !series || !series.length ||
+        series.every(s => !s.data || !s.data.length ||
+            s.data.every(d => d == null || (Array.isArray(d) && (d[1] == null || d[1] === undefined))));
+}
+
+function showError(msg) {
+    $('#lastError').text(msg).show();
+}
+function hideError() {
+    $('#lastError').hide();
+}
+
+function updateMeta(snapshots, panelCount) {
+    const latest = snapshots.length ? snapshots[snapshots.length - 1] : null;
+    $('#metaService').text('服务：' + (latest && latest.service ? latest.service : '—'));
+    $('#metaInstance').text('实例：' + (latest && latest.serviceInstance ? latest.serviceInstance : '—'));
+    $('#metaSnapshots').text('快照数：' + snapshots.length);
+    $('#metaMeters').text('图表面板：' + panelCount);
+}
+
+function destroyAllCharts() {
+    Object.keys(chartObjs).forEach(id => {
+        if (chartObjs[id]) {
+            chartObjs[id].destroy();
+            chartObjs[id] = null;
+        }
+    });
+    chartObjs = {};
+}
+
+function renderPanelCard(panel, groupKey) {
+    const descHtml = panel.description
+        ? '<div class="panel-desc" title="' + escapeHtml(panel.description) + '">' + escapeHtml(panel.description) + '</div>'
+        : '';
+    return `
+        <div class="col-md-6 col-lg-4 panel-item" data-metric="${panel.metricName}" data-metric-group="${groupKey}">
+            <div class="panel-card" id="panel_${panel.id}">
+                <div class="panel-title">${panel.title}</div>
+                ${descHtml}
+                <div class="panel-subtitle">${panel.subtitle}</div>
+                <div id="chart_${panel.id}" style="height:260px;"></div>
+            </div>
+        </div>
+    `;
+}
+
+function renderCharts(panels, snapshots) {
+    destroyAllCharts();
+    panels.forEach(panel => {
+        const series = panel.getSeries(snapshots);
+        const $container = $(`#chart_${panel.id}`);
+        if (isSeriesEmpty(series)) {
+            $container.html('<div class="no-data">暂无数据</div>');
+            return;
+        }
+        const options = {
+            chart: {
+                type: panel.chartType,
+                height: 240,
+                background: '#f7f7fa',
+                toolbar: { show: false },
+                animations: { enabled: false },
+                fontFamily: 'inherit',
+                events: {
+                    click: function() {
+                        showZoomPanel(panel, series, snapshots);
+                    }
+                }
+            },
+            xaxis: {
+                type: 'datetime',
+                labels: {
+                    formatter: function(val) { return formatTime(val); },
+                    style: { color: '#888' }
+                }
+            },
+            yaxis: panel.yaxis,
+            tooltip: buildChartTooltip(panel),
+            legend: {
+                show: true,
+                labels: { colors: ['#333'] },
+                position: 'bottom',
+                fontSize: '11px'
+            },
+            series: series,
+            noData: { text: '暂无数据', align: 'center', verticalAlign: 'middle', style: { color: '#888' } }
+        };
+        chartObjs[panel.id] = new ApexCharts(document.querySelector(`#chart_${panel.id}`), options);
+        chartObjs[panel.id].render();
+    });
+}
+
+function applyMetricFilter() {
+    const q = metricFilterText.trim().toLowerCase();
+    $('.panel-item').each(function() {
+        const name = ($(this).data('metric') || '').toLowerCase();
+        $(this).toggle(!q || name.indexOf(q) >= 0);
+    });
+    $('.metric-group').each(function() {
+        const group = $(this).data('group');
+        const visible = $('.panel-item[data-metric-group="' + group + '"]:visible').length;
+        const total = $('.panel-item[data-metric-group="' + group + '"]').length;
+        $(this).find('.group-badge').text('(' + visible + (visible !== total ? '/' + total : '') + ')');
+    });
+}
+
+function renderGroupsLayout(panels) {
+    const grouped = groupPanelsByKey(panels);
+    const groups = sortMetricGroups(Object.keys(grouped));
+    if (!groups.length) return;
+
+    const html = groups.map(g => {
+        const collapseId = groupDomId(g);
+        const expanded = isGroupExpandedByDefault(g);
+        const showClass = expanded ? ' show' : '';
+        const expandedAttr = expanded ? 'true' : 'false';
+        const count = grouped[g].length;
+        const cards = grouped[g].map(p => renderPanelCard(p, g)).join('');
+        return '<div class="metric-group" data-group="' + g + '">' +
+            '<div class="group-header" data-toggle="collapse" data-target="#' + collapseId + '" ' +
+            'aria-expanded="' + expandedAttr + '" aria-controls="' + collapseId + '">' +
+            '<span class="group-chevron">▼</span>' +
+            '<span class="group-name">' + g + '</span>' +
+            '<span class="group-badge">(' + count + ')</span>' +
+            '</div>' +
+            '<div id="' + collapseId + '" class="collapse' + showClass + ' group-collapse" data-group="' + g + '">' +
+            '<div class="group-body"><div class="row">' + cards + '</div></div>' +
+            '</div></div>';
+    }).join('');
+
+    $('#dashboardGroupsWrap').html(html);
+
+    $('.group-collapse').on('shown.bs.collapse', function() {
+        const $el = $(this);
+        const group = $el.data('group');
+        $('.metric-group[data-group="' + group + '"] .group-header').attr('aria-expanded', 'true');
+        resizeChartsInGroup($el);
+    }).on('hidden.bs.collapse', function() {
+        const group = $(this).data('group');
+        $('.metric-group[data-group="' + group + '"] .group-header').attr('aria-expanded', 'false');
+    });
+}
+
+function fetchAndRenderAll() {
+    hideError();
+    $('#dashboardGroupsWrap').html('<div class="no-data">加载中...</div>');
+
+    $.ajax({
+        url: API_URL,
+        method: 'GET',
+        dataType: 'json',
+        timeout: 10000,
+        success: function(raw) {
+            lastRawData = raw;
+            const parsed = parseMeterSnapshots(raw);
+            const { snapshots, seriesByName, histogramByName } = parsed;
+            const panels = buildPanelList(seriesByName, histogramByName);
+            panelStore = {};
+            panels.forEach(p => { panelStore[p.id] = p; });
+
+            updateMeta(snapshots, panels.length);
+
+            if (!panels.length) {
+                $('#dashboardGroupsWrap').html('<div class="no-data">暂无 Meter 数据</div>');
+                return;
+            }
+
+            renderGroupsLayout(panels);
+            applyMetricFilter();
+            renderCharts(panels, snapshots);
+        },
+        error: function() {
+            destroyAllCharts();
+            $('#dashboardGroupsWrap').html('<div class="no-data">数据加载失败</div>');
+            showError('数据加载失败，请检查网络或 /statisticMeter 接口');
+        }
+    });
+}
+
+function showZoomPanel(panel, series, snapshots) {
+    $('#panelZoomModalLabel').text(panel.title);
+    $('#zoomChartContainer').html('');
+    if (window._zoomChartObj) {
+        window._zoomChartObj.destroy();
+        window._zoomChartObj = null;
+    }
+
+    if (panel.isHistogram && panel.getLatestBuckets) {
+        const bucketGroups = panel.getLatestBuckets();
+        if (bucketGroups.length && bucketGroups[0].buckets && bucketGroups[0].buckets.length) {
+            const bg = bucketGroups[0];
+            const categories = bg.buckets.map(b => {
+                if (b.isNegativeInfinity) return '-∞';
+                if (b.bucket >= 1e6) return (b.bucket / 1e6).toFixed(0) + 'M';
+                if (b.bucket >= 1e3) return (b.bucket / 1e3).toFixed(0) + 'K';
+                return String(b.bucket);
+            });
+            const barSeries = [{
+                name: bg.label + ' count',
+                data: bg.buckets.map(b => b.count)
+            }];
+            window._zoomChartObj = new ApexCharts(document.querySelector('#zoomChartContainer'), {
+                chart: { type: 'bar', height: 500, background: '#fff', toolbar: { show: true } },
+                plotOptions: { bar: { horizontal: false, columnWidth: '70%' } },
+                xaxis: { categories: categories, title: { text: 'bucket 上界' } },
+                yaxis: { title: { text: 'count' } },
+                series: barSeries,
+                title: { text: '最新快照 · 直方图桶分布', align: 'center' }
+            });
+            window._zoomChartObj.render();
+            $('#panelZoomModal').modal('show');
+            return;
+        }
+    }
+
+    const options = {
+        chart: {
+            type: panel.chartType,
+            height: 500,
+            background: '#fff',
+            toolbar: { show: true },
+            fontFamily: 'inherit',
+            animations: { enabled: false }
+        },
+        xaxis: {
+            type: 'datetime',
+            labels: {
+                formatter: function(val) { return formatTime(val); },
+                style: { color: '#888' }
+            }
+        },
+        yaxis: panel.yaxis,
+        tooltip: buildChartTooltip(panel),
+        legend: { show: true, labels: { colors: ['#333'] }, position: 'bottom' },
+        series: series,
+        noData: { text: '暂无数据', align: 'center', verticalAlign: 'middle', style: { color: '#888' } }
+    };
+    window._zoomChartObj = new ApexCharts(document.querySelector('#zoomChartContainer'), options);
+    window._zoomChartObj.render();
+    $('#panelZoomModal').modal('show');
+}
+
+function updateCountdownDisplay() {
+    if (refreshPaused) {
+        $('#refreshCountdown').text('自动刷新已暂停（剩余 ' + countdown + ' 秒）');
+        return;
+    }
+    $('#refreshCountdown').text('距离下次刷新还需 ' + countdown + ' 秒');
+}
+
+function stopCountdown() {
+    if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+    }
+}
+
+function startCountdown(resetCountdown) {
+    if (resetCountdown !== false) {
+        countdown = REFRESH_INTERVAL;
+    }
+    stopCountdown();
+    if (refreshPaused) {
+        updateCountdownDisplay();
+        return;
+    }
+    updateCountdownDisplay();
+    countdownTimer = setInterval(function() {
+        countdown--;
+        if (countdown <= 0) {
+            fetchAndRenderAll();
+            countdown = REFRESH_INTERVAL;
+        }
+        updateCountdownDisplay();
+    }, 1000);
+}
+
+function setRefreshPaused(paused) {
+    refreshPaused = paused;
+    const $btn = $('#toggleRefreshPauseBtn');
+    if (refreshPaused) {
+        stopCountdown();
+        $btn.text('继续刷新').removeClass('btn-outline-warning').addClass('btn-warning');
+    } else {
+        $btn.text('暂停刷新').removeClass('btn-warning').addClass('btn-outline-warning');
+        startCountdown(false);
+    }
+    updateCountdownDisplay();
+}
+
+function toggleRefreshPause() {
+    setRefreshPaused(!refreshPaused);
+}
+
+$(document).ready(function() {
+    fetchAndRenderAll();
+    startCountdown();
+
+    $('#manualRefreshBtn').click(function() {
+        fetchAndRenderAll();
+        startCountdown(!refreshPaused);
+    });
+
+    $('#toggleRefreshPauseBtn').click(function() {
+        toggleRefreshPause();
+    });
+
+    $('#metricFilter').on('input', function() {
+        metricFilterText = $(this).val();
+        applyMetricFilter();
+    });
+
+    $('#expandAllGroupsBtn').click(function() {
+        setAllGroupsCollapsed(false);
+    });
+    $('#collapseAllGroupsBtn').click(function() {
+        setAllGroupsCollapsed(true);
+    });
+
+    $('#panelZoomModal').on('hidden.bs.modal', function() {
+        if (window._zoomChartObj) {
+            window._zoomChartObj.destroy();
+            window._zoomChartObj = null;
+        }
+    });
+});
+</script>
+</body>
+</html>

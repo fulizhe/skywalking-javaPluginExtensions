@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Trace Alert 验证</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            background: #f6f8fb;
+            overflow: hidden;
+        }
+
+        .page-wrap {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 1rem 1rem 0.75rem;
+            box-sizing: border-box;
+        }
+
+        .page-header {
+            flex: 0 0 auto;
+            margin-bottom: 0.5rem;
+        }
+
+        .page-header h4 {
+            margin-bottom: 0.25rem;
+        }
+
+        .panel {
+            flex: 0 0 auto;
+            background: #fff;
+            border: 1px solid #dfe6ee;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 0.75rem;
+        }
+
+        .data-row {
+            flex: 1 1 0;
+            min-height: 0;
+            margin-left: 0;
+            margin-right: 0;
+            display: flex;
+            flex-wrap: wrap;
+            overflow: hidden;
+        }
+
+        .data-col {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            min-width: 0;
+            padding-left: 8px;
+            padding-right: 8px;
+        }
+
+        @media (min-width: 992px) {
+            .data-row .data-col {
+                flex: 1 1 50%;
+                max-width: 50%;
+                height: 100%;
+            }
+        }
+
+        @media (max-width: 991.98px) {
+            .data-row .data-col {
+                flex: 1 1 100%;
+                max-width: 100%;
+                min-height: 40vh;
+            }
+        }
+
+        .data-col:first-child {
+            padding-left: 0;
+        }
+
+        .data-col:last-child {
+            padding-right: 0;
+        }
+
+        .data-col h6 {
+            flex: 0 0 auto;
+            margin-bottom: 0.35rem;
+        }
+
+        .json-scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-x: auto;
+            overflow-y: scroll;
+            -webkit-overflow-scrolling: touch;
+            background: #1f2430;
+            border-radius: 4px;
+        }
+
+        pre.json-pre {
+            margin: 0;
+            min-height: min-content;
+            background: transparent;
+            color: #f8f9fa;
+            padding: 1rem;
+            overflow: visible;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 12px;
+            font-family: Consolas, Monaco, "Courier New", monospace;
+        }
+
+        .hint { color: #6c757d; font-size: 13px; }
+
+        #triggerResult {
+            max-height: 4.5em;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+<div class="page-wrap container-fluid">
+    <div class="page-header">
+        <h4>慢/错链路 Trace Alert 验证</h4>
+        <p class="hint mb-0">
+            规则仅支持 Ant 通配符（<code>operation:/status/*</code>、<code>operation:GET:/.well-known/**</code>），不再支持 <code>url:</code> 正则。
+            Webhook：<code>POST /inner/sw/trace-alert</code>。详见 <code>README-trace-alert.md</code>。
+        </p>
+    </div>
+
+    <div class="panel">
+        <div class="btn-toolbar flex-wrap" role="toolbar">
+            <div class="btn-group mr-2 mb-2">
+                <button type="button" class="btn btn-sm btn-warning" data-trigger="/api/trace-alert-demo/slow?ms=4000">慢 4s 默认阈值</button>
+                <button type="button" class="btn btn-sm btn-warning" data-trigger="/status/200?ms=8500"
+                        title="Ant slow_rules operation:/status/*=8000">慢 /status 8.5s</button>
+                <button type="button" class="btn btn-sm btn-warning" data-trigger="/api/order/1">慢 order 8.5s</button>
+                <button type="button" class="btn btn-sm btn-outline-warning" data-trigger="/api/trace-alert-demo/ok">正常 ok</button>
+            </div>
+            <div class="btn-group mr-2 mb-2">
+                <button type="button" class="btn btn-sm btn-danger" data-trigger="/api/trace-alert-demo/error">异常 ERROR</button>
+                <button type="button" class="btn btn-sm btn-danger" data-trigger="/api/trace-alert-demo/http500">HTTP 500</button>
+            </div>
+            <div class="btn-group mr-2 mb-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-trigger="/api/trace-alert-demo/httpclient-httpbin?status=400"
+                        title="HttpClient → httpbin 400；默认不应 ERROR">HttpClient httpbin 400</button>
+                <button type="button" class="btn btn-sm btn-danger" data-trigger="/api/trace-alert-demo/httpclient-httpbin?status=500"
+                        title="对照：应触发 ERROR">HttpClient httpbin 500</button>
+            </div>
+            <div class="btn-group mr-2 mb-2">
+                <button type="button" class="btn btn-sm btn-info" data-trigger="/.well-known/demo"
+                        title="Ant error_ignore operation:GET:/.well-known/**=404">404 .well-known</button>
+                <button type="button" class="btn btn-sm btn-info" data-trigger="/status/500"
+                        title="Ant error_ignore operation:/status/*=503,500,400">500 /status 白名单</button>
+                <button type="button" class="btn btn-sm btn-info" data-trigger="/api/exists/99">404 exists</button>
+                <button type="button" class="btn btn-sm btn-info" data-trigger="/inner/business-test/probe">404 probe</button>
+            </div>
+            <div class="btn-group mb-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshMetricsBtn">刷新 traceAlert 指标</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refreshWebhookBtn">刷新 Webhook 记录</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="clearWebhookBtn">清空 Webhook</button>
+                <a class="btn btn-sm btn-outline-primary" href="./SWLogfileReporterStatistic.html" target="_blank">链路统计页</a>
+                <a class="btn btn-sm btn-outline-primary" href="./9527.html">导航 9527</a>
+            </div>
+        </div>
+        <div id="triggerResult" class="mt-2 small text-muted"></div>
+    </div>
+
+    <div class="row data-row">
+        <div class="col-lg-6 data-col">
+            <h6>Agent traceAlert 指标 <span class="hint">GET /statisticTraceAlert</span></h6>
+            <div class="json-scroll">
+                <pre id="metricsPre" class="json-pre">加载中...</pre>
+            </div>
+        </div>
+        <div class="col-lg-6 data-col">
+            <h6>Webhook 最近告警 <span class="hint">GET /inner/sw/trace-alert/recent</span></h6>
+            <div class="json-scroll">
+                <pre id="webhookPre" class="json-pre">加载中...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script>
+    function pretty(obj) {
+        try {
+            return JSON.stringify(obj, null, 2);
+        } catch (e) {
+            return String(obj);
+        }
+    }
+
+    function loadMetrics() {
+        $('#metricsPre').text('加载中...');
+        $.getJSON('./statisticTraceAlert')
+            .done(function (data) {
+                $('#metricsPre').text(pretty(data));
+            })
+            .fail(function (xhr) {
+                $('#metricsPre').text('请求失败: ' + xhr.status + ' ' + xhr.statusText);
+            });
+    }
+
+    function loadWebhook() {
+        $('#webhookPre').text('加载中...');
+        $.getJSON('./inner/sw/trace-alert/recent')
+            .done(function (data) {
+                $('#webhookPre').text(pretty(data));
+            })
+            .fail(function (xhr) {
+                $('#webhookPre').text('请求失败: ' + xhr.status + ' ' + xhr.statusText);
+            });
+    }
+
+    function triggerPath(path) {
+        $('#triggerResult').text('请求中: ' + path);
+        $.get(path)
+            .always(function (data, status, xhr) {
+                const code = xhr.status || (status === 'success' ? 200 : 0);
+                let body = '';
+                if (typeof data === 'string') {
+                    body = data;
+                } else if (data && typeof data === 'object') {
+                    body = pretty(data);
+                }
+                $('#triggerResult').html(
+                    '<strong>' + path + '</strong> → HTTP ' + code +
+                    (body ? '<br><code>' + $('<div/>').text(body.substring(0, 500)).html() + '</code>' : '')
+                );
+                setTimeout(function () {
+                    loadMetrics();
+                    loadWebhook();
+                }, 1500);
+            });
+    }
+
+    $(function () {
+        $('[data-trigger]').on('click', function () {
+            triggerPath($(this).data('trigger'));
+        });
+        $('#refreshMetricsBtn').on('click', loadMetrics);
+        $('#refreshWebhookBtn').on('click', loadWebhook);
+        $('#clearWebhookBtn').on('click', function () {
+            $.post('./inner/sw/trace-alert/clear').always(function () {
+                loadWebhook();
+            });
+        });
+        loadMetrics();
+        loadWebhook();
+        setInterval(function () {
+            loadMetrics();
+            loadWebhook();
+        }, 30 * 1000);
+    });
+</script>
+</body>
+</html>

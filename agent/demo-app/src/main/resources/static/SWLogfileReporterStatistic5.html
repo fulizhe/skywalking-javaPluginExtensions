@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>JVM 监控大盘</title>
+    <!-- Bootstrap 4 -->
+    <link rel="stylesheet" href="./lib/bootstrap.min.css">
+    <!-- ApexCharts 
+    <link rel="stylesheet" href="./lib/apexcharts.css">
+    -->
+    <style>
+        body {
+            background: #fff;
+            color: #222;
+        }
+        .dashboard-title {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            color: #222;
+        }
+        .panel-card {
+            background: #f7f7fa;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            cursor: pointer;
+            transition: box-shadow 0.2s;
+            border: 1px solid #e5e6eb;
+        }
+        .panel-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+        }
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        .refresh-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        .refresh-bar .ml-auto {
+            margin-left: auto;
+        }
+        .apexcharts-tooltip {
+            color: #222 !important;
+        }
+        .no-data {
+            color: #888;
+            text-align: center;
+            padding: 2rem 0;
+        }
+        .btn-outline-info {
+            color: #007bff;
+            border-color: #b8daff;
+        }
+        .btn-outline-info:hover {
+            background: #e3f0ff;
+            color: #0056b3;
+        }
+        .modal-content.bg-dark.text-light {
+            background: #fff !important;
+            color: #222 !important;
+        }
+        .close.text-light {
+            color: #222 !important;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid py-3">
+    <div class="dashboard-title">JVM 监控大盘</div>
+    <div class="refresh-bar">
+        <span id="refreshCountdown">距离下次刷新还需 30 秒</span>
+        <button id="manualRefreshBtn" class="btn btn-sm btn-outline-info ml-3">手动刷新</button>
+        <span id="lastError" class="ml-auto text-danger" style="display:none;"></span>
+    </div>
+    <div class="row" id="dashboardPanels">
+        <!-- 动态插入Panel -->
+    </div>
+</div>
+
+<!-- Modal for Panel Zoom -->
+<div class="modal fade" id="panelZoomModal" tabindex="-1" role="dialog" aria-labelledby="panelZoomModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl" role="document">
+    <div class="modal-content bg-dark text-light">
+      <div class="modal-header">
+        <h5 class="modal-title" id="panelZoomModalLabel">图表详情</h5>
+        <button type="button" class="close text-light" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="zoomChartContainer" style="min-height: 500px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- jQuery -->
+<script src="./lib/jquery.min.js"></script>
+<!-- Bootstrap JS -->
+<script src="./lib/bootstrap.bundle.min.js"></script>
+<!-- ApexCharts -->
+<script src="./lib/apexcharts-v4.5.0.js"></script>
+<script>
+// ===================== 配置区 =====================
+const API_URL = './statisticJVM'; // 后端接口地址
+const REFRESH_INTERVAL = 30; // 刷新间隔（秒）
+const TIME_WINDOW = 5 * 60 * 1000; // 10分钟，单位ms
+
+// 需要展示的面板配置
+const PANEL_CONFIGS = [
+    {
+        id: 'cpu',
+        title: 'JVM CPU (%)',
+        type: 'line',
+        getSeries: data => [{
+            name: 'CPU',
+            data: data.map(d => [d.time, d.cpu])
+        }],
+        yaxis: { min: 0, max: 100, labels: { formatter: v => v.toFixed(2), style: { color: '#333' } } },
+        tooltip: { y: { formatter: v => v.toFixed(2) + '%' } }
+    },
+    {
+        id: 'heap',
+        title: 'JVM Heap/NonHeap (MB)',
+        type: 'line',
+        getSeries: data => {
+            // 取heap和nonheap
+            const heap = data.map(d => [d.time, (d.memoryHeapUsed || 0) / 1024 / 1024]);
+            const heapMax = data.map(d => [d.time, (d.memoryHeapMax || 0) / 1024 / 1024]);
+            const nonheap = data.map(d => [d.time, (d.memoryNonHeapUsed || 0) / 1024 / 1024]);
+            const nonheapMax = data.map(d => [d.time, (d.memoryNonHeapMax || 0) / 1024 / 1024]);
+            return [
+                { name: 'heap', data: heap } ,
+               { name: 'heap_max', data: heapMax },
+                { name: 'nonheap', data: nonheap },
+                { name: 'nonheap_max', data: nonheapMax }
+            ];
+        },
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(1), style: { color: '#333' } }, tooltip: { y: { formatter: v => v.toFixed(1) + ' MB' } } },
+        tooltip: { y: { formatter: v => v.toFixed(2) } }
+    },
+    {
+        id: 'memoryPool',
+        title: 'JVM Memory Pool (MB)',
+        type: 'line',
+        getSeries: data => {
+            // 聚合所有memoryPool的type
+            const poolTypes = {};
+            data.forEach(d => {
+                (d.memoryPoolList || []).forEach(pool => {
+                    if (!poolTypes[pool.type]) poolTypes[pool.type] = [];
+                });
+            });
+            Object.keys(poolTypes).forEach(type => {
+                poolTypes[type] = data.map(d => {
+                    const pool = (d.memoryPoolList || []).find(p => p.type === type);
+                    return [d.time, pool ? pool.used / 1024 / 1024 : 0];
+                });
+            });
+            return Object.keys(poolTypes).map(type => ({ name: type, data: poolTypes[type] }));
+        },
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(1), style: { color: '#333' } }, tooltip: { y: { formatter: v => v.toFixed(1) + ' MB' } } },
+        tooltip: { y: { formatter: v => v.toFixed(2) } }
+    },
+    {
+        id: 'gcTime',
+        title: 'JVM GC Time (ms)',
+        type: 'line',
+        getSeries: data => {
+            // 按phrase聚合
+            const phrases = {};
+            data.forEach(d => {
+                (d.gcList || []).forEach(gc => {
+                    if (!phrases[gc.phrase]) phrases[gc.phrase] = [];
+                });
+            });
+            Object.keys(phrases).forEach(phrase => {
+                phrases[phrase] = data.map(d => {
+                    const gc = (d.gcList || []).find(g => g.phrase === phrase);
+                    return [d.time, gc ? gc.time : 0];
+                });
+            });
+            return Object.keys(phrases).map(phrase => ({ name: phrase + '_gc', data: phrases[phrase] }));
+        },
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(1), style: { color: '#333' } }, tooltip: { y: { formatter: v => v.toFixed(1) + ' ms' } } },
+        tooltip: { y: { formatter: v => v.toFixed(2) } }
+    },
+    {
+        id: 'gcCount',
+        title: 'JVM GC Count',
+        type: 'bar',
+        getSeries: data => {
+            // 按phrase聚合
+            const phrases = {};
+            data.forEach(d => {
+                (d.gcList || []).forEach(gc => {
+                    if (!phrases[gc.phrase]) phrases[gc.phrase] = [];
+                });
+            });
+            Object.keys(phrases).forEach(phrase => {
+                phrases[phrase] = data.map(d => {
+                    const gc = (d.gcList || []).find(g => g.phrase === phrase);
+                    return [d.time, gc ? gc.count : 0];
+                });
+            });
+            return Object.keys(phrases).map(phrase => ({ name: phrase + '_gc', data: phrases[phrase] }));
+        },
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(0), style: { color: '#333' } }, tooltip: { y: { formatter: v => v.toFixed(0) } } },
+        tooltip: { y: { formatter: v => v.toFixed(2) } }
+    },
+    {
+        id: 'threadCount',
+        title: 'JVM Thread Count',
+        type: 'line',
+        getSeries: data => [
+            { name: 'live', data: data.map(d => [d.time, d.thread && d.thread.live != null ? d.thread.live : null]) },
+            { name: 'daemon', data: data.map(d => [d.time, d.thread && d.thread.daemon != null ? d.thread.daemon : null]) },
+            { name: 'peak', data: data.map(d => [d.time, d.thread && d.thread.peak != null ? d.thread.peak : null]) }
+        ],
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(0), style: { color: '#333' } } },
+        tooltip: { y: { formatter: v => {debugger; return v.toFixed(0);} } }
+    },
+    {
+        id: 'threadState',
+        title: 'JVM Thread State Count',
+        type: 'line',
+        getSeries: data => [
+            { name: 'runnable', data: data.map(d => [d.time, d.thread && d.thread.runnable != null ? d.thread.runnable : null]) },
+            { name: 'blocked', data: data.map(d => [d.time, d.thread && d.thread.blocked != null ? d.thread.blocked : null]) },
+            { name: 'waiting', data: data.map(d => [d.time, d.thread && d.thread.waiting != null ? d.thread.waiting : null]) },
+            { name: 'timed_waiting', data: data.map(d => [d.time, d.thread && d.thread.timed_waiting != null ? d.thread.timed_waiting : null]) }
+        ],
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(0), style: { color: '#333' } } },
+        tooltip: { y: { formatter: v => v.toFixed(0) } },
+        plotOptions: { bar: { stacked: true } }
+    },
+    {
+        id: 'classCount',
+        title: 'JVM Class Count',
+        type: 'line',
+        getSeries: data => [
+            { name: 'loaded', data: data.map(d => [d.time, d.clazz && d.clazz.loaded != null ? d.clazz.loaded : null]) },
+            { name: 'total_loaded', data: data.map(d => [d.time, d.clazz && d.clazz.total_loaded != null ? d.clazz.total_loaded : null]) },
+            { name: 'total_unloaded', data: data.map(d => [d.time, d.clazz && d.clazz.total_unloaded != null ? d.clazz.total_unloaded : null]) }
+        ],
+        yaxis: { min: 0, labels: { formatter: v => v.toFixed(0), style: { color: '#333' } } },
+        tooltip: { y: { formatter: v => {debugger; return v.toFixed(0);} } }
+    }
+];
+
+// ===================== 工具函数 =====================
+function formatTime(ts) {
+    const d = new Date(ts);
+    return d.getHours().toString().padStart(2, '0') + ':' +
+        d.getMinutes().toString().padStart(2, '0') + ':' +
+        d.getSeconds().toString().padStart(2, '0');
+}
+
+function parseRawData(rawArr) {
+    let points = [];
+    rawArr.forEach(item => {
+        (item.metrics || []).forEach(m => {
+            let memoryHeapUsed = 0, memoryHeapMax = 0, memoryNonHeapUsed = 0, memoryNonHeapMax = 0;
+            (m.memory || []).forEach(mem => {
+                if (mem.isHeap) {
+                    memoryHeapUsed = mem.used;
+                    memoryHeapMax = mem.max;
+                } else {
+                    memoryNonHeapUsed = mem.used;
+                    memoryNonHeapMax = mem.max;
+                }
+            });
+            let memoryPoolList = m.memoryPool || [];
+            let gcList = m.gc || [];
+            points.push({
+                time: m.time,
+                cpu: m.cpu || 0,
+                memoryHeapUsed,
+                memoryHeapMax,
+                memoryNonHeapUsed,
+                memoryNonHeapMax,
+                memoryPoolList,
+                gcList,
+                thread: m.thread,
+                clazz: m.clazz
+            });
+        });
+    });
+    points.sort((a, b) => a.time - b.time);
+    return points;
+}
+
+// ===================== 主逻辑 =====================
+let refreshTimer = null;
+let countdownTimer = null;
+let countdown = REFRESH_INTERVAL;
+let chartObjs = {};
+let lastRawData = [];
+
+function showError(msg) {
+    $('#lastError').text(msg).show();
+}
+function hideError() {
+    $('#lastError').hide();
+}
+
+function fetchAndRenderAll() {
+    hideError();
+    $('#dashboardPanels').html(PANEL_CONFIGS.map(panel => `
+        <div class="col-md-6 col-lg-4">
+            <div class="panel-card" id="panel_${panel.id}">
+                <div class="panel-title">${panel.title}</div>
+                <div id="chart_${panel.id}" style="height:260px;"></div>
+            </div>
+        </div>
+    `).join(''));
+    $.ajax({
+        url: API_URL,
+        method: 'GET',
+        dataType: 'json',
+        timeout: 8000,
+        success: function(raw) {
+            lastRawData = raw;
+            const allPoints = parseRawData(raw);
+            const now = Date.now();
+            const points = allPoints.filter(p => now - p.time <= TIME_WINDOW);
+            if (!points.length) {
+                PANEL_CONFIGS.forEach(panel => {
+                    $(`#chart_${panel.id}`).html(`<div class='no-data'>暂无数据</div>`);
+                });
+                return;
+            }
+            PANEL_CONFIGS.forEach(panel => {
+                const series = panel.getSeries(points);
+                // 健壮性检查：series为空或所有data都为空时不渲染图表，显示暂无数据
+                const isSeriesEmpty = !series || !series.length || series.every(s => !s.data || !s.data.length || s.data.every(d => d === undefined || d === null || (Array.isArray(d) && d.every(x => x === undefined || x === null))));
+                if (isSeriesEmpty) {
+                    $(`#chart_${panel.id}`).html(`<div class='no-data'>暂无数据</div>`);
+                    if (chartObjs[panel.id]) {
+                        chartObjs[panel.id].destroy();
+                        chartObjs[panel.id] = null;
+                    }
+                    return;
+                }
+                const options = {
+                    chart: {
+                        type: panel.type,
+                        height: 240,
+                        background: '#f7f7fa',
+                        toolbar: { show: false },
+                        animations: { enabled: false },
+                        fontFamily: 'inherit',
+                        events: {
+                            click: function() {
+                                showZoomPanel(panel, series, points);
+                            }
+                        }
+                    },
+                    xaxis: {
+                        type: 'datetime',
+                        labels: {
+                            formatter: function(val) {
+                                return formatTime(val);
+                            },
+                            style: { color: '#888' }
+                        }
+                    },
+                    yaxis: panel.yaxis,
+                    tooltip: panel.tooltip,
+                    legend: { show: true, labels: { colors: ['#333'] } },
+                    series: series,
+                    noData: { text: '暂无数据', align: 'center', verticalAlign: 'middle', style: { color: '#888' } }
+                };
+                if (chartObjs[panel.id]) {
+                    chartObjs[panel.id].destroy();
+                }
+                chartObjs[panel.id] = new ApexCharts(document.querySelector(`#chart_${panel.id}`), options);
+                chartObjs[panel.id].render();
+            });
+        },
+        error: function(xhr, status, err) {
+            PANEL_CONFIGS.forEach(panel => {
+                $(`#chart_${panel.id}`).html(`<div class='no-data'>数据加载失败</div>`);
+            });
+            showError('数据加载失败，请检查网络或后端接口');
+        }
+    });
+}
+
+function showZoomPanel(panel, series, points) {
+    $('#panelZoomModalLabel').text(panel.title);
+    $('#zoomChartContainer').html('');
+    if (window._zoomChartObj) {
+        window._zoomChartObj.destroy();
+    }
+    const options = {
+        chart: {
+            type: panel.type,
+            height: 500,
+            background: '#fff',
+            toolbar: { show: true },
+            fontFamily: 'inherit',
+            animations: { enabled: false }
+        },
+        xaxis: {
+            type: 'datetime',
+            labels: {
+                formatter: function(val) { return formatTime(val); },
+                style: { color: '#888' }
+            }
+        },
+        yaxis: panel.yaxis,
+        tooltip: panel.tooltip,
+        legend: { show: true, labels: { colors: ['#333'] } },
+        series: series,
+        noData: { text: '暂无数据', align: 'center', verticalAlign: 'middle', style: { color: '#888' } }
+    };
+    window._zoomChartObj = new ApexCharts(document.querySelector('#zoomChartContainer'), options);
+    window._zoomChartObj.render();
+    $('#panelZoomModal').modal('show');
+}
+
+function startCountdown() {
+    countdown = REFRESH_INTERVAL;
+    $('#refreshCountdown').text(`距离下次刷新还需 ${countdown} 秒`);
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+            fetchAndRenderAll();
+            countdown = REFRESH_INTERVAL;
+        }
+        $('#refreshCountdown').text(`距离下次刷新还需 ${countdown} 秒`);
+    }, 1000);
+}
+
+$(document).ready(function() {
+    fetchAndRenderAll();
+    startCountdown();
+    $('#manualRefreshBtn').click(function() {
+        fetchAndRenderAll();
+        startCountdown();
+    });
+    $('#panelZoomModal').on('hidden.bs.modal', function() {
+        if (window._zoomChartObj) {
+            window._zoomChartObj.destroy();
+            window._zoomChartObj = null;
+        }
+    });
+});
+</script>
+</body>
+</html>

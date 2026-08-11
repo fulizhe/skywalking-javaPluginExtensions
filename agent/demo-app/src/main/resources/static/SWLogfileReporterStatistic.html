@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>SkyWalking Logfile Reporter Statistic</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/datatables.net-bs4@1.13.6/css/dataTables.bootstrap4.min.css">
+    <style>
+        body {
+            background: #f6f8fb;
+        }
+
+        .control-panel {
+            background: #fff;
+            border: 1px solid #dfe6ee;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .control-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .status-block {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 280px;
+        }
+
+        .status-indicator {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            flex: 0 0 auto;
+        }
+
+        .status-enabled {
+            background: #28a745;
+        }
+
+        .status-disabled {
+            background: #dc3545;
+        }
+
+        .status-unknown {
+            background: #6c757d;
+        }
+
+        .muted-note {
+            color: #6c757d;
+            font-size: 13px;
+        }
+
+        #spanChart {
+            min-height: 350px;
+        }
+
+        .tag-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 260px;
+        }
+
+        .tag-item {
+            font-family: Consolas, Monaco, monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            word-break: break-all;
+            color: #334155;
+        }
+
+        pre {
+            background: #1f2430;
+            color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            max-height: 60vh;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+<div class="container-fluid mt-4 mb-4">
+    <div class="control-panel">
+        <div class="control-row mb-3">
+            <div class="status-block">
+                <span id="logfileReporterStatus" class="status-indicator status-unknown"></span>
+                <strong>Logfile Reporter</strong>
+                <span id="logfileReporterText">状态读取中...</span>
+                <span id="logCountSpan" class="text-muted"></span>
+            </div>
+            <button id="toggleBtn" class="btn btn-sm btn-outline-primary" type="button">切换日志上报</button>
+            <button id="refreshStatisticBtn" class="btn btn-sm btn-outline-secondary" type="button">刷新统计</button>
+        </div>
+
+        <div class="control-row">
+            <div class="status-block">
+                <span id="httpClientCollectStatus" class="status-indicator status-unknown"></span>
+                <strong>HttpClient Body Collect</strong>
+                <span id="httpClientCollectText">状态读取中...</span>
+                <span id="httpClientCollectCount" class="text-muted"></span>
+            </div>
+            <button id="toggleHttpClientCollectBtn" class="btn btn-sm btn-outline-success" type="button">切换 Body 采集</button>
+        </div>
+        <div class="muted-note mt-3">
+            页面会自动轮询两个开关状态。点击时序图后，表格页会展示每个 span 的 tags。
+        </div>
+    </div>
+
+    <table id="traceTable" class="table table-striped table-bordered bg-white" style="width: 100%;">
+        <thead>
+        <tr>
+            <th>Trace ID</th>
+            <th>是否报错</th>
+            <th>Span 数量</th>
+            <th>开始时间</th>
+            <th>结束时间</th>
+            <th>操作</th>
+        </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+<div class="modal fade" id="spanChartModal" tabindex="-1" role="dialog" aria-labelledby="spanChartModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="spanChartModalLabel">Span 详情</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-tabs" id="spanTab" role="tablist">
+                    <li class="nav-item">
+                        <a class="nav-link active" id="tab-chart-tab" data-toggle="tab" href="#tab-chart" role="tab" aria-controls="tab-chart" aria-selected="true">时序图</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="tab-table-tab" data-toggle="tab" href="#tab-table" role="tab" aria-controls="tab-table" aria-selected="false">表格</a>
+                    </li>
+                </ul>
+                <div class="tab-content mt-3">
+                    <div class="tab-pane fade show active" id="tab-chart" role="tabpanel" aria-labelledby="tab-chart-tab">
+                        <div id="spanChart"></div>
+                    </div>
+                    <div class="tab-pane fade" id="tab-table" role="tabpanel" aria-labelledby="tab-table-tab">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-hover" id="spanDetailTable">
+                                <thead class="thead-dark">
+                                <tr>
+                                    <th>Method</th>
+                                    <th>Start Time</th>
+                                    <th>Exec(ms)</th>
+                                    <th>Self(ms)</th>
+                                    <th>API</th>
+                                    <th>Service</th>
+                                    <th>Tags</th>
+                                </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="detailModal" tabindex="-1" role="dialog" aria-labelledby="detailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="detailModalLabel">Trace 详情</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <button class="btn btn-sm btn-outline-primary mb-2" id="copyAllDetailBtn" type="button">复制全部</button>
+                <pre id="detailPre"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/datatables.net@1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/datatables.net-bs4@1.13.6/js/dataTables.bootstrap4.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+<script>
+    let enableLogfileReporter = false;
+    let enableHttpClientCollect = false;
+    let traceTable = null;
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function setStatus($dot, $text, enabled, enabledLabel, disabledLabel) {
+        $dot.removeClass('status-enabled status-disabled status-unknown');
+        if (enabled === true) {
+            $dot.addClass('status-enabled');
+            $text.text(enabledLabel);
+        } else if (enabled === false) {
+            $dot.addClass('status-disabled');
+            $text.text(disabledLabel);
+        } else {
+            $dot.addClass('status-unknown');
+            $text.text('状态未知');
+        }
+    }
+
+    function renderLogfileReporterStatus() {
+        setStatus($('#logfileReporterStatus'), $('#logfileReporterText'), enableLogfileReporter, '已启用', '未启用');
+    }
+
+    function renderHttpClientCollectStatus() {
+        setStatus($('#httpClientCollectStatus'), $('#httpClientCollectText'), enableHttpClientCollect, '已启用', '未启用');
+    }
+
+    function updateLogCount(data) {
+        let count = 0;
+        if (data && data.data) {
+            count = Object.keys(data.data).length;
+        }
+        $('#logCountSpan').text('日志组数: ' + count);
+    }
+
+    function updateHttpClientCollectCount(data) {
+        const count = data && typeof data.dataCount === 'number' ? data.dataCount : 0;
+        $('#httpClientCollectCount').text('采集条数: ' + count);
+    }
+
+    function getQueryParam(name) {
+        const params = new URLSearchParams(window.location.search);
+        return params.get(name);
+    }
+
+    function parseData(data) {
+        const rows = [];
+        if (!data || !data.data) {
+            return rows;
+        }
+
+        Object.keys(data.data).forEach(function(traceId) {
+            const logsArr = data.data[traceId].logs || [];
+            let isError = false;
+            let spanCount = 0;
+            let minStart = null;
+            let maxEnd = null;
+
+            logsArr.forEach(function(log) {
+                if (!Array.isArray(log.spans)) {
+                    return;
+                }
+                log.spans.forEach(function(span) {
+                    spanCount += 1;
+                    if (span.isError) {
+                        isError = true;
+                    }
+                    if (span.startTimeReadable && (!minStart || span.startTime < minStart.raw)) {
+                        minStart = { raw: span.startTime, readable: span.startTimeReadable };
+                    }
+                    if (span.endTimeReadable && (!maxEnd || span.endTime > maxEnd.raw)) {
+                        maxEnd = { raw: span.endTime, readable: span.endTimeReadable };
+                    }
+                });
+            });
+
+            rows.push({
+                traceId: traceId,
+                isError: isError,
+                spanCount: spanCount,
+                startTime: minStart ? minStart.readable : '',
+                endTime: maxEnd ? maxEnd.readable : '',
+                detail: JSON.stringify(logsArr, null, 2)
+            });
+        });
+
+        return rows;
+    }
+
+    function normalizeSpanTags(spanOrTags) {
+        if (!spanOrTags) {
+            return [];
+        }
+
+        const tags = Array.isArray(spanOrTags)
+            ? spanOrTags
+            : (spanOrTags.tagList || spanOrTags.tags || spanOrTags.tagMap || null);
+
+        if (Array.isArray(tags)) {
+            return tags.map(function(tag) {
+                if (tag && typeof tag === 'object') {
+                    const key = tag.key || tag.name || tag.tagKey || tag['tag-key'] || '';
+                    const value = tag.value || tag.tagValue || tag['tag-value'] || '';
+                    if (key || value) {
+                        return String(key) + '=' + String(value);
+                    }
+                    return JSON.stringify(tag);
+                }
+                return String(tag);
+            }).filter(Boolean);
+        }
+
+        if (typeof tags === 'object') {
+            return Object.keys(tags).map(function(key) {
+                return String(key) + '=' + String(tags[key]);
+            });
+        }
+
+        if (typeof spanOrTags === 'object' && !Array.isArray(spanOrTags) && !tags) {
+            return Object.keys(spanOrTags).filter(function(key) {
+                return key !== 'tagList' && key !== 'tags' && key !== 'tagMap';
+            }).map(function(key) {
+                return String(key) + '=' + String(spanOrTags[key]);
+            });
+        }
+
+        return [String(tags)];
+    }
+
+    function renderTagList(tags) {
+        const items = normalizeSpanTags(tags);
+        if (!items.length) {
+            return '<span class="text-muted">-</span>';
+        }
+        return '<div class="tag-list">' + items.map(function(item) {
+            return '<div class="tag-item">' + escapeHtml(item) + '</div>';
+        }).join('') + '</div>';
+    }
+
+    function renderSpanChart(spans, traceId) {
+        if (!spans || !spans.length) {
+            $('#spanChart').html('<div class="text-muted">暂无数据</div>');
+            return;
+        }
+
+        const sortedSpans = spans.slice().sort(function(a, b) {
+            return (a.startTime || 0) - (b.startTime || 0);
+        });
+
+        const series = [{
+            name: 'Span',
+            data: sortedSpans.map(function(span) {
+                return {
+                    x: (span.operationName || 'Unknown') + (span.componentName ? ' [' + span.componentName + ']' : ''),
+                    y: [span.startTime || 0, span.endTime || 0],
+                    fillColor: span.isError ? '#dc3545' : '#3b82f6',
+                    span: span
+                };
+            })
+        }];
+
+        const options = {
+            chart: {
+                type: 'rangeBar',
+                height: 350,
+                toolbar: { show: false },
+                background: '#23272e'
+            },
+            plotOptions: {
+                bar: {
+                    horizontal: true,
+                    barHeight: '60%'
+                }
+            },
+            xaxis: {
+                type: 'datetime',
+                labels: { style: { colors: '#fff' } }
+            },
+            yaxis: {
+                labels: { style: { colors: '#fff' } }
+            },
+            tooltip: {
+                custom: function(context) {
+                    const span = context.w.config.series[context.seriesIndex].data[context.dataPointIndex].span;
+                    const tagItems = normalizeSpanTags(span);
+                    let html = '<div class="p-2">';
+                    html += '<div><strong>' + escapeHtml(span.operationName || '') + '</strong></div>';
+                    if (span.componentName) {
+                        html += '<div>' + escapeHtml(span.componentName) + '</div>';
+                    }
+                    html += '<div>Duration: ' + (((span.endTime || 0) - (span.startTime || 0))) + 'ms</div>';
+                    html += '<div>开始: ' + escapeHtml(span.startTimeReadable || span.startTime || '') + '</div>';
+                    html += '<div>结束: ' + escapeHtml(span.endTimeReadable || span.endTime || '') + '</div>';
+                    if (tagItems.length) {
+                        html += '<div>Tags: ' + escapeHtml(tagItems.join(', ')) + '</div>';
+                    }
+                    html += '</div>';
+                    return html;
+                }
+            },
+            title: {
+                text: 'TraceID: ' + traceId,
+                style: { color: '#fff' }
+            },
+            theme: { mode: 'dark' },
+            colors: ['#3b82f6']
+        };
+
+        if (window._apexChartObj) {
+            window._apexChartObj.destroy();
+        }
+        window._apexChartObj = new ApexCharts(document.querySelector('#spanChart'), Object.assign({}, options, { series: series }));
+        window._apexChartObj.render();
+    }
+
+    function renderSpanTable(spans) {
+        const tbody = $('#spanDetailTable tbody');
+        tbody.empty();
+        if (!spans || !spans.length) {
+            tbody.append('<tr><td colspan="7" class="text-center text-muted">暂无数据</td></tr>');
+            return;
+        }
+
+        spans.forEach(function(span) {
+            const duration = ((span.endTime || 0) - (span.startTime || 0));
+            tbody.append(
+                '<tr>' +
+                '<td>' + escapeHtml(span.operationName || '') + '</td>' +
+                '<td>' + escapeHtml(span.startTimeReadable || '') + '</td>' +
+                '<td>' + duration + '</td>' +
+                '<td>' + duration + '</td>' +
+                '<td>' + escapeHtml(span.componentName || '') + '</td>' +
+                '<td>' + escapeHtml(span.serviceInstance || span.service || '') + '</td>' +
+                '<td>' + renderTagList(span) + '</td>' +
+                '</tr>'
+            );
+        });
+    }
+
+    function ensureDataTable(rows) {
+        if (traceTable) {
+            traceTable.clear().rows.add(rows).draw(false);
+            return;
+        }
+
+        traceTable = $('#traceTable').DataTable({
+            data: rows,
+            pageLength: 25,
+            columns: [
+                { data: 'traceId', orderable: false },
+                {
+                    data: 'isError',
+                    render: function(data) {
+                        return data ? '<span class="text-danger">是</span>' : '<span class="text-success">否</span>';
+                    }
+                },
+                { data: 'spanCount' },
+                { data: 'startTime' },
+                { data: 'endTime' },
+                {
+                    data: null,
+                    orderable: false,
+                    render: function(data, type, row) {
+                        return '<div class="btn-group" role="group">' +
+                            '<button class="btn btn-sm btn-info show-chart-btn" data-traceid="' + row.traceId + '" data-detail="' + encodeURIComponent(row.detail) + '">时序图</button>' +
+                            '<button class="btn btn-sm btn-secondary show-detail-btn" data-traceid="' + row.traceId + '" data-detail="' + encodeURIComponent(row.detail) + '">详情</button>' +
+                            '</div>';
+                    }
+                }
+            ],
+            initComplete: function() {
+                $(this).parents('.dataTables_wrapper').find('input[type="search"]').css('width', '240px');
+            }
+        });
+
+        const traceidParam = getQueryParam('traceid');
+        if (traceidParam) {
+            const $searchInput = $('#traceTable_filter input[type="search"]');
+            $searchInput.val(traceidParam);
+            $searchInput.trigger('input');
+        }
+    }
+
+    function loadStatistic() {
+        return $.get('/statistic', function(data) {
+            enableLogfileReporter = !!data.enbaleLogfileReporter;
+            renderLogfileReporterStatus();
+            updateLogCount(data);
+            ensureDataTable(parseData(data));
+        });
+    }
+
+    function refreshHttpClientCollectStatus() {
+        return $.get('/httpclient/collect/status', function(data) {
+            enableHttpClientCollect = !!(data && data.enabled);
+            renderHttpClientCollectStatus();
+            updateHttpClientCollectCount(data);
+        }).fail(function() {
+            setStatus($('#httpClientCollectStatus'), $('#httpClientCollectText'), null, '', '');
+            $('#httpClientCollectCount').text('采集条数: -');
+        });
+    }
+
+    function refreshStatuses() {
+        $.get('/statistic', function(data) {
+            enableLogfileReporter = !!data.enbaleLogfileReporter;
+            renderLogfileReporterStatus();
+            updateLogCount(data);
+        });
+        refreshHttpClientCollectStatus();
+    }
+
+    function toggleLogfileReporter() {
+        $.ajax({
+            url: '/toggle',
+            method: 'POST',
+            data: { enable: !enableLogfileReporter },
+            success: function() {
+                refreshStatuses();
+            },
+            error: function() {
+                alert('日志上报状态切换失败');
+            }
+        });
+    }
+
+    function toggleHttpClientCollect() {
+        $.ajax({
+            url: '/httpclient/collect/toggle',
+            method: 'POST',
+            data: { enable: !enableHttpClientCollect },
+            success: function(data) {
+                enableHttpClientCollect = !!(data && data.enabled);
+                renderHttpClientCollectStatus();
+                updateHttpClientCollectCount(data);
+            },
+            error: function() {
+                alert('HttpClient Body 采集状态切换失败');
+            }
+        });
+    }
+
+    $(document).on('click', '#copyAllDetailBtn', function() {
+        navigator.clipboard.writeText($(this).data('json') || '');
+    });
+
+    $(document).ready(function() {
+        $('#toggleBtn').on('click', toggleLogfileReporter);
+        $('#refreshStatisticBtn').on('click', loadStatistic);
+        $('#toggleHttpClientCollectBtn').on('click', toggleHttpClientCollect);
+
+        loadStatistic();
+        refreshHttpClientCollectStatus();
+        setInterval(refreshStatuses, 3000);
+
+        $('#traceTable tbody').on('click', '.show-chart-btn', function() {
+            const traceId = $(this).data('traceid');
+            const detail = decodeURIComponent($(this).data('detail'));
+            let logsArr = [];
+            try {
+                logsArr = JSON.parse(detail);
+            } catch (e) {
+                logsArr = [];
+            }
+
+            let spans = [];
+            logsArr.forEach(function(log) {
+                if (Array.isArray(log.spans)) {
+                    spans = spans.concat(log.spans);
+                }
+            });
+
+            $('#spanChart').empty();
+            $('#spanDetailTable tbody').empty();
+            renderSpanChart(spans, traceId);
+            renderSpanTable(spans);
+            $('#spanTab a:first').tab('show');
+            $('#spanChartModal').modal('show');
+        });
+
+        $('#traceTable tbody').on('click', '.show-detail-btn', function() {
+            const detail = decodeURIComponent($(this).data('detail'));
+            let logsArr = [];
+            try {
+                logsArr = JSON.parse(detail);
+            } catch (e) {
+                logsArr = [];
+            }
+            const jsonStr = JSON.stringify(logsArr, null, 2);
+            $('#detailPre').text(jsonStr);
+            $('#copyAllDetailBtn').data('json', jsonStr);
+            $('#detailModal').modal('show');
+        });
+    });
+</script>
+</body>
+</html>

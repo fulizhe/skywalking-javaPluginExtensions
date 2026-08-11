@@ -15,17 +15,25 @@
  *  limitations under the License.
  */
 
-package org.openskywalking.demo;
+package org.openskywalking.demo.config;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableAsync;
+import java.security.SecureRandom;
+import java.util.Random;
 
-@SpringBootApplication
-@EnableAsync
-public class DemoAppApplication {
+/**
+ * 一些常用的单利对象
+ *
+ * @author L.cm
+ */
+public class Holder {
 
-    public static void main(String[] args) {
-        SpringApplication.run(DemoAppApplication.class, args);
-    }
+	/**
+	 * RANDOM
+	 */
+	public final static Random RANDOM = new Random();
+
+	/**
+	 * SECURE_RANDOM
+	 */
+	public final static SecureRandom SECURE_RANDOM = new SecureRandom();
 }

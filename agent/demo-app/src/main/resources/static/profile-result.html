@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>专业 APM Profile 调用树</title>
+    <style>
+        :root { --primary-color: #1890ff; --bar-color: rgba(24, 144, 255, 0.6); --text-main: #333; --text-sub: #777; --border-color: #eee; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f5f7fa; padding: 20px; margin: 0; }
+        .container { background: #fff; border-radius: 8px; box-shadow: 0 2px 12px 0 rgba(0,0,0,0.05); padding: 20px; max-width: 100%; margin: 0 auto; box-sizing: border-box; }
+        .header { border-bottom: 2px solid var(--border-color); padding-bottom: 15px; margin-bottom: 15px; }
+        .header h2 { margin: 0 0 8px 0; color: #2c3e50; }
+        .summary { color: var(--text-sub); font-size: 14px; }
+        .highlight { color: #e74c3c; font-weight: bold; font-size: 16px; }
+        
+        /* 增加横向滚动容器 */
+        .tree-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid #f0f0f0;
+            border-radius: 4px;
+            padding-bottom: 10px;
+        }
+
+        /* 采用 Grid 布局，允许 Method 列无限延伸 max-content */
+        .tree-row, .tree-header {
+            display: grid;
+            grid-template-columns: minmax(800px, max-content) 120px 250px;
+            border-bottom: 1px solid #f9f9f9;
+            padding: 5px 0;
+            min-width: 100%;
+            width: max-content; /* 关键：撑开横向滚动条 */
+        }
+        
+        .tree-header { font-weight: bold; background: #fafafa; border-bottom: 1px solid var(--border-color); padding: 10px 0; color: #555; position: sticky; top: 0; z-index: 10;}
+        .tree-row:hover { background-color: #f0f7ff; }
+        
+        .method-cell { display: flex; align-items: center; white-space: nowrap; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 13px; padding-right: 20px;}
+        .samples-cell { text-align: right; padding-right: 30px; color: var(--text-main); font-weight: 500; font-size: 13px; display: flex; align-items: center; justify-content: flex-end;}
+        .bar-cell { display: flex; align-items: center; padding-left: 10px; padding-right: 20px; }
+
+        .toggle-btn { width: 14px; height: 14px; display: inline-block; text-align: center; line-height: 12px; cursor: pointer; user-select: none; border: 1px solid #ccc; background: #fff; border-radius: 2px; margin-right: 6px; font-size: 12px; color: #666; font-family: monospace; flex-shrink: 0;}
+        .toggle-btn.empty { border: none; background: transparent; cursor: default; }
+        
+        /* 代码着色 */
+        .pkg-name { color: #999; }
+        .class-name { color: #2c3e50; font-weight: 600; }
+        .method-name { color: #d35400; }
+        .line-num { color: #2980b9; }
+
+        .bar-bg { flex-grow: 1; height: 14px; background: #f0f0f0; border-radius: 2px; margin-right: 10px; overflow: hidden; }
+        .bar-fill { height: 100%; background: var(--bar-color); }
+        .bar-text { width: 45px; text-align: right; color: var(--text-sub); font-size: 12px; }
+
+        .children-container { display: block; }
+        .collapsed > .children-container { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>🔬 Profile 方法调用树 (防溢出版)</h2>
+            <div class="summary">共聚合了 <span class="highlight" id="totalSamples">0</span> 个慢请求快照。(提示：包名已自动智能缩写，支持横向滚动)</div>
+        </div>
+        
+        <div class="tree-wrapper">
+            <div id="treeContainer">
+                <div class="tree-header">
+                    <div class="method-cell" style="padding-left: 10px;">调用堆栈 (Method Stack)</div>
+                    <div class="samples-cell">命中样本数</div>
+                    <div class="bar-cell">耗时占比分布</div>
+                </div>
+                <!-- 树节点注入区 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 你的原始数据 Array
+	    fetch('/profileData2')
+	        .then(response => response.json())
+	        .then(data => {
+	            rawData = data;	
+
+				// 初始化渲染
+				const aggregated = aggregateData(rawData);
+				const children = Object.values(aggregated.root.childrenMap);
+				let finalHtml = '';
+				children.forEach(child => {
+					finalHtml += renderNode(child, 0, aggregated.totalSamples);
+				});
+				
+				// 注入 DOM
+				const container = document.getElementById('treeContainer');
+				container.innerHTML += finalHtml;
+	        })
+	        .catch(error => console.error('Error fetching profile data:', error));       
+        
+
+        function aggregateData(dataArray) {
+            let totalSamples = 0;
+            const root = { name: "Request Root", value: 0, childrenMap: {} };
+
+            dataArray.forEach(snapshot => {
+                const stack = snapshot.stack.codeSignatures;
+                if (!stack || stack.length === 0) return;
+
+                totalSamples++;
+                root.value++;
+                let current = root;
+
+                stack.forEach(method => {
+                    if (!current.childrenMap[method]) {
+                        current.childrenMap[method] = { name: method, value: 0, childrenMap: {} };
+                    }
+                    current.childrenMap[method].value++;
+                    current = current.childrenMap[method];
+                });
+            });
+
+            document.getElementById('totalSamples').innerText = totalSamples;
+            return { root, totalSamples };
+        }
+
+        // ⭐ 核心优化：智能缩短包名
+        function formatMethodSignature(signature) {
+            try {
+                const noArgs = signature.replace(/\(.*\)/, '');
+                const colonIdx = noArgs.lastIndexOf(':');
+                const lineStr = colonIdx > -1 ? noArgs.substring(colonIdx) : '';
+                const pathStr = colonIdx > -1 ? noArgs.substring(0, colonIdx) : noArgs;
+
+                const lastDotIdx = pathStr.lastIndexOf('.');
+                if (lastDotIdx === -1) return `<span class="method-name">${signature}</span>`;
+
+                const methodName = pathStr.substring(lastDotIdx + 1);
+                const classPath = pathStr.substring(0, lastDotIdx);
+                const secondLastDotIdx = classPath.lastIndexOf('.');
+                
+                const className = secondLastDotIdx > -1 ? classPath.substring(secondLastDotIdx + 1) : classPath;
+                const pkgNameFull = secondLastDotIdx > -1 ? classPath.substring(0, secondLastDotIdx + 1) : '';
+
+                // 把 org.apache.catalina.core. 缩写为 o.a.c.c.
+                let shortPkg = '';
+                if (pkgNameFull) {
+                    shortPkg = pkgNameFull.split('.').filter(p => p.length > 0).map(p => p[0]).join('.') + '.';
+                }
+
+                return `<span class="pkg-name">${shortPkg}</span><span class="class-name">${className}</span>.<span class="method-name">${methodName}</span><span class="line-num">${lineStr}</span>`;
+            } catch (e) {
+                return `<span class="method-name">${signature}</span>`;
+            }
+        }
+
+        let nodeIdCounter = 0;
+
+        function renderNode(node, depth, totalSamples) {
+            const children = Object.values(node.childrenMap).sort((a, b) => b.value - a.value);
+            const hasChildren = children.length > 0;
+            const percentage = ((node.value / totalSamples) * 100).toFixed(1);
+            const nodeId = 'node-' + (nodeIdCounter++);
+            
+            const isSinglePath = children.length === 1 && percentage === "100.0";
+            const autoExpand = isSinglePath ? '' : 'collapsed';
+            const toggleIcon = hasChildren ? (isSinglePath ? '[-]' : '[+]') : '';
+            const btnClass = hasChildren ? 'toggle-btn' : 'toggle-btn empty';
+
+            // ⭐ 核心优化：调小缩进间距 (原20px -> 14px)
+            const paddingLeft = depth * 14 + 10;
+
+            let html = `
+                <div class="tree-node ${autoExpand}" id="${nodeId}">
+                    <div class="tree-row">
+                        <div class="method-cell" style="padding-left: ${paddingLeft}px;">
+                            <span class="${btnClass}" onclick="toggleNode('${nodeId}', event)">${toggleIcon}</span>
+                            <span title="${node.name}">${formatMethodSignature(node.name)}</span>
+                        </div>
+                        <div class="samples-cell">${node.value}</div>
+                        <div class="bar-cell">
+                            <div class="bar-bg"><div class="bar-fill" style="width: ${percentage}%"></div></div>
+                            <div class="bar-text">${percentage}%</div>
+                        </div>
+                    </div>
+                    <div class="children-container">
+            `;
+
+            children.forEach(child => {
+                html += renderNode(child, depth + 1, totalSamples);
+            });
+
+            html += `</div></div>`;
+            return html;
+        }
+
+        function toggleNode(nodeId, event) {
+            event.stopPropagation();
+            const nodeDom = document.getElementById(nodeId);
+            const btn = nodeDom.querySelector('.toggle-btn');
+            if (btn.classList.contains('empty')) return;
+
+            if (nodeDom.classList.contains('collapsed')) {
+                nodeDom.classList.remove('collapsed');
+                btn.innerText = '[-]';
+            } else {
+                nodeDom.classList.add('collapsed');
+                btn.innerText = '[+]';
+            }
+        }
+
+
+    </script>
+</body>
+</html>

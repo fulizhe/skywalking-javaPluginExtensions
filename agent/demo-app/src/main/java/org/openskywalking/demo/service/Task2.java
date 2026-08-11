@@ -15,17 +15,29 @@
  *  limitations under the License.
  */
 
-package org.openskywalking.demo;
+package org.openskywalking.demo.service;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableAsync;
+import java.util.concurrent.CountDownLatch;
 
-@SpringBootApplication
-@EnableAsync
-public class DemoAppApplication {
+import cn.hutool.core.lang.Console;
+import cn.hutool.core.thread.ThreadUtil;
+import cn.hutool.core.util.RandomUtil;
 
-    public static void main(String[] args) {
-        SpringApplication.run(DemoAppApplication.class, args);
-    }
+public class Task2 implements Runnable {
+
+	final CountDownLatch countDownLatch;
+	
+	public Task2(CountDownLatch countDownLatch) {
+		super();
+		this.countDownLatch = countDownLatch;
+	}
+
+
+	@Override
+	public void run() {
+		long randomLong = RandomUtil.randomLong(600);
+		ThreadUtil.sleep(randomLong);
+		Console.log("task2 --- {}", randomLong);					
+		countDownLatch.countDown();	
+	}
 }

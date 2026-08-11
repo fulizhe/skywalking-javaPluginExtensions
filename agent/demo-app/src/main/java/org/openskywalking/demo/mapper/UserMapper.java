@@ -15,17 +15,16 @@
  *  limitations under the License.
  */
 
-package org.openskywalking.demo;
+package org.openskywalking.demo.mapper;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableAsync;
+import java.util.Map;
 
-@SpringBootApplication
-@EnableAsync
-public class DemoAppApplication {
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
-    public static void main(String[] args) {
-        SpringApplication.run(DemoAppApplication.class, args);
-    }
+@Mapper
+public interface UserMapper {
+	@Select("SELECT * FROM \"USER\" WHERE use_name = #{userName}")
+	public Map<String, Object> query(@Param("userName") String userName);
 }

@@ -1,3 +1,24 @@
 server:
   # 全仓库统一 9600;遵循 WebPort 环境变量约定(与 agent webhook 端口对齐)
   port: ${WebPort:9600}
+
+# springfox/knife4j 2.x 需用 ant 路径匹配(Spring Boot 2.6+ 默认 PathPattern 会导致启动失败)
+spring:
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+  datasource:
+    url: jdbc:h2:mem:dbtest;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: "123456"
+  sql:
+    init:
+      # 沿用旧 demo 工程的 h2 内存库,启动即建表灌数据(初学者 SQL 可观测演示)
+      schema-locations: classpath:schema/schema.sql
+      data-locations: classpath:schema/data.sql
+  h2:
+    console:
+      enabled: true
+      path: /h2
+

@@ -8,6 +8,15 @@
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
 
+## 初学者演示(迁移自旧 demo 工程)
+
+本工程还承载一套面向 SkyWalking 初学者的 API 演示,迁移自旧 `sb-skywalking` demo 工程(包名从 `com.fulizhe.demo` 改为 `org.openskywalking.demo`),与上面的插件验证台共存:
+
+- 入口页:<http://127.0.0.1:9600/9527.html>(各演示页导航)、<http://127.0.0.1:9600/doc.html>(knife4j 接口文档);
+- 控制器:`HelloController`(hello/异步/@Trace 注解/MyBatis+JDBC 查询/性能剖析等)与 `FullSampleController`(`/fullSample`),见 `src/main/java/org/openskywalking/demo/controller/`;
+- SQL 演示数据:内存 H2(`jdbc:h2:mem:dbtest`),启动时由 `schema/schema.sql` + `schema/data.sql` 建表灌数据,`/queryDbByMybatis`(MyBatis)与 `/queryDbByJdbc`(JdbcTemplate)双路可观测;H2 控制台在 <http://127.0.0.1:9600/h2>(JDBC URL `jdbc:h2:mem:dbtest`,用户 `sa`,密码 `123456`);
+- 兼容性适配(相对旧工程):H2 2.x 保留字/函数差异(`USER` 表加引号、`sysdate` → `CURRENT_TIMESTAMP`),springfox 2.10 需要 `spring.mvc.pathmatch.matching-strategy=ant_path_matcher`。
+
 ## 插件是什么
 
 `logfile-reporter-plugin` 是 SkyWalking Java Agent 的本地内存报告插件:默认情况下 agent 通过 gRPC 把监控数据上报给 OAP 后端;插件拦截并改写这条通路,把六类数据流(链路段 / JVM 指标 / meter 指标 / 应用日志 / 心跳·实例属性 / profile 快照)写入应用进程内的有界缓存,通过宿主工具类暴露的 JSON 接口实时可查,并提供 Trace 告警(HTTP webhook 通知)与运行时开关(不重启即启用/禁用写入)。
@@ -110,11 +119,14 @@ pwsh ./scripts/start-demo.ps1
 agent/demo-app/
 ├── pom.xml                     # 独立 pom,不进 agent reactor
 ├── src/main/
-│   ├── java/org/openskywalking/demo/   # Spring Boot 应用、控制器、配置
+│   ├── java/org/openskywalking/demo/   # Spring Boot 应用、控制器、配置(含初学者演示 HelloController/FullSampleController)
 │   ├── java/org/apache/skywalking/apm/toolkit/SWLogfileReporterUtils.java  # 宿主工具类桩(勿改名)
 │   └── resources/
 │       ├── static/index.html          # 能力导览首页(/)
+│       ├── static/9527.html           # 初学者演示导航(HelloController 等页面)
 │       ├── static/dashboards/         # 六数据流仪表盘(与验证脚本同源 JSON 契约)
+│       ├── static/SW*.html            # 各演示大屏页(迁移自旧 demo 工程)
+│       ├── schema/schema.sql + data.sql  # H2 内存库建表与演示数据
 │       ├── agent.trace-alert.config.sample
 │       └── application.yml
 └── scripts/
