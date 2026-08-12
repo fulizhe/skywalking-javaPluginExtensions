@@ -10,19 +10,44 @@ import java.util.Map;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.LogFileReporterPluginConfig;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class WebhookUrlResolverTest {
 
+    private static String originalWebhookUrl;
+    private static String originalWebhookPath;
+    private static String originalWebhookHost;
+    private static String originalWebhookPortEnv;
+    private static Integer originalWebhookPortDefault;
+
+    @BeforeClass
+    public static void saveOriginalConfig() {
+        originalWebhookUrl = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_URL;
+        originalWebhookPath = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PATH;
+        originalWebhookHost = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_HOST;
+        originalWebhookPortEnv = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_ENV;
+        originalWebhookPortDefault = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_DEFAULT;
+    }
+
     @Before
-    @After
-    public void reset() {
+    public void clearConfig() {
         WebhookUrlResolver.resetEnvProviderForTest();
         LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_URL = "";
         LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PATH = "";
         LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_HOST = "127.0.0.1";
         LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_ENV = "WebPort";
         LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_DEFAULT = 9600;
+    }
+
+    @After
+    public void restoreOriginalConfig() {
+        WebhookUrlResolver.resetEnvProviderForTest();
+        LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_URL = originalWebhookUrl;
+        LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PATH = originalWebhookPath;
+        LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_HOST = originalWebhookHost;
+        LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_ENV = originalWebhookPortEnv;
+        LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.WEBHOOK_PORT_DEFAULT = originalWebhookPortDefault;
     }
 
     @Test
