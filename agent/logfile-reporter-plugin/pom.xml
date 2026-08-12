@@ -45,6 +45,12 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<!-- 版本由父 pom pluginManagement 统一为 3.x;apm-agent 在 fork 子进程里可能导致 Surefire 误判 VM 异常退出，同进程执行更稳定 -->
+			        <!-- 不创建独立子 JVM 进程，所有测试直接运行在 Maven 主进程（Maven 本身的 JVM）内部 -->
+			        <!--
+			            forkCount=0 = 牺牲运行隔离换取启动速度；
+			            适合：本地临时调试、小型简单单元测试；
+			            不适合：集成测试、SpringBoot 容器测试、CI 流水线、需要 javaagent/JaCoCo、存在静态变量 / 系统属性修改的项目。
+					-->					
 					<forkCount>0</forkCount>
 					<includes>
 						<include>**/alert/*Test.java</include>

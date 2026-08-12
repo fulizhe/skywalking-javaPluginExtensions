@@ -113,6 +113,9 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <!-- Maven 3.8.x 默认绑定编译器插件 3.1,不识别 <release>,会按 source/target=5 编译并被 JDK 17 拒绝;
+                    固定版本使本地与 CI 一致(支持 <release>8</release> 且与 ADR-01 的 JDK 17 工具链匹配) -->
+                <version>3.11.0</version>
                 <configuration>
                     <!-- 构建工具链可用 JDK 17(需 JDK 9+ 编译器),产物字节码基线保持 8,并强制 API 边界 -->
                     <release>8</release>
