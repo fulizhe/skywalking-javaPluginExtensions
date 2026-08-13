@@ -6,7 +6,6 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SI
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -35,7 +34,7 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 /**
  * <p>
  * TraceSegmentServiceClient 的本地实现：
- * 收集到的 TraceSegment 数据不再通过网络发送给 OAP，而是转成 Log/Map 后写入本地有界 LRU 缓存，
+ * 收集到的 TraceSegment 数据不再通过网络发送给 OAP，而是转成 Log/Map 后写入本地有界 FIFO 缓存，
  * 供状态暴露、日志上报等组件按需读取。
  * </p>
  * <p>
@@ -58,8 +57,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	/** 本地 Trace 日志缓存条数上限，由 {@link LogFileReporterPluginConfig.Plugin.LogFileReporter} 配置，默认 1000 */
 	private int maxLogSize;
-	/** 借鉴自 Druid 的 JdbcDataSourceStat，使用同步包装保证并发访问安全；在 prepare() 中初始化 */
-	private Map<String, Map<String, Object>> logfileStatMap;
+	/** 按 traceId 合并的有界键式存储，FIFO 淘汰，单锁守护；在 prepare() 中初始化 */
+	private KeyedLocalStore<String, Map<String, Object>> traceStore;
 
 	private AsyncTraceAlertDispatcher traceAlertDispatcher;
 
@@ -87,12 +86,10 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 * 返回当前缓存的快照，调用方不应修改。避免与消费线程并发修改导致 CME 或读到半写状态。
 	 */
 	public Map<String, Map<String, Object>> getLogfileStatMap() {
-		if (logfileStatMap == null) {
+		if (traceStore == null) {
 			return new HashMap<>();
 		}
-		synchronized (logfileStatMap) {
-			return new HashMap<>(logfileStatMap);
-		}
+		return traceStore.snapshot();
 	}
 
 	/**
@@ -115,15 +112,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		LOGGER.info("### LogFileTraceSegmentServiceClient.prepare方法被调用，配置的maxLogSize为: {}，实际使用为: {}", configured, this.maxLogSize);
 
 		final int maxSize = this.maxLogSize;
-		logfileStatMap = Collections.synchronizedMap(
-				new LinkedHashMap<String, Map<String, Object>>(16, 0.75f, false) {
-					private static final long serialVersionUID = 1L;
-
-					@Override
-					protected boolean removeEldestEntry(Map.Entry<String, Map<String, Object>> eldest) {
-						return size() > maxSize;
-					}
-				});
+		traceStore = new KeyedLocalStore<String, Map<String, Object>>(maxSize);
 
 		LOGGER.warn("### prepare - LogFileTraceSegmentServiceClient - maxLogSize is [ {} ]", maxLogSize);
 
@@ -177,7 +166,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		if (LOGGER.isDebugEnable()) {
 			LOGGER.debug(
 					"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
-					Config.Agent.SERVICE_NAME, isEnableLogfileReporter(), data.size(), logfileStatMap.size());
+					Config.Agent.SERVICE_NAME, isEnableLogfileReporter(), data.size(), traceStore.size());
 		}
 		// 《SW原理 - 基本概念 （ TraceSegment ）》
 		// 1. 一个trace由多个tracesegment构成
@@ -264,65 +253,34 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
-	 * 按 traceId 合并：已有则追加到 logs 列表，否则 put 新 LogCollection.toMap()。
-	 * 整段逻辑在 statMap 上同步，保证同一 traceId 的并发合并不会丢 segment 或结构错乱。
+	 * 按 traceId 合并：已有则把新段追加到 logs 列表，否则放入首个段的集合。
 	 * <p>
-	 * 锁释放后，将 mergedEntry 的 logs 列表做防御性拷贝后再传给 afterTraceMerged，
-	 * 避免告警线程遍历 logs 时消费线程同步追加导致 ConcurrentModificationException。
-	 * </p>
-	 * <p>
-	 * <b>性能影响：</b>
-	 * <ul>
-	 * <li>锁本身开销很小：无争用时 synchronized 成本极低，临界区内仅做 map 查写与 list 追加，持锁时间极短。</li>
-	 * <li>消费侧仅单线程：DataCarrier 通常只配 1 个消费者，不存在多个消费线程争用同一把锁。</li>
-	 * <li>可能争用点：{@link #getLogfileStatMap()} 内部也会对同一 map 做 synchronized 拷贝快照，
-	 * 若在合并过程中有线程调用 getLogfileStatMap()，会短暂互斥等待；反之亦然。在「单消费者 + 状态接口调用不频繁」的前提下影响可忽略。</li>
-	 * <li>若后续出现状态接口响应变慢或 trace 堆积，可考虑缩小临界区或改用 {@code ConcurrentHashMap#compute} 等细粒度并发结构。</li>
-	 * </ul>
+	 * 合并由 {@link KeyedLocalStore#merge} 在存储锁内原子完成（返回更新后的值）。存储值采用
+	 * "只替换不原地修改"的发布方式：remapper 总是返回新构造的合并值，已发布的值之后不会再被
+	 * 改写，告警分发器可直接遍历合并结果，且 webhook 网络 I/O 不占用存储临界区。
 	 * </p>
 	 */
 	private void mergeLogIntoStatMap(Log log) {
 		final String globalTraceid = log.getTraceId();
-
-		final Map<String, Map<String, Object>> statMap = logfileStatMap;
-		Map<String, Object> snapshotForAlert = null;
-		synchronized (statMap) {
-			if (statMap.containsKey(globalTraceid)) {
-				// 已有该traceId，合并log
-				Object obj = statMap.get(globalTraceid);
-				if (obj instanceof Map) {
-					Map<String, Object> map = (Map<String, Object>) obj;
-					Object logsObj = map.get("logs");
-					if (logsObj instanceof List) {
-						@SuppressWarnings("unchecked")
-						List<Map<String, Object>> logs = (List<Map<String, Object>>) logsObj;
-						// 将当前log对象转为map并加入
-						logs.add(log.toMap());
-					}
+		final Map<String, Object> incoming = new LogCollection(Collections.singletonList(log)).toMap();
+		final Map<String, Object> merged = traceStore.merge(globalTraceid, incoming, (existing, batch) -> {
+			final Map<String, Object> combined = new HashMap<String, Object>(existing);
+			Object logsObj = combined.get("logs");
+			if (logsObj instanceof List) {
+				@SuppressWarnings("unchecked")
+				final List<Map<String, Object>> logs = (List<Map<String, Object>>) logsObj;
+				@SuppressWarnings("unchecked")
+				final List<Map<String, Object>> incomingLogs = (List<Map<String, Object>>) batch.get("logs");
+				if (incomingLogs != null) {
+					final List<Map<String, Object>> appendedLogs = new ArrayList<Map<String, Object>>(logs);
+					appendedLogs.addAll(incomingLogs);
+					combined.put("logs", appendedLogs);
 				}
-			} else {
-				// 没有该traceId，直接put一个新的LogCollection.toMap()
-				statMap.put(globalTraceid, new LogCollection(new ArrayList<Log>() {
-					{
-						add(log);
-					}
-				}).toMap());
 			}
-			// 在锁内对 logs 列表做防御性拷贝，生成告警用快照，避免锁外遍历与锁内追加并发冲突
-			final Map<String, Object> live = statMap.get(globalTraceid);
-			if (live != null) {
-				final Map<String, Object> snapshot = new HashMap<>(live);
-				final Object logsObj = snapshot.get("logs");
-				if (logsObj instanceof List) {
-					@SuppressWarnings("unchecked")
-					final List<Map<String, Object>> origLogs = (List<Map<String, Object>>) logsObj;
-					snapshot.put("logs", new ArrayList<>(origLogs));
-				}
-				snapshotForAlert = snapshot;
-			}
-		}
-		if (traceAlertDispatcher != null && snapshotForAlert != null) {
-			traceAlertDispatcher.afterTraceMerged(globalTraceid, snapshotForAlert);
+			return combined;
+		});
+		if (traceAlertDispatcher != null && merged != null) {
+			traceAlertDispatcher.afterTraceMerged(globalTraceid, merged);
 		}
 	}
 

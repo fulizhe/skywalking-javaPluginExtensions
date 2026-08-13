@@ -3,15 +3,9 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import org.junit.Before;
 import org.junit.Test;
 
 public class RulesEngineTest {
-
-    @Before
-    public void resetCache() {
-        AntPatternCache.resetForTest();
-    }
 
     @Test
     public void slowAntOperationOverridesDefault() {
@@ -59,9 +53,9 @@ public class RulesEngineTest {
                 "operation:GET:/api/exists/**=404");
         assertEquals(2, engine.getTotalRuleCount());
         assertEquals(0, engine.getRuleBindings().get(0).getRuleIndex());
-        assertEquals(AlertRuleType.SLOW, engine.getRuleBindings().get(0).getType());
+        assertEquals(RulesEngine.AlertRuleType.SLOW, engine.getRuleBindings().get(0).getType());
         assertEquals(1, engine.getRuleBindings().get(1).getRuleIndex());
-        assertEquals(AlertRuleType.ERROR_IGNORE, engine.getRuleBindings().get(1).getType());
+        assertEquals(RulesEngine.AlertRuleType.ERROR_IGNORE, engine.getRuleBindings().get(1).getType());
         assertEquals(1, engine.matchErrorIgnoreRuleIndex("GET:/api/exists/1", null, 404));
     }
 }

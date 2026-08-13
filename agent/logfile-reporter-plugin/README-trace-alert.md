@@ -126,7 +126,7 @@ segment 合并完成
 | Pattern 去重 | `AntPatternCache`（`ConcurrentHashMap` + `computeIfAbsent`），相同 pattern 只编译一次 |
 | 热路径 | `evaluate()` 仅 `rule.matcher.matches(text)`，无 split / parse / compile |
 | 状态码集合 | ERROR 规则用 `StatusCodeAllowlist`（`boolean[600]`），避免装箱 |
-| URL path | 每次 `UrlPathExtractor.extractPath(url)`（规则量大时可再考虑 LRU） |
+| URL path | 每次 `UrlPathExtractor.extractPath(url)`（规则量大时可再考虑缓存） |
 
 启动日志示例：
 
@@ -148,16 +148,13 @@ segment 合并完成
 
 | 类 | 说明 |
 |----|------|
-| `RulesAggregateParser` | 解析配置、分配全局 `ruleIndex`、启动期预编译 |
-| `RulesEngine` | SLOW + ERROR 统一匹配入口（`matchSlow` / `matchErrorIgnoreRuleIndex`） |
-| `CompiledAntPattern` / `AntPatternCache` | Ant pattern 预编译与缓存 |
+| `RulesAggregateParser` | 解析配置、分配全局 `ruleIndex`、启动期预编译（经引擎持有的 `AntPatternCache`） |
+| `RulesEngine` | 告警规则语义唯一驻点：`matchSlow` / `matchErrorIgnoreRuleIndex` 匹配入口 + 统计读口；`MatchKind` / `AlertRuleType` / `AlertRuleBinding` / `StatusCodeAllowlist` / `CompiledRule`（含 `SlowCompiledRule` / `ErrorIgnoreCompiledRule`）均为其嵌套类型 |
+| `CompiledAntPattern` / `AntPatternCache` | Ant pattern 预编译与去重缓存（引擎实例持有，无静态全局） |
 | `FastPathAntMatcher` | Ant 匹配算法 |
-| `SlowCompiledRule` / `ErrorIgnoreCompiledRule` | 编译后的慢阈值 / 错误白名单规则 |
-| `TracePatternMatcher` | 匹配器接口；唯一实现 `AntTracePatternMatcher` |
 | `UrlPathExtractor` | 从 `url` tag 提取 path |
-| `StatusCodeAllowlist` | HTTP 状态码白名单（固定数组） |
 | `TraceEvaluator` | 慢/错判定，只依赖 `RulesEngine` |
-| `TraceAlertMetrics` | `rules[]` 快照与 hitCount |
+| `TraceAlertMetrics` | `rules[]` 快照与 hitCount（编译计数经引擎读取） |
 
 ## 错误判定
 

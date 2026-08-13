@@ -3,7 +3,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 /**
  * 启动期编译的 Ant pattern，进程生命周期内不可变，热路径无解析/编译。
  */
-final class CompiledAntPattern implements TracePatternMatcher {
+final class CompiledAntPattern {
 
     private final String pattern;
 
@@ -22,8 +22,7 @@ final class CompiledAntPattern implements TracePatternMatcher {
         return pattern;
     }
 
-    @Override
-    public boolean matches(final String text) {
+    boolean matches(final String text) {
         if (text == null) {
             return false;
         }

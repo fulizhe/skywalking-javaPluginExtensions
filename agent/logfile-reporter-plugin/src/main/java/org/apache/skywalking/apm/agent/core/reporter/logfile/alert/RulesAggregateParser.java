@@ -15,19 +15,21 @@ final class RulesAggregateParser {
     }
 
     static RulesEngine parse(final String slowRulesRaw, final String errorIgnoreRulesRaw) {
-        final List<SlowCompiledRule> slowRules = parseSlowRules(slowRulesRaw, 0);
+        final AntPatternCache patternCache = new AntPatternCache();
+        final List<RulesEngine.SlowCompiledRule> slowRules = parseSlowRules(slowRulesRaw, 0, patternCache);
         final int errorStartIndex = slowRules.size();
-        final List<ErrorIgnoreCompiledRule> errorIgnoreRules = parseErrorIgnoreRules(errorIgnoreRulesRaw,
-                errorStartIndex);
-        final List<AlertRuleBinding> bindings = buildBindings(slowRules, errorIgnoreRules);
-        return new RulesEngine(slowRules, errorIgnoreRules, bindings);
+        final List<RulesEngine.ErrorIgnoreCompiledRule> errorIgnoreRules = parseErrorIgnoreRules(errorIgnoreRulesRaw,
+                errorStartIndex, patternCache);
+        final List<RulesEngine.AlertRuleBinding> bindings = buildBindings(slowRules, errorIgnoreRules);
+        return new RulesEngine(slowRules, errorIgnoreRules, bindings, patternCache);
     }
 
-    private static List<SlowCompiledRule> parseSlowRules(final String raw, final int startIndex) {
+    private static List<RulesEngine.SlowCompiledRule> parseSlowRules(final String raw, final int startIndex,
+            final AntPatternCache patternCache) {
         if (raw == null || raw.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        final List<SlowCompiledRule> rules = new ArrayList<>();
+        final List<RulesEngine.SlowCompiledRule> rules = new ArrayList<>();
         int index = startIndex;
         for (String part : raw.split(";")) {
             final String trimmed = part.trim();
@@ -47,8 +49,8 @@ final class RulesAggregateParser {
                 if (thresholdMs <= 0) {
                     continue;
                 }
-                rules.add(new SlowCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT,
-                        PatternMatcherFactory.createAnt(header.pattern), thresholdMs));
+                rules.add(new RulesEngine.SlowCompiledRule(index, trimmed, header.matchKind,
+                        patternCache.get(header.pattern), thresholdMs));
                 index++;
             } catch (IllegalArgumentException ignored) {
             }
@@ -56,11 +58,12 @@ final class RulesAggregateParser {
         return rules;
     }
 
-    private static List<ErrorIgnoreCompiledRule> parseErrorIgnoreRules(final String raw, final int startIndex) {
+    private static List<RulesEngine.ErrorIgnoreCompiledRule> parseErrorIgnoreRules(final String raw,
+            final int startIndex, final AntPatternCache patternCache) {
         if (raw == null || raw.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        final List<ErrorIgnoreCompiledRule> rules = new ArrayList<>();
+        final List<RulesEngine.ErrorIgnoreCompiledRule> rules = new ArrayList<>();
         int index = startIndex;
         for (String part : raw.split(";")) {
             final String trimmed = part.trim();
@@ -80,9 +83,8 @@ final class RulesAggregateParser {
                 continue;
             }
             try {
-                rules.add(new ErrorIgnoreCompiledRule(index, trimmed, header.matchKind, RuleSyntax.ANT,
-                        PatternMatcherFactory.createAnt(header.pattern),
-                        new StatusCodeAllowlist(statusCodes)));
+                rules.add(new RulesEngine.ErrorIgnoreCompiledRule(index, trimmed, header.matchKind,
+                        patternCache.get(header.pattern), new RulesEngine.StatusCodeAllowlist(statusCodes)));
                 index++;
             } catch (IllegalArgumentException ignored) {
             }
@@ -101,10 +103,10 @@ final class RulesAggregateParser {
             return null;
         }
         if ("operation".equalsIgnoreCase(typeText)) {
-            return new ParsedRuleHeader(MatchKind.OPERATION, pattern);
+            return new ParsedRuleHeader(RulesEngine.MatchKind.OPERATION, pattern);
         }
         if ("url".equalsIgnoreCase(typeText)) {
-            return new ParsedRuleHeader(MatchKind.URL, pattern);
+            return new ParsedRuleHeader(RulesEngine.MatchKind.URL, pattern);
         }
         return null;
     }
@@ -128,23 +130,23 @@ final class RulesAggregateParser {
         return codes;
     }
 
-    private static List<AlertRuleBinding> buildBindings(final List<SlowCompiledRule> slowRules,
-            final List<ErrorIgnoreCompiledRule> errorIgnoreRules) {
-        final List<AlertRuleBinding> bindings = new ArrayList<>();
-        for (SlowCompiledRule rule : slowRules) {
-            bindings.add(new AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), AlertRuleType.SLOW));
+    private static List<RulesEngine.AlertRuleBinding> buildBindings(final List<RulesEngine.SlowCompiledRule> slowRules,
+            final List<RulesEngine.ErrorIgnoreCompiledRule> errorIgnoreRules) {
+        final List<RulesEngine.AlertRuleBinding> bindings = new ArrayList<>();
+        for (RulesEngine.SlowCompiledRule rule : slowRules) {
+            bindings.add(new RulesEngine.AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), RulesEngine.AlertRuleType.SLOW));
         }
-        for (ErrorIgnoreCompiledRule rule : errorIgnoreRules) {
-            bindings.add(new AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), AlertRuleType.ERROR_IGNORE));
+        for (RulesEngine.ErrorIgnoreCompiledRule rule : errorIgnoreRules) {
+            bindings.add(new RulesEngine.AlertRuleBinding(rule.getIndex(), rule.getDescriptor(), RulesEngine.AlertRuleType.ERROR_IGNORE));
         }
         return bindings;
     }
 
     private static final class ParsedRuleHeader {
-        private final MatchKind matchKind;
+        private final RulesEngine.MatchKind matchKind;
         private final String pattern;
 
-        private ParsedRuleHeader(final MatchKind matchKind, final String pattern) {
+        private ParsedRuleHeader(final RulesEngine.MatchKind matchKind, final String pattern) {
             this.matchKind = matchKind;
             this.pattern = pattern;
         }

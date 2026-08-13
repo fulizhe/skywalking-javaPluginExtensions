@@ -1,17 +1,10 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
-import org.junit.Before;
 import org.junit.Test;
 
 public class RulesAggregateParserTest {
-
-    @Before
-    public void resetCache() {
-        AntPatternCache.resetForTest();
-    }
 
     @Test
     public void parseAntSlowRules() {
@@ -26,8 +19,8 @@ public class RulesAggregateParserTest {
         final RulesEngine engine = RulesAggregateParser.parse(null,
                 "operation:GET:/api/exists/**=404;url:/inner/probe/**=404,410");
         assertEquals(2, engine.getErrorIgnoreRuleCount());
-        assertEquals(RuleSyntax.ANT, engine.getErrorIgnoreRules().get(0).getSyntax());
-        assertEquals(RuleSyntax.ANT, engine.getErrorIgnoreRules().get(1).getSyntax());
+        assertEquals(0, engine.matchErrorIgnoreRuleIndex("GET:/api/exists/123", null, 404));
+        assertEquals(1, engine.matchErrorIgnoreRuleIndex("GET:/x", "http://host:8080/inner/probe/a", 410));
     }
 
     @Test
@@ -42,10 +35,9 @@ public class RulesAggregateParserTest {
 
     @Test
     public void sharedAntPatternCachedOnce() {
-        RulesAggregateParser.parse(null,
+        final RulesEngine engine = RulesAggregateParser.parse(null,
                 "url:/same/**=404;url:/same/**=410");
-        assertEquals(1, AntPatternCache.cacheSize());
-        assertTrue(AntPatternCache.getCompileCountForTest() >= 1);
+        assertEquals(1, engine.getCompiledPatternCount());
     }
 
     @Test

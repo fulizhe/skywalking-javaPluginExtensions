@@ -40,23 +40,26 @@ public final class TraceAlertMetrics {
     private volatile String lastTraceId;
 
     private volatile AtomicLongArray ruleHits;
-    private volatile List<AlertRuleBinding> ruleBindings = new ArrayList<AlertRuleBinding>();
+    private volatile List<RulesEngine.AlertRuleBinding> ruleBindings = new ArrayList<RulesEngine.AlertRuleBinding>();
+    private volatile RulesEngine rulesEngine;
 
     private TraceAlertMetrics() {
     }
 
     /**
-     * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按全局 ruleIndex 累计命中次数。
+     * 与 {@link TraceEvaluator#fromConfig} 解析结果绑定，用于按全局 ruleIndex 累计命中次数，
+     * 并持引擎引用以读取已编译 pattern 计数。
      */
     public void bindRules(final RulesEngine rulesEngine) {
-        final List<AlertRuleBinding> bindings = rulesEngine == null ? null : rulesEngine.getRuleBindings();
+        this.rulesEngine = rulesEngine;
+        final List<RulesEngine.AlertRuleBinding> bindings = rulesEngine == null ? null : rulesEngine.getRuleBindings();
         if (bindings == null || bindings.isEmpty()) {
             ruleHits = null;
-            ruleBindings = new ArrayList<AlertRuleBinding>();
+            ruleBindings = new ArrayList<RulesEngine.AlertRuleBinding>();
             return;
         }
         ruleHits = new AtomicLongArray(bindings.size());
-        ruleBindings = new ArrayList<AlertRuleBinding>(bindings);
+        ruleBindings = new ArrayList<RulesEngine.AlertRuleBinding>(bindings);
     }
 
     public void recordRuleHit(final int ruleIndex) {
@@ -137,7 +140,8 @@ public final class TraceAlertMetrics {
         root.put("dispatcher", buildDispatcherSnapshot());
         root.put("httpWebhook", buildHttpWebhookSnapshot());
         root.put("rules", buildRulesSnapshot());
-        root.put("antPatternCacheSize", AntPatternCache.cacheSize());
+        root.put("antPatternCacheSize",
+                rulesEngine == null ? 0 : rulesEngine.getCompiledPatternCount());
         return root;
     }
 
@@ -192,13 +196,13 @@ public final class TraceAlertMetrics {
 
     private List<Map<String, Object>> buildRulesSnapshot() {
         final List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
-        final List<AlertRuleBinding> bindings = ruleBindings;
+        final List<RulesEngine.AlertRuleBinding> bindings = ruleBindings;
         final AtomicLongArray hits = ruleHits;
         if (bindings == null || bindings.isEmpty()) {
             return items;
         }
         for (int i = 0; i < bindings.size(); i++) {
-            final AlertRuleBinding binding = bindings.get(i);
+            final RulesEngine.AlertRuleBinding binding = bindings.get(i);
             final Map<String, Object> item = new HashMap<String, Object>();
             item.put("ruleIndex", binding.getRuleIndex());
             item.put("rule", binding.getDescriptor());
@@ -266,7 +270,8 @@ public final class TraceAlertMetrics {
         m.lastTargetUrl = null;
         m.lastTraceId = null;
         m.ruleHits = null;
-        m.ruleBindings = new ArrayList<AlertRuleBinding>();
+        m.ruleBindings = new ArrayList<RulesEngine.AlertRuleBinding>();
+        m.rulesEngine = null;
     }
 
     private static String abbreviate(final String value, final int maxLen) {
