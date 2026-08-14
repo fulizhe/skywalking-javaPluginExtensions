@@ -25,8 +25,23 @@ _Avoid_: 上报、上报通道
 **Trace 告警 (trace alert)**:
 基于已合并链路的慢/错识别规则,命中后经 HTTP webhook(或 SPI 监听器)通知外部系统;默认关闭。
 
+**告警规则 (alert rule)**:
+一条已解析的告警配置串,匹配 operation 整串或 url 路径,载荷因类型而异——慢规则载荷为阈值毫秒,错忽略规则载荷为允许状态码集合;启动期编译,运行期只读。
+_Avoid_: 规则字符串、配置项
+
+**规则引擎 (rules engine)**:
+告警规则语义的唯一驻点:由配置串进入(`fromConfig`),对外仅两个匹配操作(`matchSlow`/`matchErrorIgnoreRuleIndex`)与规则统计读口;解析、编译、匹配、绑定均为内部实现,运行期只读。
+_Avoid_: 规则链、匹配器工厂
+
+**匹配维度 (match kind)**:
+单条告警规则匹配的目标维度:operation 整串 或 url 路径其一。
+
 **运行时开关 (runtime toggle)**:
 不重启应用即可启用/禁用数据流写入本地缓存的能力,用于对比验证。
+
+**有界数据存储 (bounded local store)**:
+各数据流 sender 背后的进程内有界缓存,淘汰策略统一为 FIFO(最旧插入先出,非 LRU)。两种形态:追加式(append)供 JVM/meter/log/profile 四流使用,现为 `CircularBlockingQueue`,其公开接口维持现状不变(语义为 add + 快照读);键式(keyed,按 key `put`/`merge`/`snapshot`)供 trace 流按 traceId 合并存储,为新增模块。
+_Avoid_: LRU 缓存(历史文档旧称)、将环形队列视为语义
 
 **演示应用 (demo app)**:
 仓库内的 Spring Boot 样例应用,面向"快速理解插件能力"的读者,提供可视化仪表盘与一键启动。

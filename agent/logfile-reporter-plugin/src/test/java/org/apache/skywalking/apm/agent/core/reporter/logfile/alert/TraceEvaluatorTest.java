@@ -18,7 +18,6 @@ public class TraceEvaluatorTest {
 
     @Before
     public void reset() {
-        AntPatternCache.resetForTest();
         TraceAlertMetrics.resetForTest();
     }
 

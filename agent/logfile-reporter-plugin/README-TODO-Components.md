@@ -15,7 +15,7 @@
 | ~~MeterSender~~ | `MeterLocalSender` | @OverrideImplementor | send Metrics data of meter system |
 | ~~JVMMetricsSender~~ | `JVMMetricsLocalSender` | @OverrideImplementor | JVM Metrics |
 | EventReportServiceClient | `NoOpEventReportServiceClient` | @OverrideImplementor | 上报启动/停止事件 |
-| TraceSegmentServiceClient | `LogFileTraceSegmentServiceClient` | @OverrideImplementor | 内存 LRU 缓存（供日志上报） |
+| TraceSegmentServiceClient | `LogFileTraceSegmentServiceClient` | @OverrideImplementor | 内存 FIFO 缓存（供日志上报） |
 | ProfileSnapshotSender | `ProfileSnapshotLocalSender` | @OverrideImplementor | profile 快照（原任务发往 OAP） |
 | ProfileTaskChannelService | `NoOpProfileTaskChannelService` | @OverrideImplementor | 将 profiling task result data 发送到 OAP |
 | AsyncProfilerTaskChannelService | `NoOpAsyncProfilerTaskChannelService` | @OverrideImplementor | 异步，AsyncProfiler 任务通道 |

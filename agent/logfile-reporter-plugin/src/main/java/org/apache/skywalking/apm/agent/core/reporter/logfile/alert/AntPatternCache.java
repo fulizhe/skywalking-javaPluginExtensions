@@ -4,37 +4,31 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 全局 Ant pattern 缓存：相同 pattern 字符串只编译一次。
+ * Ant pattern 去重缓存：相同 pattern 字符串只编译一次。
+ * <p>
+ * 由 {@link RulesEngine} 实例持有，生命周期与引擎一致；单测经实例隔离，无需全局重置。
+ * </p>
  */
 final class AntPatternCache {
 
-    private static final ConcurrentHashMap<String, CompiledAntPattern> CACHE = new ConcurrentHashMap<String, CompiledAntPattern>();
-    private static final AtomicInteger COMPILE_COUNT = new AtomicInteger();
+    private final ConcurrentHashMap<String, CompiledAntPattern> cache = new ConcurrentHashMap<String, CompiledAntPattern>();
+    private final AtomicInteger compileCount = new AtomicInteger();
 
-    private AntPatternCache() {
+    CompiledAntPattern get(final String pattern) {
+        return cache.computeIfAbsent(pattern, this::compileOnce);
     }
 
-    static CompiledAntPattern get(final String pattern) {
-        return CACHE.computeIfAbsent(pattern, AntPatternCache::compileOnce);
+    int size() {
+        return cache.size();
     }
 
-    static int cacheSize() {
-        return CACHE.size();
+    /** 单测断言"相同 pattern 只编译一次"用，生产代码勿调用 */
+    int getCompileCountForTest() {
+        return compileCount.get();
     }
 
-    /** 单测重置，生产代码勿调用。 */
-    static void resetForTest() {
-        CACHE.clear();
-        COMPILE_COUNT.set(0);
-    }
-
-    /** 单测观测 compile 次数，生产代码勿调用。 */
-    static int getCompileCountForTest() {
-        return COMPILE_COUNT.get();
-    }
-
-    private static CompiledAntPattern compileOnce(final String pattern) {
-        COMPILE_COUNT.incrementAndGet();
+    private CompiledAntPattern compileOnce(final String pattern) {
+        compileCount.incrementAndGet();
         return CompiledAntPattern.compile(pattern);
     }
 }
