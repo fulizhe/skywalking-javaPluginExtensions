@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>架构评审 — skywalking-javaPluginExtensions</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .arrow-red { stroke: #dc2626; stroke-width: 2; }
+      .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+      svg text { font-family: ui-monospace, monospace; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <div class="text-xs uppercase tracking-widest text-slate-400">Architecture review</div>
+        <h1 class="text-3xl font-serif font-semibold">skywalking-javaPluginExtensions</h1>
+        <p class="text-sm text-slate-500">活跃模块：logfile-reporter-plugin · override-httpclient-4.x-plugin · override-hutool-http-5.x-plugin</p>
+        <div class="flex flex-wrap gap-3 text-xs text-slate-500">
+          <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-4 rounded border-2 border-slate-800 bg-white"></span>module</span>
+          <span class="inline-flex items-center gap-1.5"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="seam" stroke="#334155"/></svg>seam</span>
+          <span class="inline-flex items-center gap-1.5"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" class="arrow-red"/></svg>leakage</span>
+          <span class="inline-flex items-center gap-1.5"><span class="inline-block w-4 h-4 rounded deep"></span>deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- ============ CARD 1 ============ -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">1 · 告警管线去掉 Map 往返，改 typed 交接</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              LogFileTraceSegmentServiceClient.java · Log.java · LogCollection.java · TraceSnapshot.java · TraceAlertEvent.java · TraceSpanUtils.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — 数据流六处手写 string key</div>
+                <pre class="mermaid">
+flowchart LR
+  S[Log typed] -->|toMap| M1["Map&lt;traceId,Map&gt;"]
+  M1 --> K[KeyedLocalStore]
+  K -->|fromMergedMap| L2[Log typed]
+  L2 -->|toMap| M2[Map]
+  M2 --> H[HTTP webhook]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class M1,M2,L2 leak
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — typed 直通，Map 只留在暴露口</div>
+                <pre class="mermaid">
+flowchart LR
+  S[Log typed] --> K[KeyedLocalStore]
+  K --> L2[Log typed]
+  L2 --> H[HTTP webhook]
+  K -.->|snapshot 仅暴露口| SE[LogSerde]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class K,SE deep
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> 数据流从 typed <code>Log</code> 序列化成 Map 存进 <em>有界数据存储</em>，再在 <code>TraceSnapshot.fromMergedMap</code> / <code>Log.fromMap</code> 反序列化回来——<code>"logs"</code>、<code>"spans"</code>、<code>"tag-key"</code> 等 key 在 6 个文件里手写，一侧改名另一侧静默断。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> <code>mergeLogIntoStatMap</code> 把 typed <code>List&lt;Log&gt;</code> 直接交给 <code>AsyncTraceAlertDispatcher</code>；Map 序列化收窄成 <em>统计快照</em> 暴露口上唯一的 <code>LogSerde</code>，共享 key 常量让 <code>toMap</code>/<code>fromMap</code> 无法漂移。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>locality：key 词汇表收敛到一个 module</li>
+                <li>interface 缩小：<code>TraceSnapshot</code> 收 typed 入参</li>
+                <li>删 <code>LogCollection</code> 死方法 <code>addLog</code></li>
+                <li>删死文件 <code>SWLogfileReporterUtils2222222222222</code></li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 2 ============ -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">2 · 统计快照 god-object：抽一个诊断 owner</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              TraceAlertMetrics.java · TraceAlertBootstrapLog.java · WebhookUrlResolver.java · HttpTraceAnomalyListener.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+                <div class="lbl text-slate-400 mb-2">Before — 一个 module 混四种关切</div>
+                <div class="border-l-4 border-slate-300 pl-3 py-1 text-xs">counters (14)</div>
+                <div class="border-l-4 border-slate-300 pl-3 py-1 text-xs">config snapshot</div>
+                <div class="border-l-4 border-red-500 pl-3 py-1 text-xs">webhook diagnostics (重复 3 处)</div>
+                <div class="border-l-4 border-slate-300 pl-3 py-1 text-xs">rules snapshot → 读 RulesEngine 内部</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
+                <div class="lbl text-slate-400 mb-2">After — 诊断收进一个 owner</div>
+                <div class="border-l-4 border-slate-300 pl-3 py-1 text-xs">TraceAlertMetrics → 纯 counters</div>
+                <div class="border-l-4 border-slate-800 pl-3 py-1 deep text-white text-xs">AlertDiagnostics：config 读 + WebhookUrlResolver + placeholder 判定</div>
+                <div class="border-l-4 border-slate-300 pl-3 py-1 text-xs">TraceAlertBootstrapLog → 消费同一 owner</div>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> <code>TraceAlertMetrics</code>（287 行）把 counters、config 快照、webhook 诊断、rules 快照混在一处，还直接读 <code>RulesEngine</code> 内部；「webhook URL 是否仍是未解析占位符」在 3 处独立重算。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 一个 <code>AlertDiagnostics</code> module 独占 config 读 + <code>WebhookUrlResolver</code> 调用 + placeholder 判定；<code>TraceAlertMetrics.snapshot()</code> 与 <code>TraceAlertBootstrapLog</code> 都消费它。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>locality：webhook 判定单点</li>
+                <li>interface 缩小：counters 与诊断分家</li>
+                <li>narrow 对 RulesEngine 内部的读</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 3 ============ -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">3 · 告警分发器：抽纯 NotifyDecision + 死配置</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              AsyncTraceAlertDispatcher.java · LogFileReporterPluginConfig.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — 五关切挤在一个线程类里（无测试）</div>
+                <div class="space-y-0.5 text-[11px] font-mono">
+                  <div class="bg-stone-100 px-2 py-1 rounded">afterTraceMerged { dedup; snapshot; evaluate; shouldNotify; offer; }</div>
+                  <div class="bg-red-50 px-2 py-1 rounded text-red-700">resolveDispatchQueueSize → hardcode 512</div>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — 纯决策可脱离线程单测</div>
+                <div class="space-y-0.5 text-[11px] font-mono">
+                  <div class="bg-slate-800 text-white px-2 py-1 rounded">NotifyDecision(snapshot) → EnumSet&lt;AlertType&gt;</div>
+                  <div class="bg-stone-100 px-2 py-1 rounded">dispatcher shell：queue + thread + listener fan-out</div>
+                  <div class="bg-stone-100 px-2 py-1 rounded">DISPATCH_QUEUE_SIZE 接 config 或删</div>
+                </div>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> <code>afterTraceMerged</code> 内联混了 dedup 短路、快照、evaluate、per-type <code>shouldNotify</code>、事件构造、入队——是告警包里唯一并发敏感却没测试的类；<code>resolveDispatchQueueSize</code> 把 config 读注释掉、硬编码 <code>512</code>。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 拆成纯 <code>NotifyDecision</code>（snapshot → 待通知 <code>EnumSet&lt;AlertType&gt;</code>，无线程无队列可单测）加一个薄 dispatcher shell；把 <code>DISPATCH_QUEUE_SIZE</code> 接进 <code>LogFileReporterPluginConfig</code> 或删掉死注释。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>locality：决策从线程类里搬出来</li>
+                <li>可测的 decision 内核</li>
+                <li>死 config knob 现形</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 4 ============ -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">4 · CompiledAntPattern 名不副实的浅 module</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              CompiledAntPattern.java · FastPathAntMatcher.java · RulesEngine.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3 flex flex-col justify-center">
+                <div class="lbl text-slate-400 mb-2">Before — 声称「编译」其实只是存 string</div>
+                <div class="space-y-2 text-center">
+                  <div class="border-2 border-slate-800 rounded p-2 text-xs">compile(): null/empty check</div>
+                  <div class="border-2 border-slate-800 rounded p-2 text-xs">matches(): 每次重解析 pattern</div>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3 flex flex-col justify-center">
+                <div class="lbl text-slate-400 mb-2">After — 真编译，或并入 matcher</div>
+                <div class="space-y-2 text-center">
+                  <div class="deep text-white rounded p-2 text-xs">compile → token 结构，热路径零解析</div>
+                  <div class="text-xs text-slate-500">或：collapse 进 FastPathAntMatcher / AntPatternCache</div>
+                </div>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> <code>compile()</code> 只做空值校验、原样存 <code>String</code>，<code>matches()</code> 每次调用都重解析——类注释「启动期编译…热路径无解析」与 README 描述言过其实。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 二选一：真把 pattern 编译成 token 结构让热路径更便宜，或 collapse 进 <code>FastPathAntMatcher</code>/<code>AntPatternCache</code>，把 null-guard 还回去。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>删除测试：现在是 pass-through</li>
+                <li>depth 诚实：要么真编译要么不存在</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 5 ============ -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">5 · 四个 override sink 复制同一惯用法</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-slate-200 text-slate-700 text-xs font-medium">Speculative</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              JVMMetricsLocalSender.java · MeterLocalSender.java · ProfileSnapshotLocalSender.java · LogReportServiceLocalClient.java · CircularBlockingQueue.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — 四份 copy-paste</div>
+                <div class="flex flex-wrap gap-1.5 text-[11px] font-mono">
+                  <span class="border border-slate-300 rounded px-2 py-1">JVM (cap 1000)</span>
+                  <span class="border border-slate-300 rounded px-2 py-1">Meter (300)</span>
+                  <span class="border border-slate-300 rounded px-2 py-1">Profile (500 hardcode)</span>
+                  <span class="border border-slate-300 rounded px-2 py-1">Log (1000)</span>
+                </div>
+                <div class="text-xs text-slate-500 mt-2">各自 build*Map + bounded queue + getX() 快照</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — 一个 adapter + 类型化快照</div>
+                <div class="space-y-1.5 text-[11px] font-mono">
+                  <div class="deep text-white rounded px-2 py-1">LocalSink&lt;T&gt;：bounded ring + snapshot read</div>
+                  <div class="border border-slate-300 rounded px-2 py-1">converter：protobuf → Map（各流一条）</div>
+                  <div class="border border-slate-300 rounded px-2 py-1">status-expose 收 1 个 typed snapshot 而非 6 次反射</div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+              ⚠ ADR-02 已把 4 个环形 sender 划为「不在活跃变更路径」并有意保留弱一致快照。仅当它们重新进入变更路径时重开此议题。
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> 四个 sink 各自手写 protobuf→Map + 有界队列 + 快照 getter，容量 1000/300/500/1000 不一致，<code>ProfileSnapshotLocalSender</code> 干脆没有 config key。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 一个 <code>LocalSink&lt;T&gt;</code> adapter 收掉「bounded ring + 快照读」，各流只留一条 converter；status-expose 从 6 次反射 getter 缩成一次 typed 快照。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>leverage：一个 adapter，四个 sink</li>
+                <li>删 <code>CircularBlockingQueue</code> 未用的 take/poll 面</li>
+                <li>反射耦合（seam 泄漏）收缩</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 6 ============ -->
+        <article id="c6" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">6 · collect 决策去中心化：profiling fallback 是死代码</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              HttpClientExecuteInterceptor.java · HutoolHttpRequestInterceptor.java · HttpClientParamCollector.java · HutoolHttpParamCollector.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — 决策在两处，内层压过外层</div>
+                <div class="space-y-1.5 text-[11px] font-mono">
+                  <div class="bg-stone-100 rounded px-2 py-1">interceptor.beforeMethod：读 switch 决定 collect</div>
+                  <div class="bg-red-50 text-red-700 rounded px-2 py-1">interceptor.afterMethod：profiling fallback 强制 collect</div>
+                  <div class="bg-stone-100 rounded px-2 py-1">collector.collect()：再读 switch 自守 → 又拒了</div>
+                </div>
+                <div class="text-xs text-red-600 mt-2">fallback 日志打了，采集却为空</div>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — 决策一个点，collect 收参数</div>
+                <div class="space-y-1.5 text-[11px] font-mono">
+                  <div class="deep text-white rounded px-2 py-1">interceptor：唯一决策点（含 fallback）</div>
+                  <div class="bg-stone-100 rounded px-2 py-1">collect(request, decision)：行为完全由入参定</div>
+                </div>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> 「是否采集请求参数」在 interceptor 和 collector 里各读一次 switch；profiling fallback 只在两 switch 全 false 时触发，可 collector 内部重读同样的 false 又拒了——日志「by profiling fallback」后什么都不采。hutool 侧结构完全一致。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> <code>collect()</code> 收显式 decision/context 入参而非内部重读 <code>CollectionSwitch</code>，唯一决策点放到 interceptor，让 fallback 真正表达「无视 switch 采集」。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>locality：决策与效果一处</li>
+                <li>死代码变活</li>
+                <li>fallback 路径可测</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 7 ============ -->
+        <article id="c7" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">7 · 两个插件复制 body-collection 内核</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              HttpClientParamCollector.java · HttpClientResponseCollector.java · HutoolHttpParamCollector.java · HutoolHttpResponseCollector.java
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — 两个插件各自维护复制体</div>
+                <pre class="mermaid">
+flowchart TB
+  A[HttpClient adapter] --> C1[clip/join/clipFileEntry/CollectedTags]
+  B[Hutool adapter] --> C2[clip/join/clipFileEntry/CollectedTags]
+  C1 -. 已漂移 .-> D1[content-type: constants]
+  C2 -. 已漂移 .-> D2[content-type: 硬编码 string]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class C1,C2 leak
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — 一个 deep module，两个 adapter</div>
+                <pre class="mermaid">
+flowchart TB
+  A[HttpClient adapter] --> E[BodyCollectionEngine]
+  B[Hutool adapter] --> E
+  E --> F[formatting + allow-list + charset]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class E,F deep
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> <code>clip</code>/<code>joinEntries</code>/<code>clipFileEntry</code>/<code>CollectedTags</code> 在两个插件里逐字复制，靠 <code>// SEE HutoolHttpResponseCollector.java</code> 镜像注释互指；content-type allow-list 已经漂移（httpclient 用常量、hutool 硬编码 string）。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 抽一个 deep <code>BodyCollectionEngine</code> module 拥有格式化/决策内核，每个插件只留一个读「字节/charset/content-type」的薄 library adapter。两个 adapter 已证明 seam 是真的。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>leverage：一个 module 服务两个插件</li>
+                <li>locality：格式化 bug 修一处</li>
+                <li>消除已漂移的 allow-list</li>
+                <li>删镜像注释</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <!-- ============ CARD 8 ============ -->
+        <article id="c8" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-5">
+            <div class="flex items-start justify-between gap-4">
+              <h2 class="text-lg font-semibold leading-tight">8 · collection-switch 跨模块静态副作用</h2>
+              <div class="flex gap-2 shrink-0">
+                <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+                <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+              </div>
+            </div>
+            <div class="font-mono text-sm text-slate-600 leading-relaxed">
+              OverrideHttpClientPluginConfig.java · HttpClientCollectionSwitch.java · HutoolHttpCollectionSwitch.java · override-hutool-http-5.x-plugin/pom.xml
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 items-stretch">
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">Before — hutool 伸手进 httpclient 的包</div>
+                <pre class="mermaid">
+flowchart LR
+  C[OverrideHttpClientPluginConfig] --> HC[HttpClientCollectionSwitch]
+  HC -.import 读静态字段.-> HU[HutoolHttpCollectionSwitch]
+  HC -.toggleRuntimeCollect 改同一个静态字段.-> HU
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class HC,HU leak
+                </pre>
+              </div>
+              <div class="rounded-lg border border-slate-200 bg-white p-3">
+                <div class="lbl text-slate-400 mb-2">After — 一个 CollectionState，显式消费方</div>
+                <pre class="mermaid">
+flowchart LR
+  CS[CollectionState module] --> HC2[httpclient 消费方]
+  CS --> HU2[hutool 消费方]
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class CS deep
+                </pre>
+              </div>
+            </div>
+            <div class="space-y-2 text-sm text-slate-700">
+              <p><span class="font-medium text-slate-900">Problem.</span> hutool 直接 import httpclient 的 <code>OverrideHttpClientPluginConfig</code>（这是 hutool→httpclient <code>provided</code> 依赖的唯一理由）；<code>toggleRuntimeCollect</code> 改的静态字段 hutool 静默读——开启 httpclient 运行时采集会顺带打开 hutool 的 body 采集，而 hutool 没有对应 facade/toggle/status。<code>isOverrideCollectEnabled</code> ≡ <code>isResponseCollectEnabled</code> 冗余。</p>
+              <p><span class="font-medium text-slate-900">Solution.</span> 一个 <code>CollectionState</code> module 让共享可变状态与其消费方显式化；对称暴露 toggle/status 或明确限定到 httpclient；删死类 <code>HutoolHttpRequestConfig</code>/<code>Initializer</code> 与死测试文件。</p>
+              <ul class="list-disc list-inside text-slate-600 space-y-1">
+                <li>杀掉静态副作用侧信道</li>
+                <li>去掉跨模块 import</li>
+                <li>冗余一对收敛</li>
+                <li>清 157 行误导性死面</li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border-2 border-slate-800 bg-white shadow-sm p-6 space-y-3">
+        <div class="text-xs uppercase tracking-widest text-slate-400">Top recommendation</div>
+        <h2 class="text-xl font-serif font-semibold"><a href="#c6" class="hover:underline">6 · collect 决策去中心化</a></h2>
+        <p class="text-sm text-slate-700">先做这个：它是一个真实组合 bug（profiling fallback 是死代码）、改动小、且把「决策入参化」的 seam 纪律立起来，正好是第 7 项抽共享 <code>BodyCollectionEngine</code> 的前置。修一处 locality，两个插件同时受益。</p>
+      </section>
+
+    </main>
+  </body>
+</html>

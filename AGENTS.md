@@ -12,6 +12,8 @@ Five canonical roles, label string equal to role name: `needs-triage`, `needs-in
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+Architecture reviews (`improve-codebase-architecture`) write their HTML report to `docs/review/architecture-review-<timestamp>.html` — committed, not temp.
+
 ### Module maintenance status
 
 - **Active**: `agent/logfile-reporter-plugin`, `agent/override-httpclient-4.x-plugin`, `agent/override-hutool-http-5.x-plugin` — ongoing iteration (bugfix & feature)
