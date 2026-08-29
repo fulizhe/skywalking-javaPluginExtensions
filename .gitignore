@@ -33,6 +33,10 @@ build/
 ### VS Code ###
 .vscode/
 
+### OMO (oh-my-openagent)
+.omo/*
+!.omo/omo.jsonc
+
 ### cat-local
 cat-local
 cat-local.idx

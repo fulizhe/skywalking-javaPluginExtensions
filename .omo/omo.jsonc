@@ -1,0 +1,105 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/omo.schema.json",
+
+  // Project-scoped OMO config (skywalking-javaPluginExtensions)
+  // Posture: passive background. matt-skills (spec/to-tickets/ADR) stays the
+  // primary workflow on the default build/plan agents; OMO provides the
+  // low-level toolbox: background multi-agent, hashline hash-anchored edits,
+  // LSP tools, explore/librarian background exploration, ulw-loop.
+  "[opencode]": {
+    // Keep build/plan primary (with Sisyphus enabled, `build` is demoted to a
+    // hidden subagent). All OMO discipline agents remain registered; type
+    // `ultrawork`/`ulw` or switch to the `sisyphus` agent for full orchestration.
+    // Sisyphus 是 OMO 的「总调度大管家」agent，开启后会自动接管任务规划、拆解、全流程编排，
+    // 相当于一个自动 AI 项目经理。
+    // `disabled: true` = 关闭 OMO 自动总控：不让 OMO 抢走主控权，保证 matt-skills 的 /to-spec /to-tickets 作为你的主工作流；由你手动触发规划，而不是交给 Sisyphus 自动跑。
+    // 关闭后 `ultrawork`/`ulw` 命令依然可用，按需手动调用，不会自动接管全部会话。
+    "sisyphus_agent": {
+      "disabled": true
+    },
+
+    // Hephaestus 是 OMO 原生面向「复杂代码重构」的 Agent，只支持 GPT 系列模型。
+    // 当前环境没有 OpenAI/Copilot 密钥，直接禁用，避免调用失败、重试浪费 token。
+    "disabled_agents": [
+      "hephaestus"
+    ],
+
+    // goal = OMO 的「持续目标」系统（对应 /goal 命令）。
+    // 干嘛用的：设一个目标后，agent 会一直朝它自动推进，直到完成或被喊停。
+    //
+    // ★ 为什么这里是 false（重要，新手必读）★
+    // 这个 goal 系统有个坑：它会在【每一条消息】上挂一个钩子，把你的消息文本
+    // 当成「目标」去存。但它对目标长度有上限（2000 字符）——
+    // 一旦你的消息（比如 /teach 后面跟一大段话）超过 2000 字符，
+    // 它就会抛错 "Objective exceeds maximum length of 2000 characters"，
+    // 导致整条消息发不出去，界面弹「发送命令失败 / Unexpected server error」。
+    // 你之前 /teach 发不出去，就是这个原因，不是网络也不是项目 bug。
+    //
+    // 所以：我们把这个功能整体关掉（enabled: false），让钩子根本不装上，
+    // 以后发多长的消息都不会再被它拦。代价是 /goal 命令用不了，
+    // 如果你平时不靠「持续目标」自动跑活（新手通常用不到），关掉最省心。
+    "goal": {
+      // 是否启用 goal 功能（默认 true）。这里改成 false = 整体关闭，钩子不装。
+      // 想临时恢复：改成 true（但要注意上面那个 2000 字符卡消息的坑）。
+      "enabled": false,
+      // 是否在会话第一条消息自动开启一个目标（默认 false）。
+      // 保持 false：只有你手动敲 /goal set <目标> 才会进入持续执行，
+      // 其余时候 OMO 只是被动后台，不会自作主张无限跑。
+      // 想中途停手：/goal pause（暂停）或 /stop-continuation（全部停）。
+      // 注意：enabled 关掉后，这个开关无论在不在都不起作用（功能已整体关闭）。
+      "auto_start": false
+    },
+
+    // 只认证了 opencode-go 这一个 provider，所以把所有 agent 硬编码绑定到 opencode-go/* 系列，
+    // 不用默认自动探测（默认链从 Anthropic/OpenAI 开始，会一路撞不可用的 provider 再回退）。
+    // 注意：4.19.4 的 agent 配置只认 `fallback_models`，`models` 会被判为非法 key
+    //（migration 曾把 fallback_models 误转成 models，导致下面 3 个 agent 静默回退，已改回）。
+    "agents": {
+      "sisyphus": { // 总调度大管家（全编排的 orchestrator）
+        "model": "opencode-go/kimi-k3", // 主力：复杂推理
+        "fallback_models": [
+          "opencode-go/qwen3.7-plus", // 1M 长上下文
+          "opencode-go/minimax-m3",
+          "opencode-go/glm-5.2"
+        ]
+      },
+      "prometheus": { "model": "opencode-go/kimi-k3" }, // 战略规划：动手前先访谈你、产出方案
+      "atlas": { "model": "opencode-go/kimi-k3" }, // 待办/任务编排
+      "metis": { "model": "opencode-go/kimi-k3" }, // 规划顾问：动手前分析需求意图与遗漏
+      "oracle": { "model": "opencode-go/kimi-k3" }, // 架构/疑难问题咨询
+      "momus": { "model": "opencode-go/kimi-k3" }, // 高精度评审/复核
+      "explore": { // 代码阅读、大库扫描，高频使用
+        "model": "opencode-go/qwen3.7-plus",
+        "fallback_models": [
+          "opencode-go/minimax-m3"
+        ]
+      },
+      "librarian": { // 文档/代码检索
+        "model": "opencode-go/qwen3.7-plus",
+        "fallback_models": [
+          "opencode-go/minimax-m3"
+        ]
+      },
+      "multimodal-looker": { "model": "opencode-go/kimi-k3" }, // 图片/截图/PDF 视觉分析
+      "sisyphus-junior": { "model": "opencode-go/kimi-k3" } // 轻量任务调度
+    },
+
+    // categories 是 task() 工具做后台子任务分发时按任务类别选模型的映射。
+    // 只配 agent 不配 category 等于白配：后台多 Agent 是按 category 选模型的。
+    "categories": {
+      "quick": { "model": "opencode-go/minimax-m2.7" }, // 轻量小任务（改错别字/单文件）→ minimax-m2.7 省钱快
+      "unspecified-low": { "model": "opencode-go/minimax-m2.7" }, // 一般任务（低强度）
+      "unspecified-high": { "model": "opencode-go/kimi-k3" }, // 一般任务（高强度）
+      "writing": { "model": "opencode-go/kimi-k3" }, // 文档/方案写作
+      "visual-engineering": { "model": "opencode-go/kimi-k3" }, // 前端/UI/视觉
+      "deep": { "model": "opencode-go/qwen3.7-plus" }, // 深度代码分析（1M 长上下文）
+      "ultrabrain": { "model": "opencode-go/kimi-k3" }, // 深度逻辑推理/复杂架构
+      "artistry": { "model": "opencode-go/kimi-k3" } // 创造性/非常规方案
+    }
+  },
+
+  // OMO migration 引擎写入的迁移标记：表示旧配置已自动升级到新格式。不要手动删。
+  "_migrations": [
+    "2026-08-reasoning-unification"
+  ]
+}
