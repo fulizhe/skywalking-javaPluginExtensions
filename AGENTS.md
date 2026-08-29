@@ -35,3 +35,7 @@ When invoking toolchains (to-tickets / triage / to-spec / domain-modeling), plan
 ## Execution environment (Windows)
 
 Run commands with `pwsh` (PowerShell 7): UTF-8 end-to-end, so Chinese script output round-trips cleanly. The default Windows PowerShell 5.1 console decodes output as GBK and garbles UTF-8 text — run scripts and long verifications via `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe` rather than the 5.1 shell.
+
+## Agent tooling quirks (OpenCode + OMO)
+
+When OpenCode/OMO behaves unexpectedly (e.g. a message fails to send with "Unexpected server error", or a slash command/agent name doesn't match docs), it's usually a tooling quirk, **not this repo's code**. Do not hunt for the cause in the Java/plugin sources. See `docs/tutorial/reference/omo-pitfalls.html` for the known quirks and the 5-step log/config check. The course is navigated from `docs/tutorial/index.html`.
