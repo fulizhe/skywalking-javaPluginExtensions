@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0001 · OMO 起步：基本流程与常用命令</title>
+<link rel="stylesheet" href="../assets/omo.css">
+</head>
+<body>
+
+<p class="meta">OMO 课程 · 第 1 课 · 用 5 分钟学会「怎么用」 · 环境：opencode 桌面 GUI</p>
+
+<h1>OMO 起步：基本流程与常用命令</h1>
+<p class="subtitle">目标：你学完后，能自己在这个 skywalking 项目里让 OMO 帮你干活，并且知道常用命令怎么敲。</p>
+
+<div class="callout tip">
+<strong>你用的是桌面 GUI（opencode apps）。</strong> GUI 和终端版共用同一套机制，所以下面讲的 agent 切换、<code>@</code>、<code>/</code>、<code>!</code> 在 GUI 里全部一样用——只是你主要用<strong>鼠标点击</strong>而非键盘快捷键。本课的「agent 下拉」就是 GUI 左下角那个（Sisyphus - Ultraworker / Atlas / Build / Plan）。
+</div>
+
+<p class="lede">先记住一句话：<strong>OMO 把 OpenCode 从「一个助手」变成「一支队伍」。</strong> 你只管发指令，它负责分派、并行、验收。你不需要背模型名，只需要记住「三种用法」。</p>
+
+<h2>一、三种用法（这是全部心法）</h2>
+
+<p>OMO 的一切用法都归结为三条路。根据任务复杂度挑一条：</p>
+
+<table>
+<thead>
+<tr><th>复杂度</th><th>你做什么</th><th>适合场景</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>简单</strong></td>
+<td>在 <strong>Build</strong> 上直接打字</td>
+<td>改错字、单文件、简单提问。占日常 90%。</td>
+</tr>
+<tr>
+<td><strong>复杂但你想偷懒</strong></td>
+<td>切到 <strong>Sisyphus - Ultraworker</strong> 直接打字</td>
+<td>任务大，但你懒得一步一步解释，让它自己探索+干活。</td>
+</tr>
+<tr>
+<td><strong>复杂且要精准</strong></td>
+<td>在 <strong>Plan</strong> 上规划 → 再让 <strong>Atlas - Plan Executor</strong> 执行</td>
+<td>多步骤硬活，想先被工程师式追问、出方案再动手。</td>
+</tr>
+</tbody>
+</table>
+<div class="callout">
+<strong>你的真实 agent 下拉只有 4 项</strong>：<code>Build</code>、<code>Plan</code>、<code>Sisyphus - Ultraworker</code>、<code>Atlas - Plan Executor</code>。
+下面的用法都是在这 4 个之间切换，<strong>不需要记命令名</strong>——直接在左下角 agent 下拉里选就行。
+</div>
+
+<h3>用法一：直接打字（在 <code>Build</code>）</h3>
+<p>默认就是 <code>Build</code>，什么都不加，正常打字就行：</p>
+<pre><code>帮我看看 HelloController 里的 NPE 风险</code></pre>
+<p>这是最常用的路。你项目里 <code>Build</code> 就是 matt-skills 的主体工作流 agent。</p>
+
+<h3>用法二：ultrawork（切到 <code>Sisyphus - Ultraworker</code>）</h3>
+<p>左下角 agent 下拉选 <strong>Sisyphus - Ultraworker</strong>，然后正常打字：</p>
+<pre><code>给这个项目加一个 JWT 鉴权，遵循现有规范</code></pre>
+<p>它会自动：探索代码库 → 并行派 explore/librarian 去查 → 实现 → 校验 → 持续干到完成。你选中的这个 agent 本身就是"ultrawork 模式"，所以<strong>不用再打 <code>ultrawork</code> 这词</strong>——选中即全自动。</p>
+<div class="callout warn"><strong>注意</strong>：你也可以在 <code>Build</code> 上打字时用 <code>ultrawork 任务</code> 关键词临时切入全自动模式。两种方式都行。</div>
+
+<h3>用法三：精准编排（<code>Plan</code> 规划 → <code>Atlas - Plan Executor</code> 执行）</h3>
+<p>多步骤硬活，想要「先被审，再动手」：</p>
+<ol>
+<li>切到 <strong>Plan</strong>（matt-skills 的规划 agent，也映射 OMO 的 prometheus）——描述需求 → 它追问、定范围、写方案到 <code>.omo/plans/xxx.md</code></li>
+<li>切到 <strong>Atlas - Plan Executor</strong>（或输入 <code>/ulw-execute</code>）→ Atlas 读方案、分派任务、独立校验</li>
+</ol>
+<p>好处：中途停止，<code>/ulw-execute</code> 会从断点接续，不会白干。</p>
+
+<h2>二、常用命令（背熟这 5 类就够）</h2>
+
+<h3>① 界面内斜杠命令</h3>
+<table>
+<thead><tr><th>命令</th><th>干嘛的</th></tr></thead>
+<tbody>
+<tr><td><code>/new</code></td><td>开新会话（相当于清空重来）</td></tr>
+<tr><td><code>/sessions</code></td><td>列出、切换以前的会话</td></tr>
+<tr><td><code>/compact</code></td><td>压缩会话，省 token（对话太长时用）</td></tr>
+<tr><td><code>/agent</code></td><td>切 agent（Sisyphus / Prometheus / Atlas…）</td></tr>
+<tr><td><code>/undo</code> / <code>/redo</code></td><td>撤销 / 重做上一条</td></tr>
+<tr><td><code>/exit</code></td><td>退出</td></tr>
+</tbody>
+</table>
+
+<h3>② 三个必会的小技巧（`@` 不只是引用文件！）</h3>
+<p>在输入框打 <code>@</code>，会弹出一个带图标的列表——里面其实有<strong>三类</strong>东西，别以为都是文件：</p>
+<table>
+<thead><tr><th>类别</th><th>长啥样</th><th>作用</th><th>例子</th></tr></thead>
+<tbody>
+<tr>
+<td><strong>① 文件</strong></td>
+<td>显示文件路径</td>
+<td>把文件内容加进对话，让它看</td>
+<td><code>看看 @pom.xml 的依赖</code></td>
+</tr>
+<tr>
+<td><strong>② Agent（子 agent 提及）</strong></td>
+<td>带图标 + agent 名，如 <code>@explore</code> <code>@oracle</code> <code>@librarian</code> <code>@general</code>、<code>@Metis - Plan Consultant</code> 等</td>
+<td><strong>召唤一个专门 agent 去干活</strong>（它另开子会话，干完把结果带回）</td>
+<td><code>@explore 扫一下 logfile 核心类</code><br><code>@oracle 这个 NPE 怎么规避</code></td>
+</tr>
+<tr>
+<td><strong>③ MCP 工具/资源</strong></td>
+<td>如 <code>@tools_list</code></td>
+<td>指示 agent 查看某个外部工具可用清单</td>
+<td>（用 MCP 时才会看到，新手先不管）</td>
+</tr>
+</tbody>
+</table>
+<div class="callout">
+<strong>一句话记住</strong>：<code>@文件名</code> = 让它<strong>看文件</strong>；<code>@agent名</code> = 叫一个<strong>专门 agent 去干活</strong>。前者是你"给它看"，后者是你"派活给分身"。
+</div>
+<table>
+<thead><tr><th>写法</th><th>作用</th><th>例子</th></tr></thead>
+<tbody>
+<tr><td><code>@agent名</code></td><td>召唤子 agent（explore/oracle/librarian…）</td><td><code>@oracle 帮我想想这个架构</code></td></tr>
+<tr><td><code>!命令</code></td><td>直接跑 shell</td><td><code>!git status</code></td></tr>
+</tbody>
+</table>
+
+<h3>③ OMO 专属命令</h3>
+<table>
+<thead><tr><th>命令</th><th>干嘛的</th></tr></thead>
+<tbody>
+<tr><td><code>/agent</code></td><td>打开 agent 切换菜单——比记命令更省事，你的 4 个 agent 都在里面选</td></tr>
+<tr><td><code>/ulw-execute</code></td><td>执行 Plan / Prometheus 写好的方案（往往配 Atlas 用）</td></tr>
+<tr><td><code>ultrawork 任务</code> / <code>ulw 任务</code></td><td>在 Build 上临时切入全自动模式（也可直接切到 Sisyphus agent）</td></tr>
+<tr><td><code>/hyperplan</code></td><td>对抗式多 agent 规划（互相挑刺）——进阶才用</td></tr>
+</tbody>
+</table>
+
+<h2>三、谁在帮你干活（核心 Agent）</h2>
+<table>
+<thead><tr><th>Agent</th><th>一句话角色</th></tr></thead>
+<tbody>
+<tr><td><strong>Sisyphus</strong></td><td>总调度，默认主控，拆解+分派</td></tr>
+<tr><td><strong>Prometheus</strong></td><td>动手前访谈你、出方案</td></tr>
+<tr><td><strong>Atlas</strong></td><td>执行方案、派活、验收</td></tr>
+<tr><td><strong>Oracle</strong></td><td>只读高智商顾问：架构/疑难 debug</td></tr>
+<tr><td><strong>Librarian</strong></td><td>查文档、开源代码</td></tr>
+<tr><td><strong>Explore</strong></td><td>快速扫代码库</td></tr>
+<tr><td><strong>Metis</strong></td><td>动手前挑毛病、找遗漏</td></tr>
+<tr><td><strong>Momus</strong></td><td>无情评审方案/代码</td></tr>
+</tbody>
+</table>
+<p>你不直接选这些 agent——是 OMO 在后台按任务类型自动分派。你主观上只需要决定「用哪种用法」。</p>
+
+<h2>四、你的真实配置（重要！）</h2>
+<p>这是你这个项目 `.omo/omo.jsonc` 实际状态，跟外面教程不一样，务必记住：</p>
+<ul>
+<li><strong><code>sisyphus_agent.disabled: true</code></strong> — Sisyphus <em>不</em>自动接管主控，主导权留给 matt-skills 的 build/plan。想要 OMO 全托管，得手动敲 <code>ultrawork</code> 或切到 <code>sisyphus</code> agent。</li>
+<li><strong><code>goal.enabled: false</code></strong> — goal 钩子已关（就是这个钩子上次拦了你的长消息）。改配置后要<strong>重启 opencode</strong> 才生效。</li>
+<li><strong>只有 <code>opencode-go</code> 一家 provider</strong> — 所以 agent 和 category 都绑死在 <code>opencode-go/*</code> 上。</li>
+</ul>
+
+<h2>五、上次「发送命令失败」是怎么回事（学到就值了）</h2>
+<div class="callout warn">
+<strong>你遇到的「Unexpected server error / 发送命令失败」根本不在你的代码里。</strong>
+</div>
+<p>真实原因：OMO 的 <code>goal</code> 钩子会在<strong>每一条消息</strong>上取你的文本当成「目标」去存，而目标有 <strong>2000 字符上限</strong>。你的长消息（比如带一大段说明的 <code>/teach</code>）超过上限，它抛 <code>InvalidObjectiveError</code>，把整条消息打了回来。</p>
+<p>所以以后看到「发送命令失败」，第一反应是：<strong>去翻日志</strong>，而不是怀疑自己的代码。</p>
+<pre><code>C:\Users\lqzkc\.local\share\opencode\log\opencode.log</code></pre>
+<p>搜 <code>ERROR</code> 或 <code>InvalidObjective</code>，答案十有八九就在那。</p>
+<p>本次已经通过关掉 <code>goal.enabled</code> 根治——这也是你这套配置里它为什么是 <code>false</code> 的原因。</p>
+
+<h2>现在练一下（检索练习，别偷看答案）</h2>
+<p>先在心里答，再点开对答案。</p>
+
+<details class="quiz" id="q1">
+<summary>① 想「一键全自动」完成一个复杂任务，最简单敲什么？</summary>
+<div class="answer"><code>ultrawork 你的任务描述</code>（或 <code>ulw 任务描述</code>）。它会自动探索+干活。</div>
+</details>
+
+<details class="quiz" id="q2">
+<summary>② 想在对话里跑一条 shell 命令，消息开头怎么打？</summary>
+<div class="answer">以 <code>!</code> 开头，如 <code>!git status</code>。结果会直接进入对话。</div>
+</details>
+
+<details class="quiz" id="q3">
+<summary>③ 对话太长、想省 token，用哪个命令？</summary>
+<div class="answer"><code>/compact</code>（压缩当前会话）。注意它只是压缩，不是删除。</div>
+</details>
+
+<details class="quiz" id="q4">
+<summary>④ 看到「发送命令失败 / Unexpected server error」，第一件事该做什么？</summary>
+<div class="answer">翻日志：<code>C:\Users\lqzkc\.local\share\opencode\log\opencode.log</code>，搜 <code>ERROR</code>。多半是工具/配置问题，不是你的代码 bug。</div>
+</details>
+
+<h2>下一步学什么</h2>
+<p>这节课够你上手了。想深入的话，告诉我你想先学哪个：</p>
+<ul>
+<li><strong>A.</strong> 11 个 agent 什么时候用哪个（更细的分工）</li>
+<li><strong>B.</strong> 分类路由（<code>visual-engineering</code> / <code>ultrabrain</code> / <code>deep</code>…）怎么用</li>
+<li><strong>C.</strong> 你的 <code>opencode.json</code> 和 <code>.omo/omo.jsonc</code> 每一行到底干什么</li>
+</ul>
+
+<div class="callout tip">
+<strong>跟你的老师聊。</strong> 我是你的 OMO 老师。任何没讲清的地方、想再细抠一节，直接问我就可以——我就在这里陪你。
+</div>
+
+<p class="foot">返回 <a href="../index.html">目录</a> · 主来源：OMO 官方指南 <a href="https://github.com/code-yeongyu/oh-my-openagent/blob/dev/docs/guide/orchestration.md">orchestration.md</a> 与 <a href="https://ohmyopenagent.com/docs">ohmyopenagent.com/docs</a>；OpenCode <a href="https://opencode.ai/docs/tui/">TUI</a> 与 <a href="https://opencode.ai/docs/cli/">CLI</a> 文档；本机安装的 <code>oh-my-openagent/dist/index.js</code>（bug 实证来源）。速查卡：<a href="../reference/omo-cheatsheet.html">omo-cheatsheet.html</a> · 避坑：<a href="../reference/omo-pitfalls.html">omo-pitfalls.html</a></p>
+
+</body>
+</html>

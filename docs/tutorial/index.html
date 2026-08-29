@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMO 教学空间 · 目录</title>
+<link rel="stylesheet" href="assets/omo.css">
+<style>
+  .nav { display: flex; flex-wrap: wrap; gap: 1.5rem; list-style: none; padding: 0; margin: 1.5rem 0; }
+  .nav li { flex: 1 1 18rem; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1.2rem; background: #fff; }
+  .nav a { display: block; font-weight: 700; margin-bottom: 0.3rem; }
+  .track { font-size: 0.8rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+  .tag { display: inline-block; font-size: 0.7rem; padding: 0.1em 0.5em; border-radius: 10px; margin-left: 0.4em; vertical-align: middle; }
+  .tag.know { background: #eaf2ea; color: #2e6b3a; }
+  .tag.err { background: #fbf0e2; color: #a3651d; }
+</style>
+</head>
+<body>
+
+<h1>OMO 教学空间</h1>
+<p class="subtitle">给初学者（以及未来的自己 / 别人）的一份 OpenCode + OMO 使用指南。目录即导航，点进去就能学。</p>
+
+<div class="callout">
+<strong>给未来 / 新会话的话。</strong> 这是一套<strong>完整的 OMO 课程体系</strong>，不是零散文件。请<strong>从这个目录（本页）开始读</strong>：先看下面的分类，再点进对应页面——每一页都有「返回目录」链接，能随时跳回来。想快速上手从<b>第 1 课</b>开始；想知道「matt-skills 和 OMO 怎么分工」看<b>第 2 课</b>；日常查命令看<b>速查表</b>；遇到怪问题先翻<b>避坑手册</b>（那页最值钱，全是踩过的真坑）。
+</div>
+
+<h2>课程（知识线）</h2>
+<p>按顺序学，每课 5 分钟，讲完就能上手。</p>
+<ul class="nav">
+  <li>
+    <div class="track">LESSONS<br>第 1 课</div>
+    <a href="lessons/0001-omo-startup.html">OMO 起步：基本流程与常用命令</a>
+    三种用法 + 4 个 agent 对应关系 + `@` 三类 + 常用命令。
+  </li>
+  <li>
+    <div class="track">LESSONS<br>第 2 课</div>
+    <a href="lessons/0002-matt-omo-collab.html">matt-skills 与 OMO 协同</a>
+    谁管"做什么"、谁补"怎么做"—真实的分工边界与决策表。
+  </li>
+</ul>
+
+<h2>参考文档（速查 + 说明）</h2>
+<ul class="nav">
+  <li>
+    <div class="track">REFERENCE</div>
+    <a href="reference/omo-cheatsheet.html">OMO 速查手册</a>
+    打印友好。命令、3 种用法、agent 分工、`@` 三类、本仓库配置备忘。
+  </li>
+  <li>
+    <div class="track">REFERENCE</div>
+    <a href="reference/matt-omo-collab.html">matt-skills ↔ OMO 分工说明</a>
+    主体工作流 + 补短板的完整对照与真实例子。
+  </li>
+</ul>
+
+<h2>避坑手册（错误线）<span class="tag err">踩过的坑</span></h2>
+<div class="callout warn">
+<strong>这页最值钱。</strong> 每个坑都是我们真实踩过、纠正过的。遇到"怪问题"，先来这里对号入座，别再绕一圈。含：goal 钩子拦消息、agent 名对不上教程、`@` 三类、`@tools_list` 误解、控制台乱码假象、配置需重启。
+</div>
+<ul class="nav">
+  <li>
+    <div class="track">REFERENCE <span class="tag err">错误线</span></div>
+    <a href="reference/omo-pitfalls.html">OMO 避坑手册</a>
+    6 个真实坑 + 每条的"我绕过的弯路" + 一份通用排查清单。
+  </li>
+</ul>
+
+<h2>教学档案（内部）</h2>
+<ul class="nav">
+  <li>
+    <div class="track">MISSION</div>
+    <a href="MISSION.md">Mission · 为什么学</a>
+    学习目标与成功标准。
+  </li>
+  <li>
+    <div class="track">RESOURCES</div>
+    <a href="RESOURCES.md">Resources · 权威来源</a>
+    官方文档、本机源码、配置文件的来源清单。
+  </li>
+</ul>
+
+<p class="meta">本目录是教学空间的总入口。任何新开会话的人，从这里开始就能摸清全部内容，不用靠对话记忆。</p>
+
+<p class="foot">教学空间根目录：<code>C:\Users\lqzkc\.scratch\omo-tutorial\</code>。样式由 <code>assets/omo.css</code> 统一提供。</p>
+</body>
+</html>

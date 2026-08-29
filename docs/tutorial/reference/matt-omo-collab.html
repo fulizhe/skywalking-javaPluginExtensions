@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>matt-skills ↔ OMO 分工说明</title>
+<link rel="stylesheet" href="../assets/omo.css">
+</head>
+<body>
+
+<p class="meta">参考文档 ← <a href="../index.html">返回目录</a></p>
+
+<h1>matt-skills 与 OMO 的分工与协同</h1>
+<p class="subtitle">matt-skills 是主体工作流（管「做什么、怎么做完」），OMO 是补短板（管「怎么高效探索、怎么并行、怎么续跑」）。</p>
+
+<h2>一句话分工</h2>
+<table>
+<thead><tr><th>层级</th><th>谁</th><th>管什么</th><th>用哪套工具</th></tr></thead>
+<tbody>
+<tr><td><strong>主体 / 上游</strong></td><td>matt-skills</td><td>需求 → spec → ticket → 验收 的完整工程流程</td><td><code>/to-spec</code>、<code>/to-tickets</code>、<code>/triage</code>、<code>/wayfinder</code>、<code>/code-review</code>、<code>/domain-modeling</code></td></tr>
+<tr><td><strong>补短板 / 下游</strong></td><td>OMO</td><td>低成本深度探索、跨上下文/大库扫描、后台并行 agent、计划续跑、LSP/codegraph</td><td><code>ultrawork</code>、<code>ulw</code>、task(explore/librarian)、Sisyphus 编排</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+<strong>matt-skills 决定你「做什么」「做到什么算完」；OMO 决定你「探索和实现时快不快、省不省力」。</strong> 两者不是竞争，是上下游。
+</div>
+
+<h2>为什么这样分（你的配置已经这么做了）</h2>
+<p>你的 <code>.omo/omo.jsonc</code> 里这一行是整套协同的开关：</p>
+<pre><code>"sisyphus_agent": { "disabled": true }</code></pre>
+<p><code>disabled: true</code> 的意思是：Sisyphus（OMO 的自动总控）<strong>不接管</strong>主对话。代价/收益——</p>
+<ul>
+<li>✅ 保住 matt-skills 的主体地位：<code>build</code>/<code>plan</code> 不被降级成隐藏子 agent，<code>/to-spec</code>、<code>/to-tickets</code> 能正常跑</li>
+<li>✅ OMO 的<strong>底层能力照常可用</strong>：11 个 discipline agent（Oracle/Librarian/Explore…）、task() 工具、后台探索、codegraph、LSP 全都在</li>
+<li>⚠️ 想用 OMO 的<strong>全自动编排</strong>，要<strong>手动</strong>敲 <code>ultrawork</code>/<code>ulw</code>，或手动切到 <code>sisyphus</code> agent——不会自动抢</li>
+</ul>
+
+<div class="callout warn"><strong>注意</strong>：<code>disabled_agents: ["hephaestus"]</code> 是因为只有 <code>opencode-go</code> 一家 provider，而 Hephaestus 只能用 GPT 系列，环境不允许，所以显式禁用避免白撞。</div>
+
+<h2>matt-skills 主体工作流（你项目里怎么走）</h2>
+<p>这套流程的载体都在仓库里：spec / issue tracker 在 <code>.scratch/&lt;feature-slug&gt;/</code>，triage 标签在 <code>docs/agents/triage-labels.md</code>，领域术语 + ADR 在 <code>CONTEXT.md</code> + <code>docs/adr/</code>，领域文档消费约定在 <code>docs/agents/domain.md</code>。</p>
+<pre><code>/to-spec        ← 把想法变成 spec（写到 .scratch/&lt;feature&gt;/spec.md）
+/to-tickets     ← 把 spec 拆成带依赖的 ticket（issues/01-*.md, 02-*.md…）
+/triage         ← 给 ticket 标状态（ready-for-agent 等）
+/domain-modeling / /grill-with-docs ← 需要时沉淀术语 + ADR
+/implement      ← 按 ticket 实现
+/code-review    ← 按规范 + 对照 spec 验收</code></pre>
+
+<h2>OMO 补的短板（matt-skills 缺/弱的地方）</h2>
+<table>
+<thead><tr><th>matt-skills 场景</th><th>OMO 补什么</th><th>怎么触发</th></tr></thead>
+<tbody>
+<tr><td>要<strong>扫一遍大库</strong>找相关代码</td><td>OMO 的 <code>explore</code> 子 agent 后台并行搜索，不占用主上下文</td><td><code>@explore</code> 或 <code>task(explore)</code></td></tr>
+<tr><td>要<strong>查外部文档/开源实现</strong></td><td><code>librarian</code> 子 agent（搜 GitHub、官方 API、OSS 示例）</td><td><code>@librarian</code> 或 <code>task(librarian)</code></td></tr>
+<tr><td>实现时<strong>跨文件、深逻辑</strong></td><td><code>ultrabrain</code> / <code>deep</code> 分类，或 Sisyphus 全编排</td><td><code>ultrawork 任务</code></td></tr>
+<tr><td>卡壳时<strong>架构/疑难问题</strong></td><td><code>oracle</code>（只读顾问）</td><td><code>@oracle</code></td></tr>
+<tr><td>长工程<strong>被中断要续跑</strong></td><td>OMO 的计划续跑（<code>.omo/boulder.json</code>、<code>/ulw-execute</code> 断点续）</td><td>Plan 规划 → <code>/ulw-execute</code></td></tr>
+<tr><td>视觉/前端工作</td><td><code>visual-engineering</code> 分类（自动路由到前端模型）</td><td><code>task(category="visual-engineering")</code></td></tr>
+</tbody>
+</table>
+
+<h2>什么时候用哪个 —— 决策表</h2>
+<pre><code>你的目标是「把需求落地成工程」 → matt-skills 主体（to-spec → to-tickets → …）
+                                  └─ 过程中要「探索/查资料/深度分析/并行」→ 临时调 OMO 补
+你的目标是「一个具体实现/修复，想快」 → 切到 Sisyphus - Ultraworker（或 ultrawork 一把梭）
+你的目标是「复杂多步，要精准」      → Plan 访谈 → /ulw-execute</code></pre>
+
+<h2>一个真实例子：在 skywalking 项目里</h2>
+<p>比如要给 <code>logfile-reporter-plugin</code>（活跃模块）加个功能：</p>
+<ol>
+<li><strong>matt-skills 启动</strong>：<code>/to-spec</code> 写 spec → <code>/to-tickets</code> 拆 ticket → 落 <code>.scratch/</code></li>
+<li><strong>中途探索</strong>：不确定改哪几个文件 → <code>@explore 帮我把 logfile 核心类扫出来</code>（OMO 后台跑）</li>
+<li><strong>实现</strong>：照 ticket 改（主 agent 干，或 <code>ulw 按 ticket 02 实现</code>）</li>
+<li><strong>验收</strong>：<code>/code-review</code> 对照 spec + 仓库规范</li>
+<li>卡壳 → <code>@oracle</code>；深逻辑 → <code>ultrabrain</code></li>
+</ol>
+
+<h2>一句话记住</h2>
+<div class="callout"><strong>matt-skills 决定「打哪里、怎么算赢」；OMO 决定「怎么又快又省地摸清战场、把活干完」。</strong> 你永远是主体工作流的掌舵人，OMO 只在需要时被叫来帮忙。</div>
+
+<p class="foot">关联：<a href="../lessons/0001-omo-startup.html">第 1 课</a> · <a href="../lessons/0002-matt-omo-collab.html">第 2 课</a> · <a href="omo-cheatsheet.html">速查手册</a> · <a href="omo-pitfalls.html">避坑手册</a></p>
+</body>
+</html>

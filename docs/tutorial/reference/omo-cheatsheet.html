@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMO 速查手册</title>
+<link rel="stylesheet" href="../assets/omo.css">
+</head>
+<body>
+<h1>OMO 速查手册</h1>
+<p class="subtitle">OhMyOpenCode 常用命令 · 打印友好 · 随查随用</p>
+
+<h2>一、三种用法（核心心法）</h2>
+<table>
+<tr><th>方式</th><th>怎么写</th><th>什么时候用</th></tr>
+<tr><td>直接打字</td><td><code>帮我修一下 X</code></td><td>简单任务、单文件改动（90% 的情况）</td></tr>
+<tr><td>ultrawork</td><td><code>ultrawork 做 Y</code> 或 <code>ulw 做 Y</code></td><td>复杂任务但懒得解释，让它自己探索+干活</td></tr>
+<tr><td>Prometheus→执行</td><td>切 Prometheus → 描述 → <code>/ulw-execute</code></td><td>多步骤硬活，想先被工程师式追问再动手</td></tr>
+</table>
+
+<h2>二、最常用的命令</h2>
+<h3>OpenCode CLI（命令行）</h3>
+<pre><code>opencode                 # 启动界面
+opencode /path/to/proj   # 在指定项目启动
+opencode -c              # 继续上次会话
+opencode run "提示词"    # 不打开界面，直接跑一句
+opencode models          # 列出可用模型
+opencode auth login      # 登录/配置提供商
+opencode stats           # 看 token 用量
+opencode upgrade         # 升级</code></pre>
+
+<h3>界面内斜杠命令</h3>
+<table>
+<tr><th>命令</th><th>作用</th></tr>
+<tr><td><code>/new</code></td><td>开新会话</td></tr>
+<tr><td><code>/sessions</code></td><td>列出/切换会话</td></tr>
+<tr><td><code>/compact</code></td><td>压缩当前会话（省 token）</td></tr>
+<tr><td><code>/undo</code></td><td>撤销上一条消息</td></tr>
+<tr><td><code>/redo</code></td><td>重做被撤的消息</td></tr>
+<tr><td><code>/models</code></td><td>看/切模型</td></tr>
+<tr><td><code>/agent</code></td><td>切换 agent（Sisyphus/Prometheus 等）</td></tr>
+<tr><td><code>/init</code></td><td>引导生成 AGENTS.md</td></tr>
+<tr><td><code>/exit</code></td><td>退出</td></tr>
+</table>
+
+<h3>小技巧</h3>
+<table>
+<tr><th>写法</th><th>作用</th></tr>
+<tr><td><code>@文件名</code></td><td>引用文件，把它内容加进对话（如 <code>@pom.xml</code>）</td></tr>
+<tr><td><code>@agent名</code></td><td>召唤子 agent 去干活（<code>@explore</code> <code>@oracle</code> <code>@librarian</code> <code>@general</code>）</td></tr>
+<tr><td><code>!命令</code></td><td>跑 shell，如 <code>!git status</code></td></tr>
+</table>
+
+<h3>@ 菜单里的三类东西（别以为都是文件）</h3>
+<table>
+<tr><th>类别</th><th>例子</th><th>作用</th></tr>
+<tr><td>文件</td><td><code>@docs/README.md</code></td><td>把文件内容加进对话</td></tr>
+<tr><td>Agent（子 agent）</td><td><code>@explore</code> <code>@oracle</code> <code>@librarian</code> <code>@Metis</code></td><td>召唤专门 agent 干活，另开子会话</td></tr>
+<tr><td>MCP 工具/资源</td><td><code>@tools_list</code></td><td>查看外部工具可用清单</td></tr>
+</table>
+<p class="subtitle" style="font-size:.85rem;margin-top:.4rem">环境：opencode 桌面 GUI —— 与终端版同机制，切换 agent 用左下角下拉点选即可。</p>
+
+<h2>三、核心 Agent（谁干嘛用）</h2>
+<table>
+<tr><th>Agent</th><th>角色</th></tr>
+<tr><td><strong>Sisyphus</strong></td><td>总调度大管家，默认主编排</td></tr>
+<tr><td><strong>Prometheus</strong></td><td>动手前先访谈你、写出方案</td></tr>
+<tr><td><strong>Atlas</strong></td><td>读 Prometheus 方案，分派干活</td></tr>
+<tr><td><strong>Hephaestus</strong></td><td>深度重构，只支持 GPT 系列</td></tr>
+<tr><td><strong>Oracle</strong></td><td>只读顾问，架构/疑难问题</td></tr>
+<tr><td><strong>Librarian</strong></td><td>查文档/开源代码</td></tr>
+<tr><td><strong>Explore</strong></td><td>快速扫代码库</td></tr>
+<tr><td><strong>Metis</strong></td><td>动手前分析缺什么、有没有坑</td></tr>
+<tr><td><strong>Momus</strong></td><td>无情评审你的方案/代码</td></tr>
+</table>
+
+<h2>四、本项目（skywalking）配置备忘</h2>
+<ul>
+<li><code>sisyphus_agent.disabled: true</code> — Sisyphus 不自动接管主控，保住 matt-skills 工作流；要靠 <code>ultrawork</code>/<code>ulw</code> 手动触发</li>
+<li><code>goal.enabled: false</code> — 关闭 goal 钩子（避免 2000 字符上限拦消息）。改这个后要重启 opencode 才生效</li>
+<li>只有 <code>opencode-go</code> 一家 provider，agent/category 都硬绑到 <code>opencode-go/*</code></li>
+</ul>
+
+<h2>五、报错排查</h2>
+<div class="callout warn">
+<strong>发送命令失败 / Unexpected server error</strong> — 大概率是工具/配置问题，不是你的代码 bug。
+去翻 <code>C:\Users\lqzkc\.local\share\opencode\log\opencode.log</code> 找 ERROR 行。
+（本教学 0001 那节就讲了这个真实案例。）
+</div>
+
+<p class="foot">返回 <a href="../index.html">目录</a> · 来源：omo 官方 docs（ohmyopenagent.com/docs）、OpenCode docs（opencode.ai/docs/cli 与 /tui）、本机安装的 oh-my-openagent dist。配套：<a href="matt-omo-collab.html">分工说明</a> · <a href="omo-pitfalls.html">避坑手册</a> · 课程 <a href="../lessons/0001-omo-startup.html">0001</a> / <a href="../lessons/0002-matt-omo-collab.html">0002</a></p>
+</body>
+</html>

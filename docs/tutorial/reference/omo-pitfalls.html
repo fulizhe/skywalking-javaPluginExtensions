@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMO 避坑手册</title>
+<link rel="stylesheet" href="../assets/omo.css">
+</head>
+<body>
+
+<p class="meta">参考文档 · 错误线 · ← <a href="../index.html">返回目录</a></p>
+
+<h1>OMO 避坑手册</h1>
+<p class="subtitle">走过的弯路都是资产。下次遇到同款症状，先来这里对号入座，别再绕一圈。</p>
+
+<div class="callout warn">
+<strong>这页最值钱。</strong> 每一条都是我们<strong>真实踩过/纠正过</strong>的坑。教训比教程更有用——遇到「怪问题」，先翻这页，再看课程。
+</div>
+
+<div class="callout tip"><strong>先看通用排查清单（底部）。</strong> 我们这程总结出一条 5 步法：看日志 → 查本机源码 → 核对真实配置 → 分清内置/MCP → 改了要重启。绝大多数怪问题都能用它兜住。</div>
+
+<h2>🕳 坑 1：发长消息报「发送命令失败 / Unexpected server error」</h2>
+<ul>
+<li><strong>症状</strong>：敲 <code>/teach</code> + 一大段说明，弹 toast「发送命令失败 / Unexpected server error. Check server logs for details.」</li>
+<li><strong>真相</strong>：<strong>不是你的代码 bug，也不是网络</strong>。OMO 的 <code>goal</code> 钩子在<strong>每一条消息</strong>上抓文本去存"目标"，而目标有 <strong>2000 字符上限</strong>（<code>validateObjective</code> 里 <code>MAX_OBJECTIVE_LENGTH=2000</code>）。超了就抛错，整条消息被打回。</li>
+<li><strong>我绕过的弯路</strong>：一开始我以为是项目代码问题，去 skywalking 插件里找——全错，那串消息根本不在代码里。应该第一时间看 opencode 日志。</li>
+<li><strong>正确姿势</strong>：翻 <code>C:\Users\lqzkc\.local\share\opencode\log\opencode.log</code> 搜 <code>ERROR</code> / <code>InvalidObjective</code>。</li>
+<li><strong>根治</strong>：<code>.omo/omo.jsonc</code> 里 <code>goal.enabled</code> 改成 <code>false</code>（已提交，本地 commit <code>1e36e60</code>）。<strong>改完需重启 opencode 才生效。</strong></li>
+</ul>
+
+<h2>🕳 坑 2：教学犯了「照通用教程讲」而不是「照你的环境讲」</h2>
+<ul>
+<li><strong>症状</strong>：我在第 1 课讲了「三种用法：切 Prometheus / ultrawork 命令」，你说<strong>没有</strong>这些。</li>
+<li><strong>真相</strong>：通用教程里的 agent 名（Prometheus/Hephaestus）≠ 你界面上真实的 agent 名。你的 agent 下拉只有 4 项：<code>Build</code>、<code>Plan</code>、<code>Sisyphus - Ultraworker</code>、<code>Atlas - Plan Executor</code>。其中 <strong>Prometheus 在你界面里就叫 <code>Plan</code></strong>，Hephaestus 被禁用（无 OpenAI 凭据），ultrawork 模式靠<strong>切到 Sisyphus agent</strong> 而不是打命令。</li>
+<li><strong>教训</strong>：教工具时，必须先看对方<strong>当前的真实配置</strong>，不要拿官方通用文档糊弄——尤其 agent 名、插件名会因版本/配置不同而不同。（我改过多次，查证靠本机 <code>dist/index.js</code> + <code>.omo/omo.jsonc</code>，别靠记忆。）</li>
+</ul>
+
+<h2>🕳 坑 3：以为 <code>@</code> 只能引用文件</h2>
+<ul>
+<li><strong>症状</strong>：你 <code>@</code> 弹出大量带图标的 <code>@explore</code>/<code>@oracle</code>/<code>@Metis</code>…，我第一课只讲了「<code>@文件名</code> 引用文件」，你自然懵。</li>
+<li><strong>真相</strong>：<code>@</code> 菜单里有<strong>三类</strong>：<br>
+① 文件（<code>@pom.xml</code>）→ 让它看文件<br>
+② <strong>子 agent 提及</strong>（<code>@explore</code>/<code>@oracle</code>/<code>@librarian</code>/<code>@Metis</code>…）→ <strong>派活给分身</strong>，它另开子会话<br>
+③ MCP 资源（<code>@tools_list</code>）→ 查看某个 MCP 服务器的工具清单</li>
+<li><strong>一句话</strong>：<code>@文件名</code>=让它看；<code>@agent名</code>=派活给分身。</li>
+</ul>
+
+<h2>🕳 坑 4：<code>@tools_list</code> 以为是「全局工具列表」</h2>
+<ul>
+<li><strong>症状</strong>：你 <code>@tools_list</code> 想「看所有工具」，结果只看到 exa 的搜索工具列表。</li>
+<li><strong>真相</strong>：<code>@tools_list</code> 是 <strong>exa 这一个 MCP 服务器的工具清单</strong>（<code>exa://tools/list</code>），不是全局汇总。</li>
+<li><strong>两类工具别混淆</strong>：<br>
+<strong>内置工具</strong> = opencode 自带（<code>bash</code>/<code>read</code>/<code>edit</code>/<code>grep</code>/<code>glob</code>/<code>webfetch</code>…），agent 自动用，不需要 <code>@</code>。<br>
+<strong>MCP 资源</strong> = 外部服务器插入的（<code>exa://...</code>、<code>@tools_list</code>），<code>@</code> 它才暴露。</li>
+<li><strong>还有</strong>：exa 目前只有基础 <code>web_search_exa</code> 是 <code>enabled:true</code>，高级版（<code>web_search_advanced_exa</code>、<code>web_fetch_exa</code> 等）全被禁用——多半因为没配 API key。日常查资料基础版够用。</li>
+</ul>
+
+<h2>🕳 坑 5：控制台里中文显示成乱码（不是文件坏了！）</h2>
+<ul>
+<li><strong>症状</strong>：<code>Get-Content</code> 读 markdown、<code>git diff</code> 看中文，全变 <code>�?</code> 或 <code>���</code>。</li>
+<li><strong>真相</strong>：文件本身是<strong>干净的 UTF-8 字节</strong>（我用 GB18030/UTF-8 逐字节验证过，中文〈插件安装/配置经验〉都在）。乱码只是 <strong>PowerShell 控制台用 GBK 渲染 UTF-8</strong> 的显示假象。<strong>不是 mojibake，千万别去「修」文件。</strong></li>
+<li><strong>正确姿势</strong>：用 <code>pwsh</code>（PowerShell 7）跑（你环境已配 <code>shell: pwsh</code>），它 UTF-8 端到端不糊。判断乱码真假，用字节层面验证（<code>System.Text.Encoding.UTF8.GetString</code> + 正则匹配中文），别只看终端显示。</li>
+</ul>
+
+<h2>🕳 坑 6（你没踩，但要知道）：配置改了不重启不生效</h2>
+<ul>
+<li>改 <code>.omo/omo.jsonc</code>（如 goal）后，<strong>必须重启 opencode</strong>（或新开会话）才装配到运行时的 OMO 插件里。当前会话还带旧配置。</li>
+<li>我们当时改完 <code>goal.enabled=false</code> 没立刻验证，就是这个原因——不至于错，但要知道「改了≠马上生效」。</li>
+</ul>
+
+<h2>✅ 通用检查清单（下次遇到怪问题先走这几步）</h2>
+<ol>
+<li><strong>先看日志</strong>：<code>C:\Users\lqzkc\.local\share\opencode\log\opencode.log</code>，搜 <code>ERROR</code>/<code>InvalidObjective</code>/<code>Unexpected</code>。十有八九答案就在那，<strong>别去翻你的代码</strong>。</li>
+<li><strong>查本机源码</strong>（比文档准）：<code>C:\Users\lqzkc\.cache\opencode\packages\oh-my-openagent@latest\...\dist\index.js</code>，搜关键字。</li>
+<li><strong>核对真实配置</strong>：<code>D:\gitRepository\skywalking-javaPluginExtensions\.omo\omo.jsonc</code> + <code>opencode.json</code> —— 你的 agent 名、禁用项、模型绑定都以这里为准。</li>
+<li><strong>分清「内置」vs「MCP」</strong>：内置工具 agent 会自动用；MCP 资源才需要 <code>@</code>。</li>
+<li><strong>配置改了要重启</strong>才生效。</li>
+</ol>
+
+<p class="foot">本页把散落在各条 learning-records 里的「错误」汇总成一条避坑线。知识线见：<a href="../lessons/0001-omo-startup.html">第 1 课</a> · <a href="../lessons/0002-matt-omo-collab.html">第 2 课</a> · <a href="omo-cheatsheet.html">速查手册</a>。</p>
+</body>
+</html>

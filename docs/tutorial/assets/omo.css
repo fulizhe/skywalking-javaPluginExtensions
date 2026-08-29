@@ -1,0 +1,113 @@
+/* omo.css — 共享样式，所有 lesson/reference 都链接这个，保证整门课观感统一。
+   风格：Tufte 式 — 留白多、衬线正文、窄栏、克制用色。 */
+
+:root {
+  --ink: #1a1a1a;
+  --ink-soft: #3b3b3b;
+  --ink-faint: #6b6b6b;
+  --accent: #8c1a1a;        /* 深红点缀 */
+  --accent-soft: #efe6e6;
+  --rule: #d9d0c7;          /* 暖灰分隔线 */
+  --bg: #fdfcf9;
+  --code-bg: #f2efe9;
+  --maxw: 44rem;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 18px; }
+
+body {
+  margin: 0 auto;
+  max-width: var(--maxw);
+  padding: 3.5rem 1.5rem 5rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Charter, "Bitstream Charter", Georgia, "Songti SC", "Noto Serif SC", serif;
+  line-height: 1.65;
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
+h1, h2, h3, h4 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+h1 { font-size: 1.9rem; margin: 0 0 0.4rem; }
+h2 { font-size: 1.4rem; margin: 2.6rem 0 0.7rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.15rem; margin: 1.8rem 0 0.5rem; color: var(--ink-soft); }
+
+p, li { color: var(--ink-soft); }
+p { margin: 0 0 1rem; }
+li { margin-bottom: 0.45rem; }
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(140,26,26,.25); }
+a:hover { border-bottom-color: var(--accent); }
+
+.lede { font-size: 1.1rem; color: var(--ink); font-style: italic; }
+
+.subtitle { color: var(--ink-faint); font-style: italic; margin-bottom: 2rem; }
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: .88em;
+  background: var(--code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  color: #a0251f;
+}
+
+pre {
+  background: var(--code-bg);
+  border-left: 3px solid var(--accent-soft);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  margin: 1.2rem 0;
+}
+pre code { background: none; padding: 0; color: var(--ink-soft); font-size: 0.85rem; }
+
+/* 卡片：重点框 */
+.callout {
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  padding: 1rem 1.3rem;
+  margin: 1.5rem 0;
+  border-radius: 0 6px 6px 0;
+}
+.callout strong { color: var(--accent); }
+
+.callout.tip { background: #eaf2ea; border-left-color: #2e6b3a; }
+.callout.tip strong { color: #2e6b3a; }
+
+.callout.warn { background: #fbf0e2; border-left-color: #b0742a; }
+.callout.warn strong { color: #a3651d; }
+
+/* 表格 */
+table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { color: var(--ink); font-weight: 700; border-bottom: 2px solid var(--ink-faint); }
+td code { white-space: nowrap; }
+
+/* 教学专用 */
+.quiz { border: 1px solid var(--rule); border-radius: 8px; padding: 1.3rem; margin: 1.5rem 0; background: #fff; }
+.quiz summary { cursor: pointer; font-weight: 700; color: var(--accent); margin-bottom: 0.5rem; }
+.answer { margin-top: 0.8rem; display: none; }
+details[open] .answer { display: block; }
+.answer code { background: var(--code-bg); }
+
+.foot {
+  margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  font-size: 0.85rem; color: var(--ink-faint);
+}
+
+.meta { font-size: 0.82rem; color: var(--ink-faint); margin-bottom: 2.5rem; }
+
+@media print {
+  body { max-width: 100%; padding: 0; }
+  pre, code { background: #eee; }
+  a { color: var(--accent); }
+}
