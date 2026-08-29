@@ -1,41 +1,17 @@
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live as markdown files under `.scratch/<feature>/` in this repo. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Five canonical roles, label string equal to role name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
-
-Architecture reviews (`improve-codebase-architecture`) write their HTML report to `docs/review/architecture-review-<timestamp>.html` — committed, not temp.
-
-### Module maintenance status
-
-- **Active**: `agent/logfile-reporter-plugin`, `agent/override-httpclient-4.x-plugin`, `agent/override-hutool-http-5.x-plugin` — ongoing iteration (bugfix & feature)
-- **Sample & validation**: `agent/demo-app` — plugin capability demo + one-command validation loop for the active modules. Standalone pom, deliberately NOT in the agent reactor, so plugin builds (`-pl <plugin> -am`) and CI paths stay untouched
-
-### Build & demo runtime convention (adr-01)
-
-- **Build toolchain**: JDK 17 (plugin artifacts keep bytecode baseline 8 via `release 8`; building with JDK 8 is no longer supported)
-- **Demo runtime**: JDK 8 default + JDK 17 explicit (`run-with-agent.ps1 -JavaHome <jdk17>`); scripts auto-pick a JDK 17 build toolchain via `-BuildJavaHome` / `jdk-17*` scan
-- See `docs/adr/adr-01-jdk17-migration.md` for the full decision record
-- **Archived**: all other modules — critical bugfix only; feature work needs pre-approval
-
-### Known TODOs
-
-- `agent/demo-app`: initial validation scope is logfile-reporter-plugin only; extend to override-httpclient-4.x and override-hutool-http-5.x later (structure already multi-plugin ready)
-
-When invoking toolchains (to-tickets / triage / to-spec / domain-modeling), plan context & features for the active modules.
-
 ## Execution environment (Windows)
 
-Run commands with `pwsh` (PowerShell 7): UTF-8 end-to-end, so Chinese script output round-trips cleanly. The default Windows PowerShell 5.1 console decodes output as GBK and garbles UTF-8 text — run scripts and long verifications via `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe` rather than the 5.1 shell.
+- **pwsh 运行约定** — 运行命令用 `pwsh`（PowerShell 7）：UTF-8 end-to-end，中文脚本输出可干净往返。默认 Windows PowerShell 5.1 控制台按 GBK 解码，会乱码 UTF-8 文本 — 运行脚本与长验证请用 `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe`，不要用 5.1 shell。
+
+## Agent skills
+
+- **Issue tracker** — 何时读：spec/issue 存放、publish/fetch ticket、wayfinding 操作。→ `docs/agents/index.md`
+- **Triage labels** — 何时读：技能提到 triage 角色标签时。→ `docs/agents/index.md`
+- **Domain docs** — 何时读：探索代码前读领域词表与 ADR。→ `docs/agents/index.md`
+- **Review reports** — 何时读：`improve-codebase-architecture` 阅读/产出评审 HTML 时。→ `docs/review/index.md`
+- **Module maintenance status** — 何时读：动任何模块、调用工具链（to-tickets / triage / to-spec / domain-modeling）前。→ `docs/repo/index.md`
+- **Build & demo runtime convention (adr-01)** — 何时读：构建工具链 / 演示运行时约定。→ `docs/adr/index.md`
+- **Known TODOs** — 何时读：规划 demo-app 验证范围时。→ `docs/repo/index.md`
 
 ## Agent tooling quirks (OpenCode + OMO)
 
-When OpenCode/OMO behaves unexpectedly (e.g. a message fails to send with "Unexpected server error", or a slash command/agent name doesn't match docs), it's usually a tooling quirk, **not this repo's code**. Do not hunt for the cause in the Java/plugin sources. See `docs/tutorial/reference/omo-pitfalls.html` for the known quirks and the 5-step log/config check. The course is navigated from `docs/tutorial/index.html`.
+- **工具怪癖排查** — 何时读：OpenCode/OMO 行为异常（发送失败、命令/agent 名不匹配）时。→ `docs/tutorial/index.html`

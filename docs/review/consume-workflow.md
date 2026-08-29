@@ -5,15 +5,9 @@
 3. 如果后续想法发生变化、方案调整：修改对应的 spec.md / ADR；不要改动这份 html 快照。
 4. html 只代表评审当时那一瞬间的分析结论。
 
-
-
 \## 如何使用这份html
 
-
-
 整体流水线顺序：\*\*wayfinder阅读评审文档 → /grill‑with‑docs 澄清 → /triage 分级 → /to‑spec 写规格 → /to‑tickets 拆工单 → 迭代编码评审 → ADR记录架构决策 → 更新CONTEXT.md\*\*
-
-
 
 \### 步骤0：锁定执行边界（先执行，防止Agent越界修改归档模块）
 
@@ -30,8 +24,6 @@ Do NOT touch or suggest changes for any archived modules outside this component.
 Respect the review priority: Candidate‑A highest priority, then Candidate‑B. Candidate‑C and Candidate‑D require grill session first, do not generate implementation tickets for them now.
 
 ```
-
-
 
 \### 步骤1：Grill澄清（/grill‑with‑docs）——消除模糊点
 
@@ -58,8 +50,6 @@ Capture confirmed terms into CONTEXT.md.
 ```
 
 > 会话中产生新领域概念（deep module、pass‑through hop等）会询问是否写入`CONTEXT.md`，确认保存。
-
-
 
 \### 步骤2：生成重构规格文档 /to‑spec
 
@@ -95,8 +85,6 @@ Output spec file to docs/spec/rulesengine-deep-refactor-spec.md
 
 ```
 
-
-
 \### 步骤3：把Spec拆解成小的可执行工单 /to‑tickets
 
 > 重点：拆成分步工单，不要一次性巨大变更；标签带上 `refactor‑rulesengine`
@@ -123,8 +111,6 @@ Rules for ticket splitting:
 
 ```
 
-
-
 \### 步骤4：迭代编码评审循环（开发阶段反复使用）
 
 每次改完代码，执行校验指令：
@@ -146,8 +132,6 @@ Check:
 Flag deviations from spec.
 
 ```
-
-
 
 \### 步骤5：A记录架构决策（重构完成后）
 
@@ -171,8 +155,6 @@ Save to docs/adr/adr‑xxx‑deep‑rulesengine‑refactor.md
 
 ```
 
-
-
 \### 步骤6（完成A之后，再处理Candidate‑B）
 
 > A做完再启动B，不要并行；复用同样一套流程：`/grill‑with‑docs` → `/to‑spec` → `/to‑tickets`
@@ -186,8 +168,6 @@ Source: architecture‑review‑20260808‑220621.html Candidate‑B LocalStore<
 Clarify: capacity mapping for each sender, concurrency contract, snapshot semantics, migration path from existing CircularBlockingQueue / LinkedHashMap.
 
 ```
-
-
 
 \### Candidate‑C / Candidate‑D（当前阶段不要生成实现工单）
 
@@ -205,8 +185,6 @@ Goal: explore constraints and risks; do NOT output implementation spec or ticket
 
 ```
 
-
-
 \### 关键避坑点（结合你之前JDK17迁移背景）
 
 1\. 重构Candidate‑A/B的同时，\*\*需要兼顾JDK17兼容性审计\*\*；在spec/ticket的验收标准加上：
@@ -216,4 +194,3 @@ Goal: explore constraints and risks; do NOT output implementation spec or ticket
 2\. 所有产出物（spec、ADR）路径遵循你现有的 matt‑skill 目录约定，不要散落；
 
 3\. 全程禁止触碰仓库中 archived 的其他模块。
-
