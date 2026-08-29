@@ -3,6 +3,11 @@
 #### 介绍
 Skywalking Java Agent插件 和 OAP端的扩展。
 
+#### 开发约定
+
+- **给 AI/Agent 看的约定**：见 [`AGENTS.md`](./AGENTS.md) —— 包含模块维护状态、JDK 17 构建/运行约定，以及 OpenCode/OMO 工具怪癖的排查指引（遇到"发送命令失败"等怪问题，先看那里，别在插件代码里找）。顺带读一下能少走弯路。
+- **OMO 教学+避坑**：见 [`docs/tutorial/`](./docs/tutorial/) —— 从 `index.html` 进入，包含课程、速查手册和避坑手册。工具相关的坑都沉淀在 [`reference/omo-pitfalls.html`](./docs/tutorial/reference/omo-pitfalls.html)。
+
 #### Github同步
 
 ##### 方案一
