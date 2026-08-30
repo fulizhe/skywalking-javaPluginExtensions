@@ -1,6 +1,7 @@
-## Execution environment (Windows)
+## Execution environment
 
-- **pwsh 运行约定** — 运行命令用 `pwsh`（PowerShell 7）：UTF-8 end-to-end，中文脚本输出可干净往返。默认 Windows PowerShell 5.1 控制台按 GBK 解码，会乱码 UTF-8 文本 — 运行脚本与长验证请用 `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe`，不要用 5.1 shell。
+- **Linux / WSL** — shell 用 `bash`（UTF-8，中文无乱码问题）。`pwsh` 不保证可用，不要默认调用。
+- **Windows 宿主 shell** — 运行命令用 `pwsh`（PowerShell 7）：UTF-8 end-to-end，中文脚本输出可干净往返。默认 Windows PowerShell 5.1 控制台按 GBK 解码，会乱码 UTF-8 文本 — 运行脚本与长验证请用 `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe`，不要用 5.1 shell。
 
 ## Agent skills
 
