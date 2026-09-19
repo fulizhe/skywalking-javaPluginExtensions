@@ -27,4 +27,4 @@
 
 - pwsh 执行环境约定内联到 `AGENTS.md` 顶部 `## Execution environment (Windows)` 一节。
 - 删除 `docs/repo/execution-environment.md`（内容已内联，避免孤儿冗余）。
-- 其余主题（模块状态 / TODO / ADR / agents / review / spec）维持 index 模型不动。
+- 其余主题（模块状态 / TODO / ADR / agents / review）维持 index 模型不动。

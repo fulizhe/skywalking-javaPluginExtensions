@@ -53,7 +53,7 @@ Capture confirmed terms into CONTEXT.md.
 
 \### 步骤2：生成重构规格文档 /to‑spec
 
-输出可评审的 spec 文件，作为后续编码、评审的依据，文件输出到 `docs/spec/rulesengine‑deep‑refactor‑spec.md`
+输出可评审的 spec 文件，作为后续编码、评审的依据，文件输出到 `.scratch/deep-module-refactor/spec.md`
 
 ```
 
@@ -81,7 +81,7 @@ Requirements:
 
 
 
-Output spec file to docs/spec/rulesengine-deep-refactor-spec.md
+Output spec file to .scratch/deep-module-refactor/spec.md
 
 ```
 
@@ -93,7 +93,7 @@ Output spec file to docs/spec/rulesengine-deep-refactor-spec.md
 
 /to-tickets
 
-Input: docs/spec/rulesengine-deep-refactor-spec.md.
+Input: .scratch/deep-module-refactor/spec.md.
 
 Split into incremental, review‑able tickets for Candidate‑A RulesEngine refactor.
 
@@ -117,7 +117,7 @@ Rules for ticket splitting:
 
 ```
 
-Review current changes against docs/spec/rulesengine-deep-refactor-spec.md.
+Review current changes against .scratch/deep-module-refactor/spec.md.
 
 Check:
 
