@@ -50,51 +50,53 @@
       "auto_start": false
     },
 
-    // 只认证了 opencode-go 这一个 provider，所以把所有 agent 硬编码绑定到 opencode-go/* 系列，
-    // 不用默认自动探测（默认链从 Anthropic/OpenAI 开始，会一路撞不可用的 provider 再回退）。
+    // 当前唯一认证的 provider 是 command-go-2（见 ~/.local/share/opencode/auth.json），
+    // 所以把所有 agent 硬编码绑定到 command-go-2/* 系列，不用默认自动探测（默认链从
+    // Anthropic/OpenAI 开始，会一路撞不可用的 provider 再回退）。
+    // 注：此处引用的模型须同时声明在 ~/.config/opencode/opencode.jsonc 的 command-go-2.models 中。
     // 注意：4.19.4 的 agent 配置只认 `fallback_models`，`models` 会被判为非法 key
     //（migration 曾把 fallback_models 误转成 models，导致下面 3 个 agent 静默回退，已改回）。
     "agents": {
       "sisyphus": { // 总调度大管家（全编排的 orchestrator）
-        "model": "opencode-go/kimi-k3", // 主力：复杂推理
+        "model": "command-go-2/moonshotai/Kimi-K3", // 主力：复杂推理
         "fallback_models": [
-          "opencode-go/qwen3.7-plus", // 1M 长上下文
-          "opencode-go/minimax-m3",
-          "opencode-go/glm-5.2"
+          "command-go-2/Qwen/Qwen3.7-Plus", // 1M 长上下文
+          "command-go-2/MiniMaxAI/MiniMax-M3",
+          "command-go-2/zai-org/GLM-5.2"
         ]
       },
-      "prometheus": { "model": "opencode-go/kimi-k3" }, // 战略规划：动手前先访谈你、产出方案
-      "atlas": { "model": "opencode-go/kimi-k3" }, // 待办/任务编排
-      "metis": { "model": "opencode-go/kimi-k3" }, // 规划顾问：动手前分析需求意图与遗漏
-      "oracle": { "model": "opencode-go/kimi-k3" }, // 架构/疑难问题咨询
-      "momus": { "model": "opencode-go/kimi-k3" }, // 高精度评审/复核
+      "prometheus": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 战略规划：动手前先访谈你、产出方案
+      "atlas": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 待办/任务编排
+      "metis": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 规划顾问：动手前分析需求意图与遗漏
+      "oracle": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 架构/疑难问题咨询
+      "momus": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 高精度评审/复核
       "explore": { // 代码阅读、大库扫描，高频使用
-        "model": "opencode-go/qwen3.7-plus",
+        "model": "command-go-2/Qwen/Qwen3.7-Plus",
         "fallback_models": [
-          "opencode-go/minimax-m3"
+          "command-go-2/MiniMaxAI/MiniMax-M3"
         ]
       },
       "librarian": { // 文档/代码检索
-        "model": "opencode-go/qwen3.7-plus",
+        "model": "command-go-2/Qwen/Qwen3.7-Plus",
         "fallback_models": [
-          "opencode-go/minimax-m3"
+          "command-go-2/MiniMaxAI/MiniMax-M3"
         ]
       },
-      "multimodal-looker": { "model": "opencode-go/kimi-k3" }, // 图片/截图/PDF 视觉分析
-      "sisyphus-junior": { "model": "opencode-go/kimi-k3" } // 轻量任务调度
+      "multimodal-looker": { "model": "command-go-2/deepseek/deepseek-v4-flash-vision-exp" }, // 图片/截图/PDF 视觉分析
+      "sisyphus-junior": { "model": "command-go-2/moonshotai/Kimi-K3" } // 轻量任务调度
     },
 
     // categories 是 task() 工具做后台子任务分发时按任务类别选模型的映射。
     // 只配 agent 不配 category 等于白配：后台多 Agent 是按 category 选模型的。
     "categories": {
-      "quick": { "model": "opencode-go/minimax-m2.7" }, // 轻量小任务（改错别字/单文件）→ minimax-m2.7 省钱快
-      "unspecified-low": { "model": "opencode-go/minimax-m2.7" }, // 一般任务（低强度）
-      "unspecified-high": { "model": "opencode-go/kimi-k3" }, // 一般任务（高强度）
-      "writing": { "model": "opencode-go/kimi-k3" }, // 文档/方案写作
-      "visual-engineering": { "model": "opencode-go/kimi-k3" }, // 前端/UI/视觉
-      "deep": { "model": "opencode-go/qwen3.7-plus" }, // 深度代码分析（1M 长上下文）
-      "ultrabrain": { "model": "opencode-go/kimi-k3" }, // 深度逻辑推理/复杂架构
-      "artistry": { "model": "opencode-go/kimi-k3" } // 创造性/非常规方案
+      "quick": { "model": "command-go-2/deepseek/deepseek-v4-flash" }, // 轻量小任务（改错别字/单文件）→ flash 省钱快
+      "unspecified-low": { "model": "command-go-2/deepseek/deepseek-v4-flash" }, // 一般任务（低强度）
+      "unspecified-high": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 一般任务（高强度）
+      "writing": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 文档/方案写作
+      "visual-engineering": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 前端/UI/视觉
+      "deep": { "model": "command-go-2/Qwen/Qwen3.7-Plus" }, // 深度代码分析（1M 长上下文）
+      "ultrabrain": { "model": "command-go-2/moonshotai/Kimi-K3" }, // 深度逻辑推理/复杂架构
+      "artistry": { "model": "command-go-2/moonshotai/Kimi-K3" } // 创造性/非常规方案
     }
   },
 
