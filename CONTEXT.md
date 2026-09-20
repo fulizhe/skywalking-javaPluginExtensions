@@ -43,6 +43,22 @@ _Avoid_: 规则链、匹配器工厂
 各数据流 sender 背后的进程内有界缓存,淘汰策略统一为 FIFO(最旧插入先出,非 LRU)。两种形态:追加式(append)供 JVM/meter/log/profile 四流使用,现为 `CircularBlockingQueue`,其公开接口维持现状不变(语义为 add + 快照读);键式(keyed,按 key `put`/`merge`/`snapshot`)供 trace 流按 traceId 合并存储,为新增模块。
 _Avoid_: LRU 缓存(历史文档旧称)、将环形队列视为语义
 
+**trace 内存热层 (trace hot memory tier)**:
+进程内按 traceId 保留近期链路的键式有界存储;按 traceId 查询优先命中它,未命中再查持久层。
+_Avoid_: 缓存、LRU、一级存储
+
+**trace 持久层 (trace persistence tier)**:
+跨进程重启保留链路数据的分层:只包含 slow/error 明细与 Trace 指标;normal 明细不进入该层。
+_Avoid_: 落盘日志、数据库(具体技术)
+
+**链路分级 (trace level)**:
+按现有告警规则对一条链路的判定结果:error、slow、normal 三档;决定是否进入持久层(normal 不进入)。
+_Avoid_: 告警级别、日志级别
+
+**Trace 指标 (trace metrics)**:
+从链路数据流上聚合出的请求数、错误数、错误率、耗时与分位数;与 SkyWalking 自带的 JVM/meter 指标不同源。
+_Avoid_: 本地指标、监控指标
+
 **演示应用 (demo app)**:
 仓库内的 Spring Boot 样例应用,面向"快速理解插件能力"的读者,提供可视化仪表盘与一键启动。
 _Avoid_: 样例项目(与验证回路混为一谈)
