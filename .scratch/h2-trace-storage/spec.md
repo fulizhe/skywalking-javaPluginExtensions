@@ -14,8 +14,9 @@ Status: ready-for-agent
 
 - `consume` 里只新增一次 `accept(data)` 调用；既有 `segmentToLog` / `mergeLogIntoStatMap` / `KeyedLocalStore` / 告警 / 暴露机制零改动；
 - 新路径按"一条 segment 一行、`data_binary` 存该段 JSON"落 H2，查询时按 `trace_id` 取行、按 `start_time` 排序组装；
-- 可开启 debug 比对：以现有内存 store 的当前 key 集为基准，逐 traceId 与 H2 数据对账（logs 条数 / span 数 / 关键字段），差异只打日志；
-- 可选开启 **H2 调试控制台**（浏览器页面，默认关闭、仅本机），供人工 SQL 查看、粗略对比；
+- 可开启 debug 比对：以现有内存 store 的当前 key 集为基准，逐 traceId 与 H2 数据对账（logs 条数 / span 数 / 关键字段），差异打日志并**落 H2 对账审计表**；
+- 提供宿主工具类范式的调试入口（新桩类，工作名 `SWTraceParityUtils`），使用侧界面可直接展示对账结果，快速交叉验证；
+- 可选开启 **H2 调试控制台**（浏览器页面、支持测试环境远程访问、默认关闭），供人工 SQL 查看、粗略对比；
 - H2 影子写入带行数水位上限（默认 2000），长跑 / 压测下内存有界，可安全用于生产观察。
 
 比对通过后，后续阶段再做"只收 error/slow"（Phase 2）、"切 file 模式 + TTL"（Phase 3）、"读门面（内存优先、miss 再 H2）+ Query"（Phase 4）、"trace-based metrics"（Phase 5）。
@@ -40,6 +41,9 @@ Status: ready-for-agent
 16. 作为维护者，我想 H2 依赖被 shade 重定位，以便不与业务自带 H2 / 其它组件冲突。
 17. 作为维护者，我想测试缝收敛在"存储接口（单元）+ 既有验证回路（端到端）"两个，以便测试不侵入实现细节。
 18. 作为后续阶段作者，我想 Phase 1 的同步写与水位清理留下明确标记（file 阶段必须换异步写线程），以便不在生产上长期使用临时方案。
+19. 作为验证者，我想每轮对账结果落 H2 审计表（差异明细 + 期望 / 实际样例），以便事后审计而不是翻日志。
+20. 作为使用者，我想通过宿主工具类范式的调试入口（类似 `SWLogfileReporterUtils` 的桩类）拿到对账快照，以便在使用侧界面直接展示对比验证结果。
+21. 作为维护者，我想审计表带行数水位上限并明确标注"临时"，以便 Phase 2 收窄后重新评估去留。
 
 ## Implementation Decisions
 
@@ -49,6 +53,8 @@ Status: ready-for-agent
 - **写入模型（Phase 1 临时）**：`accept` 内同步批量 `addBatch/executeBatch`（单连接、单消费线程）；**file 模式阶段必须切换为独立写线程**（方案 §6.1 B），此为本阶段已知临时简化。
 - **行数水位上限**：新增 `h2.shadow_max_rows`（默认 2000，建议 ≥ `max_log_size`）；按 `id` 水位节流执行 `DELETE FROM trace_segment WHERE id <= currentMaxId - cap`（每 N 批或计数阈值触发一次）。
 - **比对器（纯函数）**：以旧 store 当前 key 集为基准，逐 traceId 从新 `snapshot()` 取回，比较 logs 条数 / span 数 / 关键字段；返回差异报告；仅 `compare_debug=true` 时由客户端限速打日志（差异计数 + 样例）。
+- **对账审计表（临时）**：`trace_parity_audit`，每条差异一行（check_time / trace_id / diff_type / 期望 / 实际 / detail），随对账轮次写入，行数水位上限固定 1000（不新增配置，Phase 2 收窄后重估去留）。
+- **宿主工具类调试入口**：新增桩类（工作名 `SWTraceParityUtils`，`statisticParity()` 返回 JDK 原生 Map），沿用既有拦截器范式跨 ClassLoader 取数；demo-app 增加对账展示面（读口 + 页面区块）。
 - **配置**（`plugin.logfilereporter.h2.*`）：`enabled`（默认 true）、`compare_debug`（默认 false）、`shadow_max_rows`（默认 2000）、`console_enabled`（默认 false）、`console_port`（默认 8092）。
 - **H2 调试控制台（可选，默认关闭）**：启用时在应用 JVM 内启动 H2 `org.h2.tools.Server` Web Console，**允许远程访问**（`-webAllowOthers`），测试环境部署后可直接浏览器对比；属 H2 自带调试工具，不是方案"不做内置 HTTP Server"约束（非业务面、默认关闭、用完即关，不建议生产常开）。
 - **依赖与打包**：新增 `com.h2database:h2:2.1.212`（与 OAP 9.4 / 实验环境一致），maven-shade 重定位 `org.h2` 前缀；字节码基线 `release 8` 不变。
@@ -68,7 +74,7 @@ Status: ready-for-agent
 - 收窄（只收 error/slow）、`trace_level` 打标与两档 TTL（Phase 2/3）。
 - H2 file 模式、异步写线程、磁盘风险验证（Phase 3）。
 - Query / 读门面、trace-based metrics（Phase 4/5）。
-- 对外 H2 数据查询接口（宿主工具类范式，Phase 4 候选，见 Further Notes）。
+- 泛化的对外 H2 任意查询接口（Phase 4 候选；对账审计的定点读取 `statisticParity()` 在本期实现，见 Implementation Decisions）。
 - 告警下沉设计（后期）。
 - 变更对外输出、宿主工具类契约、`KeyedLocalStore` 与其它数据流。
 
@@ -84,6 +90,7 @@ Status: ready-for-agent
      - 最近 N 条：`SELECT id, trace_id, segment_id, service, endpoint, start_time, latency, is_error FROM trace_segment ORDER BY id DESC LIMIT 20;`
      - 指定 trace：`SELECT * FROM trace_segment WHERE trace_id = '<从 statisticStatus 拿到的 traceId>';`
   5. 人工对比步骤：从 `statisticStatus()`（旧内存视图）取一个近期 traceId → 控制台查 H2 同 trace 的 segment 行数与 JSON 内容 → 与旧视图 `data[traceId].logs` 对齐检查（条数 / span 数 / 关键字段）。
+- 审计表：控制台可直接查询 `trace_parity_audit`（对账差异明细，临时表），与 `statisticParity()` 读口同源；Phase 2 收窄后重估去留。
 - **DBeaver 等外部客户端**：Phase 1（mem）通过应用内 Web Console 访问；TCP 远程连接留待 file 模式或后续需要时再加开关。
 - **风险备案**：H2 经 shade 重定位后，Web Console 静态资源路径需实测；若不可用，退路为"在 JVM 内启动 H2 TCP Server（`-tcpAllowOthers`）+ 外部 H2 Console / DBeaver 连接 `jdbc:h2:tcp://<部署机IP>:<port>/mem:sw_trace_segment`"（同为默认关闭的调试开关）。
 - **后续方向（本期不做）**：沿用宿主工具类范式（`SWLogfileReporterUtils` 思路）对外提供 H2 数据查询接口（按 traceId / 时间范围查影子数据），让客户端无需 SQL 控制台即可快速交叉验证——与 Phase 4（读门面 + Query）合并评估。
