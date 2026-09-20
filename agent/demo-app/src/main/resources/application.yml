@@ -1,6 +1,6 @@
 server:
   # 全仓库统一 9600;遵循 WebPort 环境变量约定(与 agent webhook 端口对齐)
-  port: ${WebPort:9600}
+  port: ${WebPort:9601}
 
 # springfox/knife4j 2.x 需用 ant 路径匹配(Spring Boot 2.6+ 默认 PathPattern 会导致启动失败)
 spring:

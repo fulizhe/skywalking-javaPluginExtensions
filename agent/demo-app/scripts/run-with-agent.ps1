@@ -36,7 +36,7 @@ $appJar = Join-Path $demoAppDir "target\demo-app-1.0.0.jar"
 $pluginJar = Join-Path $agentModuleDir "logfile-reporter-plugin\target\$pluginJarName"
 
 function Get-DriveRoot {
-    if (Test-Path 'E:\') { return 'E:' }
+    #if (Test-Path 'E:\') { return 'E:' }
     return 'D:'
 }
 
