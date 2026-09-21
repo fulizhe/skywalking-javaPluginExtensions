@@ -45,7 +45,7 @@ $script:appProc = $null
 $script:failures = 0
 
 function Get-DriveRoot {
-    if (Test-Path 'E:\') { return 'E:' }
+    # agent / JDK 工具链约定在 D:\apps;强制 D:,不随仓库所在盘变化(与 setup / run-with-agent / validate-h2 一致)
     return 'D:'
 }
 

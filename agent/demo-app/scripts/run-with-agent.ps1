@@ -36,7 +36,7 @@ $appJar = Join-Path $demoAppDir "target\demo-app-1.0.0.jar"
 $pluginJar = Join-Path $agentModuleDir "logfile-reporter-plugin\target\$pluginJarName"
 
 function Get-DriveRoot {
-    #if (Test-Path 'E:\') { return 'E:' }
+    # agent / JDK 工具链约定在 D:\apps;强制 D:,不随仓库所在盘变化(与 setup / validate / validate-h2 一致)
     return 'D:'
 }
 

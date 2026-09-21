@@ -39,7 +39,7 @@ $AgentUrl = "https://archive.apache.org/dist/skywalking/java-agent/$AgentVersion
 $AgentShaUrl = "$AgentUrl.sha512"
 
 function Get-DriveRoot {
-    if (Test-Path 'E:\') { return 'E:' }
+    # agent / JDK 工具链约定在 D:\apps;强制 D:,不随仓库所在盘变化(与 validate / run-with-agent / validate-h2 一致)
     return 'D:'
 }
 
