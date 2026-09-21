@@ -66,6 +66,59 @@
 					</includes>
 				</configuration>
 			</plugin>
+			<!-- 从 h2 artifact 里取出嵌套的 org/h2/util/data.zip(Web Console 静态资源 + 消息包),
+			     供下一步 antrun 展开到 shade 重定位后的资源路径 -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<version>3.6.1</version>
+				<executions>
+					<execution>
+						<id>unpack-h2-data-zip</id>
+						<phase>generate-resources</phase>
+						<goals>
+							<goal>unpack</goal>
+						</goals>
+						<configuration>
+							<artifactItems>
+								<artifactItem>
+									<groupId>com.h2database</groupId>
+									<artifactId>h2</artifactId>
+									<version>${h2.version}</version>
+									<includes>org/h2/util/data.zip</includes>
+									<outputDirectory>${project.build.directory}/h2-data</outputDirectory>
+								</artifactItem>
+							</artifactItems>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- 展开 data.zip,并把 org/h2/** 资源改写到 shade 后的 org/apache/skywalking/apm/dependencies/h2/**。
+			     H2 的 Utils.loadResource 找不到 Utils 同包的 data.zip 时,会回落到 classpath 直接读 name 对应资源;
+			     故把资源平铺到重定位路径即可被正确的字符串常量命中。 -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>3.1.0</version>
+				<executions>
+					<execution>
+						<id>expand-h2-data-zip</id>
+						<phase>process-resources</phase>
+						<goals>
+							<goal>run</goal>
+						</goals>
+						<configuration>
+							<target>
+								<unzip src="${project.build.directory}/h2-data/org/h2/util/data.zip"
+								       dest="${project.build.directory}/h2-data-expanded"/>
+								<copy todir="${project.build.outputDirectory}/org/apache/skywalking/apm/dependencies/h2">
+									<fileset dir="${project.build.directory}/h2-data-expanded/org/h2"/>
+								</copy>
+							</target>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
 			<!-- H2 shade 重定位:只打 com.h2database:h2,不卷 hutool-json(后者运行期经 PluginClassLoader 回落到应用 classpath) -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -103,6 +156,12 @@
 									<artifact>com.h2database:h2</artifact>
 									<excludes>
 										<exclude>META-INF/maven/**</exclude>
+										<!-- H2 把 Web Console 静态资源与消息包塞在嵌套的 org/h2/util/data.zip 里;
+										     shade 只会重定位"资源路径"本身,不会改写 data.zip 内部条目名,导致
+										     Utils.getResource("/org/apache/.../dependencies/h2/res/x") 查不到(shade 已把
+										     代码里的路径字符串改成新前缀,而 zip 内条目仍是 org/h2/...)。此处剔除该嵌套 zip,
+										     改由下方 dependency:unpack + antrun 展开到重定位后的资源路径。 -->
+										<exclude>org/h2/util/data.zip</exclude>
 									</excludes>
 								</filter>
 							</filters>
