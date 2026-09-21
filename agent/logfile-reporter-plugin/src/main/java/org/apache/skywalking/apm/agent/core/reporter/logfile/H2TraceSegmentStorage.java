@@ -83,6 +83,11 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
 
     private static final String DELETE_AUDIT_CAP_SQL = "DELETE FROM trace_parity_audit WHERE id <= ?";
 
+    private static final String SELECT_AUDIT_RECENT_SQL = "SELECT check_time, trace_id, diff_type, expected, actual, detail "
+            + "FROM trace_parity_audit ORDER BY id DESC LIMIT ?";
+
+    private static final String COUNT_AUDIT_SQL = "SELECT COUNT(*) FROM trace_parity_audit";
+
     private static final int AUDIT_WATER_LEVEL = 1000;
 
     private static final String INSERT_SQL = "INSERT INTO trace_segment "
@@ -386,6 +391,60 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         } catch (SQLException e) {
             recordError("enforceAuditRowCap", e);
         }
+    }
+
+    /**
+     * 读取审计表最近 {@code limit} 条差异（倒序），供 {@code statisticParity()} 展示。
+     * 返回 JDK 原生 Map 列表；任何异常就地捕获并返回已读到的部分。
+     */
+    List<Map<String, Object>> recentAuditRows(final int limit) {
+        final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+        if (connection == null || limit <= 0) {
+            return rows;
+        }
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(SELECT_AUDIT_RECENT_SQL)) {
+                ps.setInt(1, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        final Map<String, Object> row = new LinkedHashMap<String, Object>();
+                        row.put("checkTime", rs.getString("check_time"));
+                        row.put("traceId", rs.getString("trace_id"));
+                        row.put("diffType", rs.getString("diff_type"));
+                        row.put("expected", rs.getString("expected"));
+                        row.put("actual", rs.getString("actual"));
+                        row.put("detail", rs.getString("detail"));
+                        rows.add(row);
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("recentAuditRows", e);
+            }
+        }
+        return rows;
+    }
+
+    /** 审计表当前行数（水位状态）。 */
+    int auditRowCount() {
+        if (connection == null) {
+            return 0;
+        }
+        synchronized (this) {
+            try (Statement stmt = connection.createStatement();
+                    ResultSet rs = stmt.executeQuery(COUNT_AUDIT_SQL)) {
+                if (rs.next()) {
+                    return rs.getInt(1);
+                }
+            } catch (SQLException e) {
+                recordError("auditRowCount", e);
+            }
+            return 0;
+        }
+    }
+
+    /** 审计表固定水位上限（Phase 1 临时表，不新增配置）。 */
+    int auditWaterLevel() {
+        return AUDIT_WATER_LEVEL;
     }
 
     private static String truncate(final String s, final int maxLen) {

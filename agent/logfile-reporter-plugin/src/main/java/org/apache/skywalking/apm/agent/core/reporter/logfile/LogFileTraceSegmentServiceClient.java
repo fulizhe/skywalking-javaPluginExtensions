@@ -135,9 +135,19 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		result.put("checkedCount", parityCheckedCount);
 		result.put("totalDiffs", parityTotalDiffs);
 		result.put("h2Enabled", traceSegmentStorage != null);
-		result.put("h2ErrorCount", traceSegmentStorage != null ? traceSegmentStorage.getErrorCount() : 0L);
-		result.put("h2Size", traceSegmentStorage != null ? traceSegmentStorage.size() : 0);
-		return result;
+        result.put("h2ErrorCount", traceSegmentStorage != null ? traceSegmentStorage.getErrorCount() : 0L);
+        result.put("h2Size", traceSegmentStorage != null ? traceSegmentStorage.size() : 0);
+        // 审计表：最近差异明细（来源 trace_parity_audit）+ 水位状态，供使用侧界面直接展示
+        if (traceSegmentStorage != null) {
+            result.put("auditRowCount", traceSegmentStorage.auditRowCount());
+            result.put("auditWaterLevel", traceSegmentStorage.auditWaterLevel());
+            result.put("recentDiffs", traceSegmentStorage.recentAuditRows(20));
+        } else {
+            result.put("auditRowCount", 0);
+            result.put("auditWaterLevel", 0);
+            result.put("recentDiffs", Collections.emptyList());
+        }
+        return result;
 	}
 
 	// ==================================== @Override
