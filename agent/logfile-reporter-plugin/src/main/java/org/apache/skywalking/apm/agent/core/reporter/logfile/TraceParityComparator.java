@@ -2,6 +2,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -126,9 +127,12 @@ public final class TraceParityComparator {
                 continue;
             }
 
-            // 逐 segment 比对 span 数与关键字段
-            final List<Map<String, Object>> oldLogs = getLogsList(oldData);
-            final List<Map<String, Object>> newLogs = getLogsList(newData);
+            // 逐 segment 比对 span 数与关键字段。
+            // 两侧排序口径不同(旧 store 按到达顺序 append,H2 按 start_time 排序),
+            // 直接按下标对齐会产生假差异;统一切到按 traceSegmentId 排序后再逐位比对,
+            // 使对齐与到达/落库顺序无关(segmentId 在同一 trace 内唯一)。
+            final List<Map<String, Object>> oldLogs = sortBySegmentId(getLogsList(oldData));
+            final List<Map<String, Object>> newLogs = sortBySegmentId(getLogsList(newData));
             if (oldLogs == null || newLogs == null) {
                 addDiff(diffCounts, samples, traceId, DiffType.PARSE_FAILURE, "logs list", "null", "failed to parse logs list");
                 continue;
@@ -212,5 +216,31 @@ public final class TraceParityComparator {
 
     private static boolean safeEquals(final String a, final String b) {
         return (a == null) ? (b == null) : a.equals(b);
+    }
+
+    /**
+     * 按 {@code traceSegmentId} 排序的副本，使两侧对齐与到达/落库顺序无关。
+     * null 先于非 null；不会就地修改入参。
+     */
+    private static List<Map<String, Object>> sortBySegmentId(final List<Map<String, Object>> logs) {
+        if (logs == null) {
+            return null;
+        }
+        final List<Map<String, Object>> copy = new ArrayList<Map<String, Object>>(logs);
+        Collections.sort(copy, new Comparator<Map<String, Object>>() {
+            @Override
+            public int compare(final Map<String, Object> a, final Map<String, Object> b) {
+                final String idA = asString(a.get("traceSegmentId"));
+                final String idB = asString(b.get("traceSegmentId"));
+                if (idA == null) {
+                    return idB == null ? 0 : -1;
+                }
+                if (idB == null) {
+                    return 1;
+                }
+                return idA.compareTo(idB);
+            }
+        });
+        return copy;
     }
 }

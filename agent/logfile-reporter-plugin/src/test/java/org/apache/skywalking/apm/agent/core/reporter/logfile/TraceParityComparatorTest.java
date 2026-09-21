@@ -171,6 +171,22 @@ public class TraceParityComparatorTest {
         Assert.assertEquals("should have 1 LOGS_COUNT sample", 1, logCountSamples);
     }
 
+    @Test
+    public void zeroDiffs_whenLogsArriveInDifferentOrder() {
+        // 同一 trace 的 segment 集合完全相同,仅顺序不同:
+        // 旧 store 按到达顺序 append、H2 按 start_time 排序,顺序差异不应产生假差异。
+        final Map<String, Map<String, Object>> old = buildSnapshot("t1",
+                buildLogMap("s1", 2), buildLogMap("s2", 1));
+        final Map<String, Map<String, Object>> now = buildSnapshot("t1",
+                buildLogMap("s2", 1), buildLogMap("s1", 2));
+        final Set<String> ids = setOf("t1");
+
+        final TraceParityComparator.Report report = TraceParityComparator.compare(old, now, ids);
+
+        Assert.assertFalse("order-only difference must not produce diffs", report.hasDiffs());
+        Assert.assertEquals("total diffs should be 0", 0, report.getTotalDiffs());
+    }
+
     // ========== helpers ==========
 
     private static Map<String, Map<String, Object>> buildSnapshot(final String traceId, final Map<String, Object>... logs) {
