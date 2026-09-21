@@ -9,7 +9,8 @@
 <body class="nav-body">
 <header class="nav-header">
     <h1>demo-app 数据流仪表盘</h1>
-    <p>logfile-reporter-plugin 六类数据流(链路段 / JVM / meter / 实例属性 / 告警 / profile)的本地内存报告可视化。
+    <p>logfile-reporter-plugin 六类数据流(链路段 / JVM / meter / 实例属性 / 告警 / profile)的本地内存报告可视化,
+    外加一项 H2 影子对账调试面(H2 影子写入状态与新内存视图的一致性比对)。
     页面轮询与验证回路(<code>scripts/validate.ps1</code>)同一批 JSON 契约,静态资源随应用打包,无外部网络依赖。</p>
 </header>
 <main class="nav-grid">
@@ -42,6 +43,11 @@
         <div class="nav-num">06</div>
         <div class="nav-title">Profile 快照</div>
         <div class="nav-desc">线程采样触发与带方法栈的快照列表</div>
+    </a>
+    <a class="nav-card" href="dashboard.html?p=parity">
+        <div class="nav-num">07</div>
+        <div class="nav-title">H2 影子对账</div>
+        <div class="nav-desc">H2 影子写入状态、对账计数与最近差异明细(与 H2 Web Console 同源)</div>
     </a>
 </main>
 <footer class="nav-footer">运行方式:<code>pwsh ./scripts/validate.ps1</code>(一键验证)或 <code>pwsh ./scripts/run-with-agent.ps1</code>(手动模式,保持运行后浏览器打开本页)</footer>

@@ -7,7 +7,8 @@ var PAGES = {
     meter:     { title: "Meter 指标",    endpoints: ["/statisticMeter"], interval: 4000 },
     instance:  { title: "实例属性",      endpoints: ["/statisticInstanceProperties"], interval: 6000 },
     alert:     { title: "Trace 告警",    endpoints: ["/statisticTraceAlert", "/inner/sw/trace-alert/recent"], interval: 3000 },
-    profile:   { title: "Profile 快照",  endpoints: ["/profileData2"], interval: 5000 }
+    profile:   { title: "Profile 快照",  endpoints: ["/profileData2"], interval: 5000 },
+    parity:    { title: "H2 影子对账",   endpoints: ["/inner/sw/trace-parity"], interval: 5000 }
 };
 
 /* ---------------- 工具 ---------------- */
@@ -541,6 +542,63 @@ RENDER.profile = function (results, box) {
     });
     table.appendChild(tbody);
     panel.appendChild(table);
+    box.appendChild(panel);
+};
+
+/* ---- 07 H2 影子对账 ---- */
+/* 数据来源 /inner/sw/trace-parity(宿主工具类 SWTraceParityUtils.statisticParity 经拦截器反射取数)。
+   字段:trace 计数 / H2 存储状态 / 审计表水位 / 最近差异明细(trace_parity_audit)。与 H2 Web Console 同源。 */
+RENDER.parity = function (results, box) {
+    var s = results[0];
+    box.innerHTML = "";
+    if (!isObject(s) || !Object.keys(s).length) {
+        box.appendChild(el("div", "empty",
+            "插件未挂载或对账数据为空。请以 agent 模式启动,并确认 -Dskywalking.plugin.logfilereporter.h2.enabled=true。"));
+        return;
+    }
+
+    var chips = el("div", "chips");
+    chips.appendChild(chip("H2 影子存储", s.h2Enabled ? badge("开启", "ok") : badge("关闭", "err")));
+    chips.appendChild(chip("debug 比对", s.compareDebug ? badge("开启", "ok") : badge("关闭", "err")));
+    chips.appendChild(chip("已检查 trace", s.checkedCount != null ? s.checkedCount : "-"));
+    chips.appendChild(chip("累计差异", s.totalDiffs ? badge(s.totalDiffs, "err") : badge("0", "ok")));
+    chips.appendChild(chip("H2 trace 数", s.h2Size != null ? s.h2Size : "-"));
+    chips.appendChild(chip("H2 错误数", s.h2ErrorCount != null ? s.h2ErrorCount : "-"));
+    chips.appendChild(chip("审计表水位", (s.auditRowCount != null ? s.auditRowCount : "-") + " / " + (s.auditWaterLevel != null ? s.auditWaterLevel : "-")));
+    box.appendChild(chips);
+
+    var docLink = el("div");
+    docLink.style.cssText = "margin:0 0 14px;font-size:13px;color:#6b7280;";
+    docLink.innerHTML = '不知道 H2 控制台怎么用?看 <a href="../SWTraceParityVerify.html" target="_blank">H2 影子对账操作说明 →</a>(含 JDBC URL、登录信息与现成 SQL)';
+    box.appendChild(docLink);
+
+    if (!s.compareDebug) {
+        box.appendChild(el("div", "note",
+            "debug 比对未开启。以 -Dskywalking.plugin.logfilereporter.h2.compare_debug=true 启动后可见逐轮对账结果。"));
+    }
+
+    var diffs = s.recentDiffs || [];
+    var panel = el("div", "panel");
+    panel.appendChild(el("h3", null, "最近对账差异(" + diffs.length + ",最新在前;来源 trace_parity_audit)"));
+    if (!diffs.length) {
+        panel.appendChild(el("div", "empty", "暂无差异记录(对账零差异,或比对未触发)。"));
+    } else {
+        var table = el("table");
+        table.appendChild(el("thead", null, "<tr><th>检查时间</th><th>traceId</th><th>类型</th><th>期望</th><th>实际</th><th>说明</th></tr>"));
+        var tbody = el("tbody");
+        diffs.forEach(function (d) {
+            var cls = (d.diffType === "LOGS_COUNT" || d.diffType === "SPAN_COUNT" || d.diffType === "KEY_FIELD") ? "warn" : "err";
+            tbody.appendChild(el("tr", null,
+                "<td class='mono'>" + esc(d.checkTime || "-") + "</td>" +
+                "<td class='mono' title='" + esc(d.traceId) + "'>" + esc(shortId(d.traceId)) + "</td>" +
+                "<td>" + badge(d.diffType || "-", cls) + "</td>" +
+                "<td class='mono'>" + esc(d.expected || "-") + "</td>" +
+                "<td class='mono'>" + esc(d.actual || "-") + "</td>" +
+                "<td>" + esc(d.detail || "-") + "</td>"));
+        });
+        table.appendChild(tbody);
+        panel.appendChild(table);
+    }
     box.appendChild(panel);
 };
 
