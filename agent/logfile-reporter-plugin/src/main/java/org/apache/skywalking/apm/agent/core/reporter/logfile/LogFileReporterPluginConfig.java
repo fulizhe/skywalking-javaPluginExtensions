@@ -80,6 +80,29 @@ public class LogFileReporterPluginConfig {
                  */
                 public static Integer NOTIFIED_CACHE_TTL_MS = 600_000;
             }
+
+            /**
+             * H2 影子存储配置（Phase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑）。
+             * 配置键前缀：{@code plugin.logfilereporter.h2.*}
+             */
+            public static class H2 {
+
+                // -Dskywalking.plugin.logfilereporter.h2.enabled=true
+                /** 是否启用 H2 影子存储，默认 true */
+                public static Boolean ENABLED = true;
+
+                /** 是否开启 debug 一致性比对（旧内存视图 vs H2），默认 false */
+                public static Boolean COMPARE_DEBUG = false;
+
+                /** H2 影子存储行数水位上限，默认 2000（建议 >= max_log_size） */
+                public static Integer SHADOW_MAX_ROWS = 2000;
+
+                /** 是否启用 H2 Web Console（默认关闭；仅测试环境开启，可执行任意 SQL） */
+                public static Boolean CONSOLE_ENABLED = false;
+
+                /** H2 Web Console 端口，默认 8092 */
+                public static Integer CONSOLE_PORT = 8092;
+            }
         }
 
         /** JVM 指标本地缓存相关配置（供 {@code JVMMetricsLocalSender} 使用） */

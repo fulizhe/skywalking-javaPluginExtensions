@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.skywalking.apm.toolkit.SWLogfileReporterUtils;
+import org.apache.skywalking.apm.toolkit.SWTraceParityUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -46,6 +47,12 @@ public class StatisticController {
     /** 静态缓存 componentId -> 组件名 映射表(component-libraries.yml) */
     private static final Map<Integer, String> COMPONENT_ID_NAME_MAP = new HashMap<>();
     private static final AtomicBoolean COMPONENT_MAP_LOADED = new AtomicBoolean(false);
+
+    /** 影子对账读口:/inner/sw/trace-parity 返回 H2 影子对账计数与 H2 存储状态 */
+    @GetMapping("/inner/sw/trace-parity")
+    public Map<String, Object> traceParity() {
+        return SWTraceParityUtils.statisticParity();
+    }
 
     /** 链路段读口:/statistic 返回 data(按 endTime 倒序、附可读时间与组件名),去掉 jvm/instanceProperties 两流 */
     @GetMapping("/statistic")

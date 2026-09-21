@@ -6,9 +6,11 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SI
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -62,6 +64,24 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	private AsyncTraceAlertDispatcher traceAlertDispatcher;
 
+	/** H2 影子存储（Phase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑；h2.enabled=false 时为 null，零开销） */
+	private H2TraceSegmentStorage traceSegmentStorage;
+
+	/** debug 一致性比对开关（h2.compare_debug），仅 true 时触发对账 */
+	private boolean compareDebug;
+	/** 对账累积 traceIds（限频窗口内累积，到点一次比对） */
+	private final Set<String> parityAccumulatedTraceIds = new HashSet<String>();
+	/** 上次对账时间戳（ms），限频 ≥5s 一轮 */
+	private volatile long parityLastCheckTime = 0;
+	/** 累计已检查 traceId 数 */
+	private long parityCheckedCount = 0;
+	/** 累计差异总数 */
+	private long parityTotalDiffs = 0;
+	/** 对账日志限速（同类差异 30s 最多一条） */
+	private volatile long parityLastErrorLogTime = 0;
+	private static final long PARITY_INTERVAL_MS = 5_000L;
+	private static final long PARITY_LOG_INTERVAL_MS = 30_000L;
+
 	public LogFileTraceSegmentServiceClient() {
 		this.enable = new AtomicBoolean(true);
 	}
@@ -103,6 +123,23 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		return TraceAlertMetrics.get().snapshot();
 	}
 
+	/**
+	 * H2 影子对账状态快照（供 {@code SWTraceParityUtils.statisticParity()} 经拦截器反射调用）。
+	 * <p>
+	 * 返回 JDK 原生 Map，不暴露 Agent 自定义类型。
+	 * </p>
+	 */
+	public Map<String, Object> getParityStatus() {
+		final Map<String, Object> result = new HashMap<String, Object>();
+		result.put("compareDebug", compareDebug);
+		result.put("checkedCount", parityCheckedCount);
+		result.put("totalDiffs", parityTotalDiffs);
+		result.put("h2Enabled", traceSegmentStorage != null);
+		result.put("h2ErrorCount", traceSegmentStorage != null ? traceSegmentStorage.getErrorCount() : 0L);
+		result.put("h2Size", traceSegmentStorage != null ? traceSegmentStorage.size() : 0);
+		return result;
+	}
+
 	// ==================================== @Override
 
 	@Override
@@ -125,6 +162,34 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 		// 本agent脱离OAP, 所以不需要监听GRPC
 		//super.prepare();
+
+		// H2 影子存储初始化（Phase 1：内存模式，与旧路径并行双跑）
+		h2Config();
+	}
+	
+	private void h2Config() {
+		if (LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.ENABLED) {
+			final int shadowMaxRows = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS != null
+					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS : 2000;
+			traceSegmentStorage = new H2TraceSegmentStorage(true, shadowMaxRows);
+			LOGGER.info("### [H2Shadow] traceSegmentStorage initialized (shadowMaxRows={}).", shadowMaxRows);
+			// H2 Web Console（可选，默认关闭；仅测试环境开启）
+			if (LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_ENABLED != null
+					&& LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_ENABLED) {
+				final int consolePort = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_PORT != null
+						? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_PORT : 8092;
+				traceSegmentStorage.startConsole(consolePort);
+			}
+		} else {
+			LOGGER.info("### [H2Shadow] traceSegmentStorage is disabled (h2.enabled=false).");
+		}
+
+		// debug 一致性比对开关
+		this.compareDebug = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.COMPARE_DEBUG != null
+				&& LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.COMPARE_DEBUG;
+		if (compareDebug) {
+			LOGGER.info("### [H2Shadow] compare_debug is ON — parity checks will run every {}ms.", PARITY_INTERVAL_MS);
+		}		
 	}
 
 	@Override
@@ -144,6 +209,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		carrier.shutdownConsumers();
 		if (traceAlertDispatcher != null) {
 			traceAlertDispatcher.shutdown();
+		}
+		if (traceSegmentStorage != null) {
+			traceSegmentStorage.close();
 		}
 	}
 
@@ -194,7 +262,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			// 1. traceId：全局唯一，标识一次完整的分布式调用。
 			// 2. traceSegmentId：局部唯一，标识某个服务/线程/进程中的一个调用片段。
 			// 3. 一个 traceId 下可以有多个 traceSegmentId，它们通过“引用关系”串联成完整的调用链。
-			Log log = segmentToLog(segment);
+			Log log = SegmentLogConverter.toLog(segment);
 			// logList.add(log);
 
 			// 这里是traceId一样的放到一起
@@ -202,54 +270,60 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			mergeLogIntoStatMap(log);
 		}
 		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
-	}
 
-	/** 单条 SegmentObject → Log，含 spans、tags 等，便于单测与复用。 */
-	private Log segmentToLog(SegmentObject segment) {
-		Log log = new Log();
-		log.setTraceId(segment.getTraceId());
-		log.setTraceSegmentId(segment.getTraceSegmentId());
-		log.setService(segment.getService());
-		log.setServiceInstance(segment.getServiceInstance());
-		log.setIsSizeLimited(segment.getIsSizeLimited());
-		List<Log.SpanInfo> spanInfoList = new ArrayList<>();
-		for (SpanObject span : segment.getSpansList()) {
-			spanInfoList.add(spanToSpanInfo(span));
-		}
-		log.setSpans(spanInfoList);
-		return log;
-	}
-
-	/** 单条 SpanObject → Log.SpanInfo，便于单测与复用。 */
-	private Log.SpanInfo spanToSpanInfo(SpanObject span) {
-		Log.SpanInfo spanInfo = new Log.SpanInfo();
-		spanInfo.setSpanId(span.getSpanId());
-		spanInfo.setParentSpanId(span.getParentSpanId());
-		spanInfo.setOperationName(span.getOperationName());
-		spanInfo.setStartTime(span.getStartTime());
-		spanInfo.setEndTime(span.getEndTime());
-		spanInfo.setSpanType(span.getSpanType().toString());
-		spanInfo.setSpanLayer(span.getSpanLayer().toString());
-		spanInfo.setComponentId(span.getComponentId());
-		spanInfo.setIsError(span.getIsError());
-		spanInfo.setLogList(span.getLogsList().stream().map(TextFormat::printToString).collect(Collectors.toList()));
-		// 处理tag集合，假设tag为键值对结构
-		spanInfo.setTagList(tagsToTagList(span.getTagsList()));
-		return spanInfo;
-	}
-
-	/** tags 转为 List<Map<String, Object>>，便于单测与复用。 */
-	private List<Map<String, Object>> tagsToTagList(List<KeyStringValuePair> tags) {
-		List<Map<String, Object>> tagList = new ArrayList<>();
-		if (tags != null) {
-			for (KeyStringValuePair tag : tags) {
-				Map<String, Object> tagMap = new HashMap<>();
-				tagMap.put("tag-key", tag.getKey());
-				tagMap.put("tag-value", tag.getValue());
-				tagList.add(tagMap);
+		// Phase 1 影子 accept：既有逻辑之后新增一次 H2 影子写入；旧路径零改动、零行为变化。
+		// accept 内部异常全部捕获（计数 + 限速日志），绝不外抛——"监控只能是助力，不是阻碍"。
+		if (traceSegmentStorage != null) {
+			traceSegmentStorage.accept(data);
+			// debug 一致性比对：批次末尾、仅 compare_debug=true、只比本批涉及的 traceIds
+			if (compareDebug) {
+				runParityCheck(collect);
 			}
 		}
-		return tagList;
+	}
+
+	/**
+	 * debug 一致性比对触发器：限频 ≥5s，期间累积 traceIds，到点一次取两份快照比对。
+	 * <p>
+	 * 比对自身异常吞掉——绝不影响主流程。差异落日志（计数 + 限速明细）+ H2 审计表。
+	 * </p>
+	 */
+	private void runParityCheck(final List<SegmentObject> batch) {
+		// 收集本批 traceIds
+		final Set<String> batchIds = new HashSet<String>();
+		for (SegmentObject seg : batch) {
+			batchIds.add(seg.getTraceId());
+		}
+		final Set<String> idsToCheck;
+		synchronized (parityAccumulatedTraceIds) {
+			parityAccumulatedTraceIds.addAll(batchIds);
+			final long now = System.currentTimeMillis();
+			if (now - parityLastCheckTime < PARITY_INTERVAL_MS) {
+				return; // 未到限频窗口，只累积不比对
+			}
+			parityLastCheckTime = now;
+			idsToCheck = new HashSet<String>(parityAccumulatedTraceIds);
+			parityAccumulatedTraceIds.clear();
+		}
+		try {
+			final Map<String, Map<String, Object>> oldSnapshot = getLogfileStatMap();
+			final Map<String, Map<String, Object>> newSnapshot = traceSegmentStorage.snapshot();
+			final TraceParityComparator.Report report = TraceParityComparator.compare(oldSnapshot, newSnapshot, idsToCheck);
+			parityCheckedCount += report.getCheckedCount();
+			if (report.hasDiffs()) {
+				parityTotalDiffs += report.getTotalDiffs();
+				final long now = System.currentTimeMillis();
+				if (now - parityLastErrorLogTime > PARITY_LOG_INTERVAL_MS) {
+					parityLastErrorLogTime = now;
+					LOGGER.warn("### [H2Shadow] Parity check: checked={}, totalDiffs={}, diffCounts={}, samples={}",
+							report.getCheckedCount(), report.getTotalDiffs(), report.getDiffCounts(), report.getSamples());
+				}
+				traceSegmentStorage.insertAuditRows(report.getSamples());
+			}
+		} catch (Exception e) {
+			// 比对自身异常吞掉——绝不影响主流程
+			LOGGER.error(e, "### [H2Shadow] Parity check failed (swallowed).");
+		}
 	}
 
 	/**
