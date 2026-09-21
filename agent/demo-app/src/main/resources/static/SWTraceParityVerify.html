@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>H2 影子对账 · 使用说明(给人看的)</title>
+<link rel="stylesheet" href="dashboards/dashboard.css">
+<style>
+    .doc-main { max-width: 900px; margin: 0 auto; padding: 8px 20px 48px; }
+    .doc-section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 16px; }
+    .doc-section h2 { font-size: 18px; margin: 0 0 12px; }
+    .doc-section p { line-height: 1.9; margin: 8px 0; }
+    .doc-section ul, .doc-section ol { line-height: 2; padding-left: 22px; margin: 8px 0; }
+    .doc-cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+    .doc-cta a { display: inline-block; padding: 9px 18px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; }
+    .doc-cta a.ghost { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+    .doc-cta a.ghost:hover { background: #eef4ff; }
+    .step { display: flex; gap: 14px; margin: 16px 0; }
+    .step-num { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; text-align: center; line-height: 30px; }
+    .step-body { flex: 1; }
+    .step-body h3 { margin: 4px 0 6px; font-size: 15px; }
+    .kv { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    .kv th, .kv td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; vertical-align: top; }
+    .kv th { background: #fafbfc; color: var(--muted); width: 160px; white-space: nowrap; }
+    .kv td code { font-size: 13px; }
+    .sqlblock { position: relative; margin: 10px 0; }
+    .sqlblock .sql-title { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+    .sqlblock pre { background: #0f172a; color: #cbd5e1; border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; margin: 0; }
+    .copy-btn { position: absolute; top: 26px; right: 10px; cursor: pointer; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; border-radius: 6px; font-size: 12px; padding: 3px 10px; }
+    .copy-btn:hover { background: #334155; }
+    .tip { background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; border-radius: 8px; padding: 10px 14px; line-height: 1.8; margin: 10px 0; }
+    .danger { background: #ffe3e3; border: 1px solid #ffa8a8; color: #b42318; border-radius: 8px; padding: 10px 14px; line-height: 1.8; margin: 10px 0; }
+    .ok { color: var(--ok); font-weight: 600; }
+    .faq q { font-weight: 600; color: var(--text); font-style: normal; }
+    .faq p { margin: 4px 0 14px; }
+</style>
+</head>
+<body class="nav-body">
+<header class="nav-header">
+    <h1>H2 影子对账 · 使用说明</h1>
+    <p>这份是<strong>给人看的</strong>操作指南——不要求你懂 SkyWalking 内部结构。跟着三步走,你能亲眼看到"插件把链路数据同时写了一份到本地 H2,并和原来的数据逐条核对一致"。</p>
+    <div class="doc-cta">
+        <a href="dashboards/dashboard.html?p=parity">① 看对账仪表盘</a>
+        <a class="ghost" href="http://127.0.0.1:8092" target="_blank">② 打开 H2 控制台</a>
+        <a class="ghost" href="index.html">返回首页</a>
+    </div>
+</header>
+
+<main class="doc-main">
+
+    <section class="doc-section">
+        <h2>一句话解释:这是个啥</h2>
+        <p>插件本来把链路数据放在<strong>应用进程的内存</strong>里(重启就没)。现在它<strong>额外再写一份</strong>到本地 <strong>H2 内存数据库</strong>(就是常说的"影子数据"),然后每隔几秒拿两边<strong>逐条对账</strong>,确认新写法没把数据搞丢或搞错。</p>
+        <p>对账结果有两个地方能看:<strong>对账仪表盘</strong>(给应用界面看)和 <strong>H2 Web Console</strong>(像数据库客户端一样直接查 SQL)。两者数据同源,可以互相对照。</p>
+        <div class="tip">"H2 内存模式"= 不落盘、不产生磁盘文件,关掉进程即消失。所以它<strong>试运行零成本、可随时回退</strong>;适合测试环境观察,不是生产存储。</div>
+    </section>
+
+    <section class="doc-section">
+        <h2>三步上手</h2>
+
+        <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-body">
+                <h3>用"带 H2 控制台"的方式启动应用</h3>
+                <p>在仓库 <code>agent/demo-app</code> 目录下执行(它会构建、启动、造数、跑断言,然后保持运行):</p>
+                <div class="sqlblock">
+                    <div class="sql-title">PowerShell</div>
+                    <pre>pwsh ./scripts/validate-h2.ps1 -ConsoleEnabled -KeepRunning -SkipPluginBuild -SkipAppBuild</pre>
+                    <button class="copy-btn" type="button">复制</button>
+                </div>
+                <p>看到类似 <code>H2 验证全绿 (exit 0)</code> 和 <code>保持运行中(PID=...)</code> 就成了——<strong>别关这个窗口</strong>。</p>
+                <div class="tip">若还没构建过插件/应用,去掉 <code>-SkipPluginBuild -SkipAppBuild</code> 让它自动构建。首次可能多花几分钟。</div>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-body">
+                <h3>看对账仪表盘</h3>
+                <p>浏览器打开:<a href="dashboards/dashboard.html?p=parity">http://127.0.0.1:9600/dashboards/dashboard.html?p=parity</a></p>
+                <p>最下面一排数字就是结论:重点是<strong class="ok">累计差异 = 0</strong>。</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-body">
+                <h3>打开 H2 控制台,直接查 SQL</h3>
+                <p>浏览器打开:<a href="http://127.0.0.1:8092" target="_blank">http://127.0.0.1:8092</a></p>
+                <p>登录信息按下面那张表填,点 <strong>Connect</strong> 就能查"影子数据"。</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="doc-section">
+        <h2>H2 控制台登录:每个框填什么</h2>
+        <p>打开 <code>http://127.0.0.1:8092</code> 后会看到 H2 的登录页,照抄下表即可:</p>
+        <table class="kv">
+            <tr><th>Driver Class</th><td><code>org.h2.Driver</code> <span style="color:var(--muted)">(一般默认就是它,不用改)</span></td></tr>
+            <tr><th>JDBC URL</th><td><code>jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1</code><br><span style="color:var(--muted)">这就是插件影子库的地址;<code>DB_CLOSE_DELAY=-1</code> 表示"连接断了也别把内存库清掉"。</span></td></tr>
+            <tr><th>User Name</th><td><code>sa</code></td></tr>
+            <tr><th>Password</th><td><strong>留空</strong>(什么都不填)</td></tr>
+        </table>
+        <div class="tip">保持默认的 <strong>"Generic H2 (Embedded)"</strong> 连接方式即可。因为控制台就跑在应用自己的 JVM 里,能直接连到这个内存库。</div>
+        <p>连上后左边会出现 <code>TRACE_SEGMENT</code>(影子链路数据)和 <code>TRACE_PARITY_AUDIT</code>(对账差异记录)两张表。</p>
+    </section>
+
+    <section class="doc-section">
+        <h2>常用 SQL(复制就能跑)</h2>
+        <p>把下面任一段粘到控制台上方的大输入框,点 <strong>Run</strong>:</p>
+
+        <div class="sqlblock">
+            <div class="sql-title">1. 一共存了多少行(影子数据有没有在写)</div>
+            <pre>SELECT COUNT(*) AS 总行数 FROM trace_segment;</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+        <div class="sqlblock">
+            <div class="sql-title">2. 有多少条 trace(和仪表盘的"H2 trace 数"应对得上)</div>
+            <pre>SELECT COUNT(DISTINCT trace_id) AS trace数 FROM trace_segment;</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+        <div class="sqlblock">
+            <div class="sql-title">3. 最近 20 条明细(看真实链路行)</div>
+            <pre>SELECT id, trace_id, segment_id, service, endpoint, start_time, latency, is_error
+FROM trace_segment
+ORDER BY id DESC
+LIMIT 20;</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+        <div class="sqlblock">
+            <div class="sql-title">4. 按 trace 聚合(每条 trace 有几个 segment)</div>
+            <pre>SELECT trace_id, COUNT(*) AS segment数, MIN(start_time) AS 开始, MAX(start_time) AS 结束
+FROM trace_segment
+GROUP BY trace_id
+ORDER BY 结束 DESC
+LIMIT 20;</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+        <div class="sqlblock">
+            <div class="sql-title">5. 查某一条 trace 的完整内容(把引号里的值换成真实 traceId)</div>
+            <pre>SELECT * FROM trace_segment WHERE trace_id = '把这里换成 /statistic 里看到的 traceId';</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+        <div class="sqlblock">
+            <div class="sql-title">6. 对账差异记录(一切正常时应为空)</div>
+            <pre>SELECT * FROM trace_parity_audit ORDER BY id DESC;</pre>
+            <button class="copy-btn" type="button">复制</button>
+        </div>
+    </section>
+
+    <section class="doc-section">
+        <h2>看懂仪表盘上的 7 个数字</h2>
+        <table class="kv">
+            <tr><th>H2 影子存储</th><td>影子功能有没有开。显示"开启"才对。</td></tr>
+            <tr><th>debug 比对</th><td>有没有在跑对账。要看到"开启"。</td></tr>
+            <tr><th>已检查 trace</th><td>累计对账过多少条 trace,应随时间增长。</td></tr>
+            <tr><th>累计差异</th><td><strong>最关键</strong>:两边数据不一致的条数。<strong class="ok">0 就是最好</strong>;不是 0 就在下面差异表看具体哪条、差在哪。</td></tr>
+            <tr><th>H2 trace 数</th><td>影子库里的 trace 数,应等于控制台里 SQL 2 的结果。</td></tr>
+            <tr><th>H2 错误数</th><td>影子写入过程报错次数。健康时是 0。</td></tr>
+            <tr><th>审计表水位</th><td>差异明细表的行数 / 上限(1000)。零差异时是 <code>0 / 1000</code>。</td></tr>
+        </table>
+        <p>下方"最近对账差异"表:零差异时显示"暂无差异记录";一旦有差异,会逐条列出检查时间、traceId、差异类型、期望值、实际值和说明。</p>
+    </section>
+
+    <section class="doc-section">
+        <h2>常见问题</h2>
+        <div class="faq">
+            <q>打开 8092 是空白 / 网页一直转圈?</q>
+            <p>说明控制台没起来。确认启动参数带了 <code>-Dskywalking.plugin.logfilereporter.h2.console_enabled=true</code>,并在启动日志里搜到 <code>Web Console started on port 8092</code>。若端口被占,用 <code>-ConsolePort 8093</code> 换一个。</p>
+
+            <q>以前打开是空白,还看到 "Message 90061 not found"?</q>
+            <p>那是旧版本的已知问题(H2 的网页资源在打包重定位后丢了),<strong>已经修复</strong>。用重新构建过的插件 jar 重启应用即可。</p>
+
+            <q>连上后表是空的?</q>
+            <p>说明还没有流量经过应用。随便触发几个请求再刷新:</p>
+            <div class="sqlblock">
+                <pre>curl.exe --noproxy "*" http://127.0.0.1:9600/api/trace-alert-demo/self-call
+curl.exe --noproxy "*" "http://127.0.0.1:9600/api/trace-alert-demo/slow?ms=4000"
+curl.exe --noproxy "*" http://127.0.0.1:9600/api/trace-alert-demo/error</pre>
+                <button class="copy-btn" type="button">复制</button>
+            </div>
+            <p>对账每 5 秒一轮,等 6 秒再刷新看。</p>
+
+            <q>提示 "Database may be already in use"?</q>
+            <p>同一台机器上开了多个应用实例,抢同一个内存库名字。只保留一个实例即可。</p>
+
+            <q>对账差异不是 0,要紧吗?</q>
+            <p>看差异类型:统计/排序口径不同可能造成"看起来不一样";先看仪表盘差异表的"说明"列,或到仓库工单 <code>.scratch/h2-trace-storage/issues/07</code> 记录结论。正常情况下造数流量应为 0。</p>
+
+            <q>能从别的机器访问控制台吗?</q>
+            <p>可以,控制台已允许远程访问:用 <code>http://&lt;部署机IP&gt;:8092</code>。但请注意下面的安全提醒。</p>
+        </div>
+    </section>
+
+    <section class="doc-section">
+        <h2>安全提醒</h2>
+        <div class="danger">H2 控制台能对这个库执行<strong>任意 SQL</strong>(包括改数据、删表)。请<strong>只在测试环境开启、用完即关</strong>,不要在生产长期打开。默认就是关闭的。</div>
+    </section>
+
+    <section class="doc-section">
+        <h2>想深入了解(给工程师的部分)</h2>
+        <p>上面是操作指南。要了解设计背景、字段口径、实现取舍,看这些:</p>
+        <ul>
+            <li><code>.scratch/h2-trace-storage/spec.md</code> — Phase 1 规格与 Further Notes(含控制台访问步骤)</li>
+            <li><code>.scratch/h2-trace-storage/issues/</code> — 逐张工单与验收结论</li>
+            <li><code>docs/todos/h2化-统一方案.md</code> — 背景设计与后续阶段规划</li>
+        </ul>
+    </section>
+
+</main>
+
+<footer class="nav-footer">
+    H2 影子对账 · 演示应用 demo-app ·
+    <a href="dashboards/index.html">仪表盘导航</a> ·
+    <a href="index.html">能力导览首页</a>
+</footer>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".copy-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            var pre = btn.parentElement.querySelector("pre");
+            var text = pre ? pre.innerText : "";
+            function done() {
+                var old = btn.textContent;
+                btn.textContent = "已复制";
+                setTimeout(function () { btn.textContent = old; }, 1200);
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+            } else {
+                fallback(text, done);
+            }
+        });
+    });
+    function fallback(text, done) {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); done(); } catch (e) {}
+        document.body.removeChild(ta);
+    }
+});
+</script>
+</body>
+</html>

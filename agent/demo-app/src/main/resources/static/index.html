@@ -21,6 +21,11 @@
     .flow .flow-desc { color: #374151; font-size: 13px; line-height: 1.7; margin-top: 4px; }
     .land-cmd { background: #0f172a; color: #cbd5e1; font-family: var(--mono); font-size: 13px; border-radius: 8px; padding: 12px 16px; margin: 8px 0; overflow-x: auto; white-space: nowrap; }
     .land-cmd .prompt { color: #64748b; }
+    .land-cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+    .land-cta { display: inline-block; padding: 10px 22px; border-radius: 8px; background: #1f6feb; color: #fff; text-decoration: none; font-weight: 600; }
+    .land-cta:hover { background: #1a5fd0; }
+    .land-cta.secondary { background: #fff; color: #1f6feb; border: 1px solid #1f6feb; }
+    .land-cta.secondary:hover { background: #eef4ff; }
 </style>
 </head>
 <body class="nav-body">
@@ -28,6 +33,11 @@
     <h1>logfile-reporter-plugin 能力导览</h1>
     <p>一个 SkyWalking Java Agent 的<strong>本地内存报告</strong>插件:把 agent 采集的监控数据从"发往 OAP"改写为"存进应用进程内",无 OAP 后端也能自查全链路与指标。<br>
     本页是演示应用 demo-app 的入口——下面告诉你插件是什么、名字从哪来、怎么跑。</p>
+    <div class="land-cta-row">
+        <a class="land-cta" href="dashboards/index.html">进入仪表盘导航 →</a>
+        <a class="land-cta secondary" href="SWTraceParityVerify.html">H2 对账怎么用 →</a>
+        <a class="land-cta secondary" href="9527.html">初学者演示页导航 →</a>
+    </div>
 </header>
 
 <main>
@@ -44,25 +54,22 @@
                 <p class="flow-desc">agent 采集 → 进程内有界缓存 → 应用自带 JSON 接口自读(统计接口 + 自建仪表盘)。OAP-less:gRPC 通道禁用,单应用自足,适合开发调试、离线自查与能力演示。</p>
             </div>
         </div>
-        <p style="margin-top:14px;">插件接管并缓存的六类 agent→OAP 数据流,每类都有独立统计读口,多数配有仪表盘:</p>
+        <p style="margin-top:14px;">插件接管并缓存的六类 agent→OAP 数据流,每类都有独立统计读口;对应仪表盘统一从顶部「进入仪表盘导航」进入:</p>
         <div class="land-grid">
             <div class="flow">
                 <h3>链路段 trace segment</h3>
                 <div class="flow-endpoint">GET /statistic</div>
                 <div class="flow-desc">同一 traceId 的多 segment 合并缓存,span 时间线可查。</div>
-                <div><a href="dashboards/dashboard.html?p=statistic">查看仪表盘 →</a></div>
             </div>
             <div class="flow">
                 <h3>JVM 指标</h3>
                 <div class="flow-endpoint">GET /statisticJVM</div>
                 <div class="flow-desc">CPU / 堆内存 / 线程 / GC 等 JVM 运行时指标。</div>
-                <div><a href="dashboards/dashboard.html?p=jvm">查看仪表盘 →</a></div>
             </div>
             <div class="flow">
                 <h3>meter 指标</h3>
                 <div class="flow-endpoint">GET /statisticMeter</div>
                 <div class="flow-desc">micrometer 桥接的自定义单值与直方图指标。</div>
-                <div><a href="dashboards/dashboard.html?p=meter">查看仪表盘 →</a></div>
             </div>
             <div class="flow">
                 <h3>应用日志</h3>
@@ -73,16 +80,14 @@
                 <h3>心跳 / 实例属性</h3>
                 <div class="flow-endpoint">GET /statisticInstanceProperties</div>
                 <div class="flow-desc">实例心跳与应用/OS/环境属性键值对。</div>
-                <div><a href="dashboards/dashboard.html?p=instance">查看仪表盘 →</a></div>
             </div>
             <div class="flow">
                 <h3>profile 快照</h3>
                 <div class="flow-endpoint">POST /profile</div>
                 <div class="flow-desc">线程采样触发与带方法栈的快照列表。</div>
-                <div><a href="dashboards/dashboard.html?p=profile">查看仪表盘 →</a></div>
             </div>
         </div>
-        <p>另有两项附加能力:<strong>Trace 告警</strong>——基于已合并链路的慢/错识别规则,命中后经 HTTP webhook 通知外部(默认关闭);<strong>运行时开关</strong>——不重启即可启用/禁用数据流写入缓存,便于对比验证。</p>
+        <p>另有三项附加能力:<strong>Trace 告警</strong>——基于已合并链路的慢/错识别规则,命中后经 HTTP webhook 通知外部(默认关闭);<strong>运行时开关</strong>——不重启即可启用/禁用数据流写入缓存,便于对比验证;<strong>H2 影子对账</strong>——影子写入 H2 内存库并与内存视图逐轮比对(对账仪表盘见导航页 07,<a href="SWTraceParityVerify.html">H2 控制台怎么操作 →</a>)。</p>
     </section>
 
     <section class="land-section">
@@ -98,7 +103,7 @@
         <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/validate.ps1</div>
         <p>想边跑边看实时数据,用手动模式(保持运行后刷新本页与仪表盘):</p>
         <div class="land-cmd"><span class="prompt">pwsh&gt; </span>pwsh ./scripts/run-with-agent.ps1 -SkipPluginBuild</div>
-        <p>仪表盘导航页:<a href="dashboards/index.html">/dashboards/index.html</a>(汇总全部六个数据流仪表盘)。</p>
+        <p>仪表盘导航页:<a href="dashboards/index.html">/dashboards/index.html</a>(六类数据流仪表盘 + H2 影子对账,共 7 项;也可从本页顶部「进入仪表盘导航」按钮直达)。</p>
         <p>另有一套面向 SkyWalking 初学者的 API 演示(迁移自旧 demo 工程):<a href="9527.html">/9527.html</a>(演示页导航)+ <a href="doc.html">/doc.html</a>(knife4j 接口文档)。</p>
     </section>
 </main>
