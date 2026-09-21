@@ -4,11 +4,15 @@
 
 **Blocked by:** 02 — TraceSegmentStorage 接口 + H2 内存模式实现
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `consume` 既有逻辑之后新增一次 `accept`；`h2.enabled=false` 时完全不执行（无任何 H2 相关开销）
-- [ ] H2 初始化 / 建表 / insert 的任何异常不外抛：计数 + 限速日志
-- [ ] 验证回路现有断言全绿（对外零行为变化）
-- [ ] 既有告警行为与去重不变（影子路径绝不触发告警）
+- [x] `consume` 既有逻辑之后新增一次 `accept`；`h2.enabled=false` 时完全不执行（无任何 H2 相关开销）
+- [x] H2 初始化 / 建表 / insert 的任何异常不外抛：计数 + 限速日志
+- [x] 验证回路现有断言全绿（对外零行为变化）
+- [x] 既有告警行为与去重不变（影子路径绝不触发告警）
 
 ## Comments
+
+- `LogFileTraceSegmentServiceClient.consume` 在既有 `mergeLogIntoStatMap` 循环之后调用 `traceSegmentStorage.accept(data)`；`h2.enabled=false` 时 `traceSegmentStorage == null`，零执行。
+- `validate.ps1` 现有断言全绿（含告警链端到端 4 事件、运行时开关、合并断言），证明对外零行为变化。
+- 证据时间：2026-09-21。

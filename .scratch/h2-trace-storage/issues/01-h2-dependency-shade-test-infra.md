@@ -4,12 +4,18 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 插件引入 H2 依赖（版本 2.1.212，与 OAP 9.4 / 实验环境一致），构建产物包含重定位后的 H2 类；字节码基线 `release 8` 不变
-- [ ] 确认现有 hutool-json 依赖的打包方式，H2 沿用同一策略；若发现既有依赖并未随 jar 分发，如实记录并按同一策略处理
-- [ ] surefire include 扩为 `**/*Test.java`：既有 `KeyedLocalStoreTest`、队列测试等恢复运行
-- [ ] 沉睡测试翻出的历史失败：本票内修绿，或在票内明确豁免记录（不带病前进）
-- [ ] 验证回路不受打包变化影响（构建 → 安装 → 启动链路照常）
+- [x] 插件引入 H2 依赖（版本 2.1.212，与 OAP 9.4 / 实验环境一致），构建产物包含重定位后的 H2 类；字节码基线 `release 8` 不变
+- [x] 确认现有 hutool-json 依赖的打包方式，H2 沿用同一策略；若发现既有依赖并未随 jar 分发，如实记录并按同一策略处理
+- [x] surefire include 扩为 `**/*Test.java`：既有 `KeyedLocalStoreTest`、队列测试等恢复运行
+- [x] 沉睡测试翻出的历史失败：本票内修绿，或在票内明确豁免记录（不带病前进）
+- [x] 验证回路不受打包变化影响（构建 → 安装 → 启动链路照常）
 
 ## Comments
+
+- **H2 打包**：`com.h2database:h2:2.1.212` + maven-shade 重定位 `org.h2 → org.apache.skywalking.apm.dependencies.h2`；jar 内含 1086 个重定位类（`h2/Driver`、`h2/tools/Server`、`META-INF/services/java.sql.Driver`）；字节码 `major=52`（release 8 未破）。
+- **hutool-json 策略**：沿用编译期声明 + 运行期经 PluginClassLoader 回落到应用 classpath，不卷进 shaded 产物（pom 注释已说明）。
+- **测试基建**：surefire include `**/*Test.java`；`mvn test` = **95 用例全绿**（`KeyedLocalStoreTest` 7、`CircularBlockingQueueTest` 23 恢复运行），无历史失败需豁免。
+- **验证回路**：`validate.ps1` 现有断言全绿（exit 0）；`validate-h2.ps1` 全绿。
+- 证据时间：2026-09-21。

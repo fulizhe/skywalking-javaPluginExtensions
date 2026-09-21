@@ -1,6 +1,6 @@
 # h2-trace-storage Phase 1：影子 accept + H2 内存模式 + 新旧一致性比对
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
