@@ -543,7 +543,9 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                         row.put("isError", rs.getBoolean("is_error"));
                         final long payloadId = rs.getLong("payload_id");
                         final boolean payloadNull = rs.wasNull();
-                        row.put("payloadExpired", !payloadNull && payloadId >= 0 && cappedStorage != null
+                        final boolean hasPayload = !payloadNull && payloadId >= 0;
+                        row.put("hasPayload", hasPayload);
+                        row.put("payloadExpired", hasPayload && cappedStorage != null
                                 && cappedStorage.isOverwritten(payloadId));
                         out.add(row);
                     }

@@ -18,7 +18,7 @@ Phase 1（`.scratch/h2-trace-storage/spec.md`，已 done）把整段 segment JSO
 - **H2 行只留 header/索引**：`trace_segment` **删除 `data_binary` 列**，**新增 `payload_id BIGINT`**（可空）。
 - **新增 `CappedFileStorage`（最小环形文件）**：单文件、固定大小（默认 **128MB**）、块 `⟨len:8B⟩⟨gzip(payload)⟩`、逻辑索引；写满**覆盖最旧**；`id < currIndex - sizeBytes` 即"过期"读回 `null`。**去掉** resize / `isInTheFuture` / 统计。
 - **载荷 GZIP**：每段 payload 独立 `GZIP(JSON)`，块自包含，读侧 `GZIPInputStream` 解。
-- **异步写**：`accept` 只入**有界队列**（默认 4096，满则丢弃 + 计数），**独立写线程**做 `transform → SegmentLogConverter → JSON → gzip → ring.writeMessage → H2 批量 INSERT(payload_id)`；`close()` 排空 + flush + fsync。
+- **异步写**：`accept` 只入**有界队列**（默认 4096，满则丢弃 + 计数），**独立写线程**做 `transform → SegmentLogConverter → JSON → gzip → ring.writeMessage → H2 INSERT(payload_id)`（每段一行）；`close()` 排空 + flush + fsync。
 - **H2 仍 `mem`** 模式（Phase 3 再切 file + 两档 TTL）。
 - **storage 独立子包**：`...reporter.logfile.storage`。
 - **使用侧查询门面**：宿主工具类范式新增"按 traceId 从 H2/环形取回整条链路"的方法，demo-app 提供入口与页面——供**人工查看整条链路**、验证 payload 拆分后功能齐全，并为日后 H2 完全替代内存读路径做准备。
@@ -74,7 +74,7 @@ accept(List<TraceSegment>)   ← DataCarrier 消费线程：仅入队，零 I/O
       ▼
 【写线程 H2Shadow-Writer】(唯一写者)
    take/drain 批 → 每段: transform → SegmentLogConverter.toLog → GSON → gzip → ring.writeMessage
-                → 批量 INSERT(..., payload_id) → enforceRowCap
+                → INSERT(..., payload_id)（每段一行）→ enforceRowCap
 close(): 置停止 → 排空(超时) → ring flush + fsync → 关 H2 / console
 snapshot(): 调用线程读 H2 + ring（锁保护）
 ```

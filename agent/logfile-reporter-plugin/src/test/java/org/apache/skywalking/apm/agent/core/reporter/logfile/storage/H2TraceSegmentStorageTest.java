@@ -224,6 +224,56 @@ public class H2TraceSegmentStorageTest {
         Assert.assertEquals("span 2 operationName", "GET /cache", spanMaps.get(2).get("operationName"));
     }
 
+    // ========== 查询门面 queryTrace / recentTraces ==========
+
+    @Test
+    public void queryTrace_hit_returnsLogs() {
+        storage.storeLog(createLog("t1", "s1", 1000L, false));
+
+        final Map<String, Object> view = storage.queryTrace("t1");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> logs = (List<Map<String, Object>>) view.get("logs");
+        Assert.assertEquals("hit should return 1 log", 1, logs.size());
+        Assert.assertEquals("payload not expired", Boolean.FALSE, view.get("payloadExpired"));
+    }
+
+    @Test
+    public void queryTrace_miss_returnsEmpty() {
+        final Map<String, Object> view = storage.queryTrace("no-such-trace");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> logs = (List<Map<String, Object>>) view.get("logs");
+        Assert.assertTrue("miss should return empty logs", logs.isEmpty());
+        Assert.assertEquals("not expired on miss", Boolean.FALSE, view.get("payloadExpired"));
+    }
+
+    @Test
+    public void queryTrace_expiredPayload_marksExpired() {
+        // 小环形文件：持续写入必然覆盖最旧 payload
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 2000, true, new File(cappedDir, "small.capped.db"), 4096L);
+        for (int i = 0; i < 500; i++) {
+            storage.storeLog(createLog("t1", "s" + i, 1000L + i, false));
+        }
+
+        final Map<String, Object> view = storage.queryTrace("t1");
+        @SuppressWarnings("unchecked")
+        final List<Map<String, Object>> logs = (List<Map<String, Object>>) view.get("logs");
+        Assert.assertTrue("some payloads should be overwritten", logs.size() < 500);
+        Assert.assertEquals("payloadExpired should be true", Boolean.TRUE, view.get("payloadExpired"));
+    }
+
+    @Test
+    public void recentTraces_returnsHeadersWithPayloadState() {
+        storage.storeLog(createLog("t1", "s1", 1000L, false));
+        storage.storeLog(createLog("t2", "s2", 2000L, true));
+
+        final List<Map<String, Object>> recent = storage.recentTraces(10);
+        Assert.assertEquals("should return 2 headers", 2, recent.size());
+        Assert.assertNotNull("traceId present", recent.get(0).get("traceId"));
+        Assert.assertNotNull("hasPayload present", recent.get(0).get("hasPayload"));
+        Assert.assertNotNull("payloadExpired present", recent.get(0).get("payloadExpired"));
+    }
+
     // ========== helpers ==========
 
     private static Log createLog(final String traceId, final String segmentId,
