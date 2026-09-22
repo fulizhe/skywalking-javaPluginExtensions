@@ -1,6 +1,7 @@
 package org.apache.skywalking.apm.toolkit;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,5 +19,21 @@ public class SWTraceParityUtils {
      */
     public static Map<String, Object> statisticParity() {
         return Collections.emptyMap();
+    }
+
+    /**
+     * 按 traceId 从 H2/环形文件取回整条链路（与 {@code data[traceId].logs} 同契约）。
+     * 无 agent 时返回空 Map;挂载 agent 后由拦截器接管。
+     */
+    public static Map<String, Object> queryTrace(String traceId) {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 最近 N 条 segment header（供挑选 traceId）。
+     * 无 agent 时返回空列表;挂载 agent 后由拦截器接管。
+     */
+    public static List<Map<String, Object>> recentTraces(int limit) {
+        return Collections.emptyList();
     }
 }

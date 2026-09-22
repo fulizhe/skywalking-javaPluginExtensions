@@ -8,6 +8,7 @@
 
 - **ADR-01：JDK 17 迁移** —— 何时读：碰到构建工具链 / 字节码基线 / 演示运行时（JDK 8 vs 17）约定时。→ `adr-01-jdk17-migration.md`
 - **ADR-02：有界本地存储的两种形态** —— 何时读：理解 trace 流键式存储与 JVM/meter/log/profile 追加式环形队列的分叉时。→ `adr-02-two-shapes-for-bounded-local-storage.md`
+- **ADR-03：trace 明细载荷拆为 H2 header + 环形封顶文件** —— 何时读：动 trace 持久层存储形态（payload 落盘、磁盘上限、H2 膨胀）时。→ `adr-03-capped-file-payload-for-trace-details.md`
 
 规则：
 

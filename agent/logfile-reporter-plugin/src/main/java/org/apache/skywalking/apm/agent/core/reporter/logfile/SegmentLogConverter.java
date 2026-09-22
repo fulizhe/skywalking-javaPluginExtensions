@@ -18,12 +18,12 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
  * 但不修改旧路径代码（Phase 1 零行为变化）。
  * </p>
  */
-final class SegmentLogConverter {
+public final class SegmentLogConverter {
 
     private SegmentLogConverter() {
     }
 
-    static Log toLog(final SegmentObject segment) {
+    public static Log toLog(final SegmentObject segment) {
         final Log log = new Log();
         log.setTraceId(segment.getTraceId());
         log.setTraceSegmentId(segment.getTraceSegmentId());

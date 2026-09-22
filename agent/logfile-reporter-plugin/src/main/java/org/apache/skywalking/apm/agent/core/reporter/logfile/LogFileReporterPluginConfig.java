@@ -102,6 +102,15 @@ public class LogFileReporterPluginConfig {
 
                 /** H2 Web Console 端口，默认 8092 */
                 public static Integer CONSOLE_PORT = 8092;
+
+                /** 是否启用环形封顶载荷文件（payload 存文件、H2 只留指针），默认 true */
+                public static Boolean PAYLOAD_CAPPED_ENABLED = true;
+
+                /** 环形载荷文件路径（相对工作目录或绝对路径），默认 trace-payload.capped.db */
+                public static String PAYLOAD_CAPPED_FILE = "trace-payload.capped.db";
+
+                /** 环形载荷文件固定大小（MB），默认 128 */
+                public static Integer PAYLOAD_CAPPED_SIZE_MB = 128;
             }
         }
 

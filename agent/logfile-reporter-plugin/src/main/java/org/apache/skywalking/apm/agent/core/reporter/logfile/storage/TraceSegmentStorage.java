@@ -1,4 +1,4 @@
-package org.apache.skywalking.apm.agent.core.reporter.logfile;
+package org.apache.skywalking.apm.agent.core.reporter.logfile.storage;
 
 import java.util.List;
 import java.util.Map;

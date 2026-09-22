@@ -1,10 +1,12 @@
-package org.apache.skywalking.apm.agent.core.reporter.logfile;
+package org.apache.skywalking.apm.agent.core.reporter.logfile.storage;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -14,16 +16,21 @@ import org.junit.Test;
  * H2TraceSegmentStorage 单元测试。
  * <p>
  * 只经接口断言（storeLog → snapshot/size），不碰 SQL / 内部字段。
- * 覆盖：traceId 合并、logs/span 计数、start_time 排序、data_binary JSON 往返、size 与水位上限。
+ * 覆盖：traceId 合并、logs/span 计数、start_time 排序、环形载荷 JSON 往返、size 与水位上限。
  * </p>
  */
 public class H2TraceSegmentStorageTest {
 
     private H2TraceSegmentStorage storage;
+    private File cappedDir;
+    private File cappedFile;
 
     @Before
     public void setUp() {
-        storage = new H2TraceSegmentStorage(true, 2000);
+        cappedDir = new File(System.getProperty("java.io.tmpdir"), "h2store-test-" + System.nanoTime());
+        Assert.assertTrue(cappedDir.mkdirs());
+        cappedFile = new File(cappedDir, "payload.capped.db");
+        storage = new H2TraceSegmentStorage(true, 2000, true, cappedFile, 1024L * 1024L);
         storage.clear();
     }
 
@@ -31,6 +38,15 @@ public class H2TraceSegmentStorageTest {
     public void tearDown() {
         if (storage != null) {
             storage.close();
+        }
+        if (cappedDir != null) {
+            final File[] files = cappedDir.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    f.delete();
+                }
+            }
+            cappedDir.delete();
         }
     }
 
@@ -143,7 +159,7 @@ public class H2TraceSegmentStorageTest {
     public void rowCapEnforced_afterExceedingMaxRows() {
         // Create storage with small cap
         storage.close();
-        storage = new H2TraceSegmentStorage(true, 3);
+        storage = new H2TraceSegmentStorage(true, 3, true, new File(cappedDir, "payload2.capped.db"), 1024L * 1024L);
         storage.clear();
 
         // Store 5 segments with 5 different traceIds
@@ -168,7 +184,7 @@ public class H2TraceSegmentStorageTest {
     @Test
     public void disabledStorage_noOpsNoErrors() {
         storage.close();
-        storage = new H2TraceSegmentStorage(false, 2000);
+        storage = new H2TraceSegmentStorage(false, 2000, false, null, 0L);
 
         storage.storeLog(createLog("t1", "s1", 1000L, false));
         Assert.assertEquals("disabled storage should have size 0", 0, storage.size());

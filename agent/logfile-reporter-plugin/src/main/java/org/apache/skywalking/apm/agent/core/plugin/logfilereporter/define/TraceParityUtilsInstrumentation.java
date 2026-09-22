@@ -19,7 +19,9 @@ import org.apache.skywalking.apm.dependencies.net.bytebuddy.matcher.ElementMatch
 public class TraceParityUtilsInstrumentation extends ClassStaticMethodsEnhancePluginDefine {
 
     private static final String ENHANCE_CLASS = "org.apache.skywalking.apm.toolkit.SWTraceParityUtils";
-    private static final String ENHANCE_METHOD = "statisticParity";
+    private static final String METHOD_STATISTIC = "statisticParity";
+    private static final String METHOD_QUERY = "queryTrace";
+    private static final String METHOD_RECENT = "recentTraces";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.agent.core.plugin.logfilereporter.TraceParityStatusExposeInterceptor";
 
     @Override
@@ -32,7 +34,7 @@ public class TraceParityUtilsInstrumentation extends ClassStaticMethodsEnhancePl
         return new StaticMethodsInterceptPoint[] { new StaticMethodsInterceptPoint() {
             @Override
             public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                return named(ENHANCE_METHOD);
+                return named(METHOD_STATISTIC).or(named(METHOD_QUERY)).or(named(METHOD_RECENT));
             }
 
             @Override

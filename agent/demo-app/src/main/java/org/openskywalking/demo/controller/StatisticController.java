@@ -54,6 +54,18 @@ public class StatisticController {
         return SWTraceParityUtils.statisticParity();
     }
 
+    /** 按 traceId 从 H2/环形文件取回整条链路(与旧 data[traceId].logs 同契约),供人工查看 */
+    @GetMapping("/inner/sw/trace-query")
+    public Object traceQuery(@RequestParam("traceId") String traceId) {
+        return SWTraceParityUtils.queryTrace(traceId);
+    }
+
+    /** 最近 N 条 segment header(供挑选 traceId) */
+    @GetMapping("/inner/sw/trace-recent")
+    public Object traceRecent(@RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return SWTraceParityUtils.recentTraces(limit);
+    }
+
     /** 链路段读口:/statistic 返回 data(按 endTime 倒序、附可读时间与组件名),去掉 jvm/instanceProperties 两流 */
     @GetMapping("/statistic")
     public Object statistic() {

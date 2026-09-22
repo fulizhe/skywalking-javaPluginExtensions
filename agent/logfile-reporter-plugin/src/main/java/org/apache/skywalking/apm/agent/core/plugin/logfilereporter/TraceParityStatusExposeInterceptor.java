@@ -18,6 +18,7 @@
 package org.apache.skywalking.apm.agent.core.plugin.logfilereporter;
 
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -49,15 +50,34 @@ public class TraceParityStatusExposeInterceptor implements StaticMethodsAroundIn
             final TraceSegmentServiceClient client = (TraceSegmentServiceClient) ServiceManager.INSTANCE
                     .findService(TraceSegmentServiceClient.class);
             if (client == null) {
-                result.defineReturnValue(new HashMap<String, Object>());
+                result.defineReturnValue(defaultFor(method.getName()));
                 return;
             }
-            final Object parityStatus = ReflectUtil.invoke(client, "getParityStatus");
-            result.defineReturnValue(parityStatus != null ? parityStatus : new HashMap<String, Object>());
+            final String name = method.getName();
+            final Object value;
+            if ("queryTrace".equals(name)) {
+                final String traceId = (allArguments != null && allArguments.length > 0 && allArguments[0] != null)
+                        ? String.valueOf(allArguments[0]) : null;
+                value = ReflectUtil.invoke(client, "getTraceView", traceId);
+            } else if ("recentTraces".equals(name)) {
+                final Integer limit = (allArguments != null && allArguments.length > 0 && allArguments[0] instanceof Integer)
+                        ? (Integer) allArguments[0] : Integer.valueOf(20);
+                value = ReflectUtil.invoke(client, "getRecentTraces", limit);
+            } else {
+                value = ReflectUtil.invoke(client, "getParityStatus");
+            }
+            result.defineReturnValue(value != null ? value : defaultFor(name));
         } catch (Exception e) {
             LOGGER.error(e, "### [H2Shadow] TraceParityStatusExposeInterceptor failed.");
-            result.defineReturnValue(new HashMap<String, Object>());
+            result.defineReturnValue(defaultFor(method.getName()));
         }
+    }
+
+    private static Object defaultFor(final String methodName) {
+        if ("recentTraces".equals(methodName)) {
+            return Collections.emptyList();
+        }
+        return new HashMap<String, Object>();
     }
 
     @Override

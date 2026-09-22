@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>H2 链路查询（人工验证）</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; margin: 16px; color: #222; }
+  h1 { font-size: 18px; }
+  .row { margin: 8px 0; }
+  input { width: 420px; padding: 6px 8px; font-family: monospace; }
+  button { padding: 6px 12px; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+  th { background: #f5f5f5; }
+  tr { cursor: pointer; }
+  tr:hover { background: #eef; }
+  pre { background: #f7f7f7; border: 1px solid #ddd; padding: 10px; overflow: auto; max-height: 60vh; }
+  .expired { color: #b00; font-weight: bold; }
+  .muted { color: #888; }
+</style>
+</head>
+<body>
+<h1>H2 链路查询（人工验证：从 H2/环形文件取回整条链路）</h1>
+<div class="row">
+  最近 <input id="limit" type="number" value="20" min="1" max="200" style="width:80px"> 条
+  <button onclick="loadRecent()">刷新列表</button>
+  <span id="recentMsg" class="muted"></span>
+</div>
+<table id="recentTable">
+  <thead>
+    <tr><th>traceId</th><th>segmentId</th><th>service</th><th>endpoint</th><th>startTime</th><th>latency(ms)</th><th>error</th><th>payload</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="row">
+  traceId: <input id="traceId" placeholder="点列表行自动填入，或手动粘贴">
+  <button onclick="loadTrace()">查询整条链路</button>
+</div>
+<div id="traceMsg" class="muted"></div>
+<pre id="traceDetail" style="display:none"></pre>
+
+<script>
+function esc(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function fmtTime(ms) { if (!ms && ms !== 0) return "-"; return new Date(ms).toLocaleString(); }
+
+function loadRecent() {
+  var limit = document.getElementById("limit").value || 20;
+  fetch("/inner/sw/trace-recent?limit=" + encodeURIComponent(limit))
+    .then(function (r) { return r.json(); })
+    .then(function (rows) {
+      var tb = document.querySelector("#recentTable tbody");
+      tb.innerHTML = "";
+      document.getElementById("recentMsg").textContent = "共 " + rows.length + " 条";
+      rows.forEach(function (row) {
+        var tr = document.createElement("tr");
+        tr.onclick = function () { document.getElementById("traceId").value = row.traceId; loadTrace(); };
+        tr.innerHTML =
+          "<td>" + esc(row.traceId) + "</td>" +
+          "<td>" + esc(row.traceSegmentId) + "</td>" +
+          "<td>" + esc(row.service) + "</td>" +
+          "<td>" + esc(row.endpoint) + "</td>" +
+          "<td>" + esc(fmtTime(row.startTime)) + "</td>" +
+          "<td>" + esc(row.latency) + "</td>" +
+          "<td>" + (row.isError ? "<span class='expired'>Y</span>" : "N") + "</td>" +
+          "<td>" + (row.payloadExpired ? "<span class='expired'>过期</span>" : "OK") + "</td>";
+        tb.appendChild(tr);
+      });
+    })
+    .catch(function (e) { document.getElementById("recentMsg").textContent = "加载失败: " + e; });
+}
+
+function loadTrace() {
+  var traceId = document.getElementById("traceId").value.trim();
+  if (!traceId) { document.getElementById("traceMsg").textContent = "请输入 traceId"; return; }
+  fetch("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      var logs = (data && data.logs) ? data.logs : [];
+      document.getElementById("traceMsg").innerHTML =
+        "logs = " + logs.length + (data && data.payloadExpired ? " <span class='expired'>（部分 payload 已过期）</span>" : "");
+      var pre = document.getElementById("traceDetail");
+      pre.style.display = "block";
+      pre.textContent = JSON.stringify(data, null, 2);
+    })
+    .catch(function (e) { document.getElementById("traceMsg").textContent = "查询失败: " + e; });
+}
+
+loadRecent();
+</script>
+</body>
+</html>

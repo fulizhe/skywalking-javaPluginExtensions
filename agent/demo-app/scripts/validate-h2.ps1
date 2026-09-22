@@ -286,6 +286,7 @@ try {
         Assert "h2Size > 0(H2 影子库有数据)" ($parity.h2Size -gt 0) "h2Size=$($parity.h2Size)"
         Assert "checkedCount > 0(对账已触发)" ($parity.checkedCount -gt 0) "checkedCount=$($parity.checkedCount)"
         Assert "h2ErrorCount = 0(无 H2 错误)" ($parity.h2ErrorCount -eq 0) "h2ErrorCount=$($parity.h2ErrorCount)"
+        Assert "writeQueueDropped 可读(异步写队列丢弃计数)" ($null -ne $parity.writeQueueDropped) "缺少 writeQueueDropped 字段"
 
         Write-Host ""
         Write-Host "  对账快照:"
@@ -295,10 +296,37 @@ try {
         Write-Host "    totalDiffs      = $($parity.totalDiffs)"
         Write-Host "    h2Size         = $($parity.h2Size)"
         Write-Host "    h2ErrorCount   = $($parity.h2ErrorCount)"
+        Write-Host "    writeQueueDropped = $($parity.writeQueueDropped)"
     } else {
         $script:failures++
         Write-Host "[FAIL] 对账端点返回不可解析的 JSON"
         if ($parityResp.Content) { Write-Host "       body: $($parityResp.Content.Substring(0, [Math]::Min(200, $parityResp.Content.Length)))" }
+    }
+
+    # ---- 9b. 环形载荷文件 + 查询门面(使用侧人工验证的读口) ----
+    Write-Host ""
+    Write-Host "---- 环形载荷文件 + 查询门面 ----"
+    $cappedFile = Join-Path $demoAppDir "trace-payload.capped.db"
+    Assert "环形载荷文件已创建" (Test-Path $cappedFile) "未找到 $cappedFile"
+    if (Test-Path $cappedFile) {
+        $cappedLen = (Get-Item $cappedFile).Length
+        Assert "环形文件定长 128MB" ($cappedLen -eq 134217728) "size=$cappedLen"
+    }
+
+    $recentResp = Invoke-LocalHttp "/inner/sw/trace-recent?limit=20"
+    Assert "最近链路列表 HTTP 200" ("$($recentResp.StatusCode)" -eq "200") "status=$($recentResp.StatusCode)"
+    $recent = $null
+    try { $recent = $recentResp.Content | ConvertFrom-Json } catch { $recent = $null }
+    $recentCount = if ($recent) { @($recent).Count } else { 0 }
+    Assert "最近链路列表非空" ($recentCount -gt 0) "count=$recentCount"
+    if ($recentCount -gt 0) {
+        $tid = @($recent)[0].traceId
+        $qResp = Invoke-LocalHttp "/inner/sw/trace-query?traceId=$tid"
+        Assert "按 traceId 查询 HTTP 200" ("$($qResp.StatusCode)" -eq "200") "status=$($qResp.StatusCode)"
+        $q = $null
+        try { $q = $qResp.Content | ConvertFrom-Json } catch { $q = $null }
+        $logCount = if ($q -and $q.logs) { @($q.logs).Count } else { 0 }
+        Assert "整条链路 logs > 0" ($logCount -gt 0) "tid=$tid logs=$logCount"
     }
 
     # ---- 10. 结果 ----

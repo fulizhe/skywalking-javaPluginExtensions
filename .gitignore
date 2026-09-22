@@ -51,3 +51,5 @@ README-TODO.md
 mvnw
 mvnw.cmd
 dependency-reduced-pom.xml
+
+trace-payload.capped.db

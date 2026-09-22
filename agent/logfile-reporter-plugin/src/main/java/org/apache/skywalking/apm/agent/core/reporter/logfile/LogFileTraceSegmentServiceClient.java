@@ -3,6 +3,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile;
 import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.BUFFER_SIZE;
 import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SIZE;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,6 +26,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.AsyncTraceAlertDispatcher;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.storage.H2TraceSegmentStorage;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
 import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
@@ -134,9 +136,10 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		result.put("compareDebug", compareDebug);
 		result.put("checkedCount", parityCheckedCount);
 		result.put("totalDiffs", parityTotalDiffs);
-		result.put("h2Enabled", traceSegmentStorage != null);
+        result.put("h2Enabled", traceSegmentStorage != null);
         result.put("h2ErrorCount", traceSegmentStorage != null ? traceSegmentStorage.getErrorCount() : 0L);
         result.put("h2Size", traceSegmentStorage != null ? traceSegmentStorage.size() : 0);
+        result.put("writeQueueDropped", traceSegmentStorage != null ? traceSegmentStorage.getWriteQueueDropped() : 0L);
         // 审计表：最近差异明细（来源 trace_parity_audit）+ 水位状态，供使用侧界面直接展示
         if (traceSegmentStorage != null) {
             result.put("auditRowCount", traceSegmentStorage.auditRowCount());
@@ -148,6 +151,22 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
             result.put("recentDiffs", Collections.emptyList());
         }
         return result;
+	}
+
+	/** 按 traceId 取回整条链路（供 {@code SWTraceParityUtils.queryTrace()} 经拦截器反射调用）。 */
+	public Map<String, Object> getTraceView(final String traceId) {
+		if (traceSegmentStorage == null) {
+			return new HashMap<String, Object>();
+		}
+		return traceSegmentStorage.queryTrace(traceId);
+	}
+
+	/** 最近 N 条 segment header（供挑选 traceId）。 */
+	public List<Map<String, Object>> getRecentTraces(final int limit) {
+		if (traceSegmentStorage == null) {
+			return Collections.emptyList();
+		}
+		return traceSegmentStorage.recentTraces(limit);
 	}
 
 	// ==================================== @Override
@@ -181,8 +200,16 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		if (LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.ENABLED) {
 			final int shadowMaxRows = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS != null
 					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS : 2000;
-			traceSegmentStorage = new H2TraceSegmentStorage(true, shadowMaxRows);
-			LOGGER.info("### [H2Shadow] traceSegmentStorage initialized (shadowMaxRows={}).", shadowMaxRows);
+			final boolean cappedEnabled = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_ENABLED != null
+					&& LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_ENABLED;
+			final String cappedFile = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_FILE != null
+					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_FILE : "trace-payload.capped.db";
+			final int cappedSizeMb = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_SIZE_MB != null
+					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_SIZE_MB : 128;
+			final long cappedSizeBytes = (long) cappedSizeMb * 1024L * 1024L;
+			traceSegmentStorage = new H2TraceSegmentStorage(true, shadowMaxRows, cappedEnabled, new File(cappedFile), cappedSizeBytes);
+			LOGGER.info("### [H2Shadow] traceSegmentStorage initialized (shadowMaxRows={}, cappedEnabled={}, cappedFile={}, cappedSizeMb={}).",
+					shadowMaxRows, cappedEnabled, cappedFile, cappedSizeMb);
 			// H2 Web Console（可选，默认关闭；仅测试环境开启）
 			if (LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_ENABLED != null
 					&& LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.CONSOLE_ENABLED) {
@@ -316,6 +343,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			parityAccumulatedTraceIds.clear();
 		}
 		try {
+			// 异步写：比对前等写队列排空，避免"刚 accept、尚未落库"的假差异
+			traceSegmentStorage.awaitIdle(2000L);
 			final Map<String, Map<String, Object>> oldSnapshot = getLogfileStatMap();
 			final Map<String, Map<String, Object>> newSnapshot = traceSegmentStorage.snapshot();
 			final TraceParityComparator.Report report = TraceParityComparator.compare(oldSnapshot, newSnapshot, idsToCheck);
