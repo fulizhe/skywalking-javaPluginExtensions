@@ -63,6 +63,7 @@ class CappedFileStorage implements Closeable {
         raf = new RandomAccessFile(file, "rw");
         if (existing) {
             raf.seek(0);
+            // long长度是 64bit = 8 字节，这是头部和"块头"都用 long 的原因。
             currIndex = raf.readLong();
             raf.readLong(); // sizeBytes 字段；以文件长度为准，读后忽略
         } else {
@@ -79,7 +80,15 @@ class CappedFileStorage implements Closeable {
         raf.writeLong(sizeBytes);
     }
 
-    /** 逻辑 index → 物理位置（数据区内） */
+    /**
+     * 逻辑 index → 物理位置（数据区内）。
+     *
+     * <p>设计要点：逻辑地址空间（{@link #currIndex} 等）只增不减、永不复位，给每个块分配
+     * 独一无二的身份；物理落点完全由本方法对数据区大小取模保证——无论逻辑坐标多大，最终都
+     * 压回构造时设置的 sizeBytes 范围内（数据区起点偏移 HEADER_SKIP_BYTES 起）。这就是
+     * "**逻辑不绕圈、物理绕圈**"的解耦：写在环的哪个位置由这里决定，而该位置是否过期由
+     * {@link #readMessage} 的窗口判定决定，两者缺一不可。
+     */
     private long pos(final long index) {
         long m = index % dataLen;
         if (m < 0) {
@@ -89,7 +98,7 @@ class CappedFileStorage implements Closeable {
     }
 
     /**
-     * 写入一个载荷块（内部 GZIP 压缩），返回块起始逻辑 id。
+     * 写入一个载荷块（内部 GZIP 压缩），返回块起始逻辑 id（这块在整个"逻辑环"上占用的起始位置）。
      *
      * @throws IOException 载荷压缩后仍超过文件可容纳的单块大小时
      */
@@ -125,8 +134,11 @@ class CappedFileStorage implements Closeable {
                 return null;
             }
             final long smallestNonOverwrittenId = Math.max(0L, currIndex - dataLen);
+            // 与 pos() 配合：pos() 决定"往哪写"（取模绕圈），本窗口判定决定"能不能读"。
+            // 物理位置被新块复用后，旧 id 若不做这道拦截就会读到新块的数据（脏读最坏路径）。
+            // 落在窗口内的 id 必然完整可读，窗口外的必然整块被覆盖，没有中间态。
             if (id < smallestNonOverwrittenId) {
-                return null; // 已被覆盖
+                return null; // 已被环覆盖 → 过期
             }
             final byte[] lenBytes = readAt(id, BLOCK_HEADER_BYTES);
             if (lenBytes == null) {
