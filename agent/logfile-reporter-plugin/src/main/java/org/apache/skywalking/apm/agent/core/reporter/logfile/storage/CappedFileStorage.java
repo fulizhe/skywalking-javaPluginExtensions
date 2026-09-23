@@ -27,7 +27,7 @@ import java.util.zip.GZIPOutputStream;
  * 数据区 = {@code [16, sizeBytes)}；逻辑 index 到物理位置的映射为 {@code 16 + (index % dataLen)}。
  * </p>
  */
-public class CappedFileStorage implements Closeable {
+class CappedFileStorage implements Closeable {
 
     /** 文件头：currIndex + sizeBytes */
     private static final int HEADER_SKIP_BYTES = 16;

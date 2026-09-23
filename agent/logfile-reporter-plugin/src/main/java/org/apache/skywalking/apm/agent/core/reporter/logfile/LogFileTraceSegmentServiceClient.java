@@ -66,7 +66,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	private AsyncTraceAlertDispatcher traceAlertDispatcher;
 
-	/** H2 影子存储（Phase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑；h2.enabled=false 时为 null，零开销） */
+	/** H2 影子存储（lPhase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑；h2.enabled=false 时为 null，零开销） */
 	private H2TraceSegmentStorage traceSegmentStorage;
 
 	/** debug 一致性比对开关（h2.compare_debug），仅 true 时触发对账 */

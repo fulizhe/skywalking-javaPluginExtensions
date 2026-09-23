@@ -59,64 +59,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     private static final String JDBC_USER = "sa";
     private static final String JDBC_PASSWORD = "";
 
-    private static final String CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS trace_segment ("
-            + "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
-            + "trace_id VARCHAR(128) NOT NULL, "
-            + "segment_id VARCHAR(128) NOT NULL, "
-            + "service VARCHAR(256), "
-            + "service_instance VARCHAR(256), "
-            + "endpoint VARCHAR(512), "
-            + "start_time BIGINT NOT NULL, "
-            + "end_time BIGINT NOT NULL, "
-            + "latency INT NOT NULL, "
-            + "is_error BOOLEAN NOT NULL, "
-            + "trace_level VARCHAR(16), "
-            + "payload_id BIGINT, "
-            + "time_bucket BIGINT NOT NULL, "
-            + "create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-            + ")";
-
-    private static final String CREATE_INDEX_SQL = "CREATE INDEX IF NOT EXISTS idx_trace_segment_trace_id ON trace_segment(trace_id)";
-
-    private static final String CREATE_AUDIT_TABLE_SQL = "CREATE TABLE IF NOT EXISTS trace_parity_audit ("
-            + "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
-            + "check_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
-            + "trace_id VARCHAR(128), "
-            + "diff_type VARCHAR(32), "
-            + "expected VARCHAR(2048), "
-            + "actual VARCHAR(2048), "
-            + "detail VARCHAR(2048)"
-            + ")";
-
-    private static final String INSERT_AUDIT_SQL = "INSERT INTO trace_parity_audit (trace_id, diff_type, expected, actual, detail) VALUES (?, ?, ?, ?, ?)";
-
-    private static final String MAX_AUDIT_ID_SQL = "SELECT MAX(id) FROM trace_parity_audit";
-
-    private static final String DELETE_AUDIT_CAP_SQL = "DELETE FROM trace_parity_audit WHERE id <= ?";
-
-    private static final String SELECT_AUDIT_RECENT_SQL = "SELECT check_time, trace_id, diff_type, expected, actual, detail "
-            + "FROM trace_parity_audit ORDER BY id DESC LIMIT ?";
-
-    private static final String COUNT_AUDIT_SQL = "SELECT COUNT(*) FROM trace_parity_audit";
-
     private static final int AUDIT_WATER_LEVEL = 1000;
-
-    private static final String INSERT_SQL = "INSERT INTO trace_segment "
-            + "(trace_id, segment_id, service, service_instance, endpoint, start_time, end_time, latency, is_error, trace_level, payload_id, time_bucket) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-    private static final String SELECT_ALL_SQL = "SELECT trace_id, payload_id FROM trace_segment ORDER BY start_time ASC";
-
-    private static final String SELECT_TRACE_SQL = "SELECT payload_id FROM trace_segment WHERE trace_id = ? ORDER BY start_time ASC";
-
-    private static final String SELECT_RECENT_SQL = "SELECT trace_id, segment_id, service, endpoint, start_time, latency, is_error, payload_id "
-            + "FROM trace_segment ORDER BY id DESC LIMIT ?";
-
-    private static final String COUNT_DISTINCT_SQL = "SELECT COUNT(DISTINCT trace_id) FROM trace_segment";
-
-    private static final String MAX_ID_SQL = "SELECT MAX(id) FROM trace_segment";
-
-    private static final String DELETE_CAP_SQL = "DELETE FROM trace_segment WHERE id <= ?";
 
     private static final Gson GSON = new Gson();
 
@@ -188,9 +131,9 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                     throw new SQLException("H2 Driver.connect returned null for URL: " + JDBC_URL);
                 }
                 try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(CREATE_TABLE_SQL);
-                    stmt.execute(CREATE_INDEX_SQL);
-                    stmt.execute(CREATE_AUDIT_TABLE_SQL);
+                    stmt.execute(H2SqlStatements.CREATE_TABLE_SQL);
+                    stmt.execute(H2SqlStatements.CREATE_INDEX_SQL);
+                    stmt.execute(H2SqlStatements.CREATE_AUDIT_TABLE_SQL);
                 }
                 LOGGER.info("### [H2Shadow] H2TraceSegmentStorage initialized: url={}, shadowMaxRows={}", JDBC_URL, this.shadowMaxRows);
             } catch (SQLException e) {
@@ -366,7 +309,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                     }
                 }
 
-                try (PreparedStatement ps = connection.prepareStatement(INSERT_SQL)) {
+                try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.INSERT_SQL)) {
                     ps.setString(1, log.getTraceId());
                     ps.setString(2, log.getTraceSegmentId());
                     ps.setString(3, log.getService());
@@ -401,7 +344,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             // traceId → list of log maps, in start_time order
             final Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<String, List<Map<String, Object>>>();
             try (Statement stmt = connection.createStatement();
-                    ResultSet rs = stmt.executeQuery(SELECT_ALL_SQL)) {
+                    ResultSet rs = stmt.executeQuery(H2SqlStatements.SELECT_ALL_SQL)) {
                 while (rs.next()) {
                     final String traceId = rs.getString("trace_id");
                     if (traceId == null) {
@@ -454,7 +397,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
         synchronized (this) {
             try (Statement stmt = connection.createStatement();
-                    ResultSet rs = stmt.executeQuery(COUNT_DISTINCT_SQL)) {
+                    ResultSet rs = stmt.executeQuery(H2SqlStatements.COUNT_DISTINCT_SQL)) {
                 if (rs.next()) {
                     return rs.getInt(1);
                 }
@@ -482,7 +425,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return result;
         }
         synchronized (this) {
-            try (PreparedStatement ps = connection.prepareStatement(SELECT_TRACE_SQL)) {
+            try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.SELECT_TRACE_SQL)) {
                 ps.setString(1, traceId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -529,7 +472,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return out;
         }
         synchronized (this) {
-            try (PreparedStatement ps = connection.prepareStatement(SELECT_RECENT_SQL)) {
+            try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.SELECT_RECENT_SQL)) {
                 ps.setInt(1, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -565,12 +508,12 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return;
         }
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery(MAX_ID_SQL)) {
+                ResultSet rs = stmt.executeQuery(H2SqlStatements.MAX_ID_SQL)) {
             if (rs.next()) {
                 final long maxId = rs.getLong(1);
                 if (maxId > shadowMaxRows) {
                     final long threshold = maxId - shadowMaxRows;
-                    try (PreparedStatement ps = connection.prepareStatement(DELETE_CAP_SQL)) {
+                    try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.DELETE_CAP_SQL)) {
                         ps.setLong(1, threshold);
                         ps.executeUpdate();
                     }
@@ -602,8 +545,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
         synchronized (this) {
             try (Statement stmt = connection.createStatement()) {
-                stmt.execute("DELETE FROM trace_segment");
-                stmt.execute("DELETE FROM trace_parity_audit");
+                stmt.execute(H2SqlStatements.DELETE_ALL_SEGMENTS_SQL);
+                stmt.execute(H2SqlStatements.DELETE_ALL_AUDITS_SQL);
             } catch (SQLException e) {
                 recordError("clear", e);
             }
@@ -619,7 +562,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return;
         }
         synchronized (this) {
-            try (PreparedStatement ps = connection.prepareStatement(INSERT_AUDIT_SQL)) {
+            try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.INSERT_AUDIT_SQL)) {
                 for (TraceParityComparator.DiffEntry diff : diffs) {
                     ps.setString(1, diff.getTraceId());
                     ps.setString(2, diff.getType().name());
@@ -638,12 +581,12 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
 
     private void enforceAuditRowCap() {
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery(MAX_AUDIT_ID_SQL)) {
+                ResultSet rs = stmt.executeQuery(H2SqlStatements.MAX_AUDIT_ID_SQL)) {
             if (rs.next()) {
                 final long maxId = rs.getLong(1);
                 if (maxId > AUDIT_WATER_LEVEL) {
                     final long threshold = maxId - AUDIT_WATER_LEVEL;
-                    try (PreparedStatement ps = connection.prepareStatement(DELETE_AUDIT_CAP_SQL)) {
+                    try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.DELETE_AUDIT_CAP_SQL)) {
                         ps.setLong(1, threshold);
                         ps.executeUpdate();
                     }
@@ -664,7 +607,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return rows;
         }
         synchronized (this) {
-            try (PreparedStatement ps = connection.prepareStatement(SELECT_AUDIT_RECENT_SQL)) {
+            try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.SELECT_AUDIT_RECENT_SQL)) {
                 ps.setInt(1, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
@@ -692,7 +635,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
         synchronized (this) {
             try (Statement stmt = connection.createStatement();
-                    ResultSet rs = stmt.executeQuery(COUNT_AUDIT_SQL)) {
+                    ResultSet rs = stmt.executeQuery(H2SqlStatements.COUNT_AUDIT_SQL)) {
                 if (rs.next()) {
                     return rs.getInt(1);
                 }
