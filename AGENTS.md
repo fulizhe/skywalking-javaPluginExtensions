@@ -12,6 +12,7 @@
 - **Module maintenance status** — 何时读：动任何模块、调用工具链（to-tickets / triage / to-spec / domain-modeling）前。→ `docs/repo/index.md`
 - **Build & demo runtime convention (adr-01)** — 何时读：构建工具链 / 演示运行时约定。→ `docs/adr/index.md`
 - **Known TODOs** — 何时读：规划 demo-app 验证范围时。→ `docs/repo/index.md`
+- **Code style / 纯重构规范** — 何时读：写新 Java 代码、改既有代码、拆分大方法、对齐代码风格时。→ `docs/repo/index.md`
 
 ## Agent tooling quirks (OpenCode + OMO)
 

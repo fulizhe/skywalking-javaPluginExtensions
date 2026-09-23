@@ -106,58 +106,73 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             final boolean cappedEnabled, final File cappedFile, final long cappedSizeBytes) {
         this.enabled = enabled;
         this.shadowMaxRows = shadowMaxRows > 0 ? shadowMaxRows : 2000;
-        CappedFileStorage capped = null;
-        Connection conn = null;
-        if (enabled) {
-            if (cappedEnabled && cappedFile != null && cappedSizeBytes > 0) {
-                try {
-                    capped = new CappedFileStorage(cappedFile, cappedSizeBytes);
-                    LOGGER.info("### [H2Shadow] CappedFileStorage initialized: file={}, sizeBytes={}", cappedFile, cappedSizeBytes);
-                } catch (IOException e) {
-                    recordError("cappedInit", e);
-                }
-            }
-            try {
-                // SkyWalking PluginClassLoader 不暴露 META-INF/services 给 DriverManager 的 ServiceLoader，
-                // 必须显式加载并注册 shaded Driver 类（shade 重定位 org.h2.Driver → org.apache.skywalking.apm.dependencies.h2.Driver）。
-                final Driver h2Driver = new Driver();
-                DriverManager.registerDriver(h2Driver);
-
-                final Properties props = new Properties();
-                props.setProperty("user", JDBC_USER);
-                props.setProperty("password", JDBC_PASSWORD);
-                conn = h2Driver.connect(JDBC_URL, props);
-                if (conn == null) {
-                    throw new SQLException("H2 Driver.connect returned null for URL: " + JDBC_URL);
-                }
-                try (Statement stmt = conn.createStatement()) {
-                    stmt.execute(H2SqlStatements.CREATE_TABLE_SQL);
-                    stmt.execute(H2SqlStatements.CREATE_INDEX_SQL);
-                    stmt.execute(H2SqlStatements.CREATE_AUDIT_TABLE_SQL);
-                }
-                LOGGER.info("### [H2Shadow] H2TraceSegmentStorage initialized: url={}, shadowMaxRows={}", JDBC_URL, this.shadowMaxRows);
-            } catch (SQLException e) {
-                conn = safeClose(conn);
-                recordError("init", e);
-            }
-        }
-        this.cappedStorage = capped;
-        this.connection = conn;
-        if (enabled && conn != null) {
+        this.cappedStorage = initCappedStorage(cappedEnabled, cappedFile, cappedSizeBytes);
+        this.connection = initConnection();
+        if (enabled && connection != null) {
             this.writeQueue = new ArrayBlockingQueue<TraceSegment>(WRITE_QUEUE_CAPACITY);
-            this.writerRunning = true;
-            final Thread t = new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    drainLoop();
-                }
-            }, "H2Shadow-Writer");
-            t.setDaemon(true);
-            this.writerThread = t;
-            t.start();
+            startWriter();
         } else {
             this.writeQueue = null;
         }
+    }
+
+    private CappedFileStorage initCappedStorage(final boolean cappedEnabled, final File cappedFile,
+            final long cappedSizeBytes) {
+        if (!enabled || !cappedEnabled || cappedFile == null || cappedSizeBytes <= 0) {
+            return null;
+        }
+        try {
+            final CappedFileStorage capped = new CappedFileStorage(cappedFile, cappedSizeBytes);
+            LOGGER.info("### [H2Shadow] CappedFileStorage initialized: file={}, sizeBytes={}", cappedFile, cappedSizeBytes);
+            return capped;
+        } catch (IOException e) {
+            recordError("cappedInit", e);
+            return null;
+        }
+    }
+
+    private Connection initConnection() {
+        if (!enabled) {
+            return null;
+        }
+        Connection conn = null;
+        try {
+            // SkyWalking PluginClassLoader 不暴露 META-INF/services 给 DriverManager 的 ServiceLoader，
+            // 必须显式加载并注册 shaded Driver 类（shade 重定位 org.h2.Driver → org.apache.skywalking.apm.dependencies.h2.Driver）。
+            final Driver h2Driver = new Driver();
+            DriverManager.registerDriver(h2Driver);
+
+            final Properties props = new Properties();
+            props.setProperty("user", JDBC_USER);
+            props.setProperty("password", JDBC_PASSWORD);
+            conn = h2Driver.connect(JDBC_URL, props);
+            if (conn == null) {
+                throw new SQLException("H2 Driver.connect returned null for URL: " + JDBC_URL);
+            }
+            try (Statement stmt = conn.createStatement()) {
+                stmt.execute(H2SqlStatements.CREATE_TABLE_SQL);
+                stmt.execute(H2SqlStatements.CREATE_INDEX_SQL);
+                stmt.execute(H2SqlStatements.CREATE_AUDIT_TABLE_SQL);
+            }
+            LOGGER.info("### [H2Shadow] H2TraceSegmentStorage initialized: url={}, shadowMaxRows={}", JDBC_URL, this.shadowMaxRows);
+            return conn;
+        } catch (SQLException e) {
+            recordError("init", e);
+            return safeClose(conn);
+        }
+    }
+
+    private void startWriter() {
+        this.writerRunning = true;
+        final Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                drainLoop();
+            }
+        }, "H2Shadow-Writer");
+        t.setDaemon(true);
+        this.writerThread = t;
+        t.start();
     }
 
     @Override
@@ -227,6 +242,22 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
     }
 
+    private void drainQueue() {
+        final BlockingQueue<TraceSegment> q = writeQueue;
+        if (q == null) {
+            return;
+        }
+        TraceSegment seg;
+        while ((seg = q.poll()) != null) {
+            inFlight.incrementAndGet();
+            try {
+                storeSegment(seg);
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        }
+    }
+
     /**
      * 等待异步写队列排空且当前在写的段落库完成（供对账在快照前调用，消除异步竞态）。
      *
@@ -269,69 +300,99 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
         synchronized (this) {
             try {
-                final List<Log.SpanInfo> spans = log.getSpans();
-                long startTime = Long.MAX_VALUE;
-                long endTime = Long.MIN_VALUE;
-                boolean isError = false;
-                String endpoint = "";
-                if (spans != null) {
-                    for (Log.SpanInfo span : spans) {
-                        if (span.getStartTime() < startTime) {
-                            startTime = span.getStartTime();
-                        }
-                        if (span.getEndTime() > endTime) {
-                            endTime = span.getEndTime();
-                        }
-                        if (span.getIsError()) {
-                            isError = true;
-                        }
-                        if (endpoint.isEmpty() && "Entry".equals(span.getSpanType())) {
-                            endpoint = span.getOperationName();
-                        }
-                    }
-                }
-                if (startTime == Long.MAX_VALUE) {
-                    startTime = System.currentTimeMillis();
-                }
-                if (endTime == Long.MIN_VALUE) {
-                    endTime = startTime;
-                }
-                final int latency = (int) (endTime - startTime);
-                final long timeBucket = startTime / 60_000L;
-
-                // 载荷先写环形文件（GZIP），再把指针写入 H2；写失败则 payload_id 置空。
-                long payloadId = -1L;
-                if (cappedStorage != null) {
-                    try {
-                        payloadId = cappedStorage.writeMessage(GSON.toJson(log.toMap()).getBytes(StandardCharsets.UTF_8));
-                    } catch (IOException e) {
-                        recordError("cappedWrite", e);
-                    }
-                }
-
-                try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.INSERT_SQL)) {
-                    ps.setString(1, log.getTraceId());
-                    ps.setString(2, log.getTraceSegmentId());
-                    ps.setString(3, log.getService());
-                    ps.setString(4, log.getServiceInstance());
-                    ps.setString(5, endpoint);
-                    ps.setLong(6, startTime);
-                    ps.setLong(7, endTime);
-                    ps.setInt(8, latency);
-                    ps.setBoolean(9, isError);
-                    ps.setString(10, null); // trace_level: Phase 1 可空
-                    if (payloadId >= 0) {
-                        ps.setLong(11, payloadId);
-                    } else {
-                        ps.setNull(11, Types.BIGINT);
-                    }
-                    ps.setLong(12, timeBucket);
-                    ps.executeUpdate();
-                }
+                final SegmentMetrics metrics = computeSegmentMetrics(log);
+                insertSegmentRow(log, metrics, writePayload(log));
                 enforceRowCap();
             } catch (Exception e) {
                 recordError("storeLog", e);
             }
+        }
+    }
+
+    private SegmentMetrics computeSegmentMetrics(final Log log) {
+        final List<Log.SpanInfo> spans = log.getSpans();
+        long startTime = Long.MAX_VALUE;
+        long endTime = Long.MIN_VALUE;
+        boolean isError = false;
+        String endpoint = "";
+        if (spans != null) {
+            for (Log.SpanInfo span : spans) {
+                if (span.getStartTime() < startTime) {
+                    startTime = span.getStartTime();
+                }
+                if (span.getEndTime() > endTime) {
+                    endTime = span.getEndTime();
+                }
+                if (span.getIsError()) {
+                    isError = true;
+                }
+                if (endpoint.isEmpty() && "Entry".equals(span.getSpanType())) {
+                    endpoint = span.getOperationName();
+                }
+            }
+        }
+        if (startTime == Long.MAX_VALUE) {
+            startTime = System.currentTimeMillis();
+        }
+        if (endTime == Long.MIN_VALUE) {
+            endTime = startTime;
+        }
+        return new SegmentMetrics(endpoint, startTime, endTime, (int) (endTime - startTime),
+                isError, startTime / 60_000L);
+    }
+
+    /** 载荷先写环形文件（GZIP），再把指针写入 H2；写失败返回负值，由调用方置空 payload_id。 */
+    private long writePayload(final Log log) {
+        if (cappedStorage == null) {
+            return -1L;
+        }
+        try {
+            return cappedStorage.writeMessage(GSON.toJson(log.toMap()).getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            recordError("cappedWrite", e);
+            return -1L;
+        }
+    }
+
+    private void insertSegmentRow(final Log log, final SegmentMetrics metrics, final long payloadId)
+            throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.INSERT_SQL)) {
+            ps.setString(1, log.getTraceId());
+            ps.setString(2, log.getTraceSegmentId());
+            ps.setString(3, log.getService());
+            ps.setString(4, log.getServiceInstance());
+            ps.setString(5, metrics.endpoint);
+            ps.setLong(6, metrics.startTime);
+            ps.setLong(7, metrics.endTime);
+            ps.setInt(8, metrics.latency);
+            ps.setBoolean(9, metrics.isError);
+            ps.setString(10, null); // trace_level: Phase 1 可空
+            if (payloadId >= 0) {
+                ps.setLong(11, payloadId);
+            } else {
+                ps.setNull(11, Types.BIGINT);
+            }
+            ps.setLong(12, metrics.timeBucket);
+            ps.executeUpdate();
+        }
+    }
+
+    private static final class SegmentMetrics {
+        private final String endpoint;
+        private final long startTime;
+        private final long endTime;
+        private final int latency;
+        private final boolean isError;
+        private final long timeBucket;
+
+        SegmentMetrics(final String endpoint, final long startTime, final long endTime,
+                final int latency, final boolean isError, final long timeBucket) {
+            this.endpoint = endpoint;
+            this.startTime = startTime;
+            this.endTime = endTime;
+            this.latency = latency;
+            this.isError = isError;
+            this.timeBucket = timeBucket;
         }
     }
 
@@ -341,52 +402,71 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             return new LinkedHashMap<String, Map<String, Object>>();
         }
         synchronized (this) {
-            // traceId → list of log maps, in start_time order
-            final Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<String, List<Map<String, Object>>>();
-            try (Statement stmt = connection.createStatement();
-                    ResultSet rs = stmt.executeQuery(H2SqlStatements.SELECT_ALL_SQL)) {
-                while (rs.next()) {
-                    final String traceId = rs.getString("trace_id");
-                    if (traceId == null) {
-                        continue;
-                    }
-                    final long payloadId = rs.getLong("payload_id");
-                    final boolean payloadNull = rs.wasNull();
-                    Map<String, Object> logMap = null;
-                    if (!payloadNull && payloadId >= 0 && cappedStorage != null) {
-                        try {
-                            final byte[] bytes = cappedStorage.readMessage(payloadId);
-                            if (bytes != null) {
-                                logMap = GSON.fromJson(new String(bytes, StandardCharsets.UTF_8),
-                                        new TypeToken<Map<String, Object>>(){}.getType());
-                            }
-                        } catch (IOException e) {
-                            recordError("snapshot", e);
-                        }
-                    }
-                    if (logMap == null) {
-                        // payload 缺失或已过期（header 仍在）：跳过该 payload，不脏读
-                        continue;
-                    }
-                    List<Map<String, Object>> logs = grouped.get(traceId);
-                    if (logs == null) {
-                        logs = new ArrayList<Map<String, Object>>();
-                        grouped.put(traceId, logs);
-                    }
-                    logs.add(logMap);
-                }
+            try {
+                return assembleSnapshots(readGroupedLogs());
             } catch (SQLException e) {
                 recordError("snapshot", e);
                 return new LinkedHashMap<String, Map<String, Object>>();
             }
-            // assemble: traceId → { "logs": [logMap, ...] }
-            final Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
-            for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
-                final Map<String, Object> traceData = new LinkedHashMap<String, Object>();
-                traceData.put("logs", entry.getValue());
-                result.put(entry.getKey(), traceData);
+        }
+    }
+
+    private Map<String, List<Map<String, Object>>> readGroupedLogs() throws SQLException {
+        // traceId → list of log maps, in start_time order
+        final Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<String, List<Map<String, Object>>>();
+        try (Statement stmt = connection.createStatement();
+                ResultSet rs = stmt.executeQuery(H2SqlStatements.SELECT_ALL_SQL)) {
+            while (rs.next()) {
+                final String traceId = rs.getString("trace_id");
+                if (traceId == null) {
+                    continue;
+                }
+                final long payloadId = rs.getLong("payload_id");
+                final boolean payloadNull = rs.wasNull();
+                final Map<String, Object> logMap = readLogPayload(payloadId, payloadNull);
+                if (logMap != null) {
+                    addToGroup(grouped, traceId, logMap);
+                }
             }
-            return result;
+        }
+        return grouped;
+    }
+
+    private void addToGroup(final Map<String, List<Map<String, Object>>> grouped, final String traceId,
+            final Map<String, Object> logMap) {
+        List<Map<String, Object>> logs = grouped.get(traceId);
+        if (logs == null) {
+            logs = new ArrayList<Map<String, Object>>();
+            grouped.put(traceId, logs);
+        }
+        logs.add(logMap);
+    }
+
+    private Map<String, Map<String, Object>> assembleSnapshots(
+            final Map<String, List<Map<String, Object>>> grouped) {
+        final Map<String, Map<String, Object>> result = new LinkedHashMap<String, Map<String, Object>>();
+        for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
+            final Map<String, Object> traceData = new LinkedHashMap<String, Object>();
+            traceData.put("logs", entry.getValue());
+            result.put(entry.getKey(), traceData);
+        }
+        return result;
+    }
+
+    private Map<String, Object> readLogPayload(final long payloadId, final boolean payloadNull) {
+        if (payloadNull || payloadId < 0 || cappedStorage == null) {
+            return null;
+        }
+        try {
+            final byte[] bytes = cappedStorage.readMessage(payloadId);
+            if (bytes == null) {
+                return null;
+            }
+            return GSON.fromJson(new String(bytes, StandardCharsets.UTF_8),
+                    new TypeToken<Map<String, Object>>(){}.getType());
+        } catch (IOException e) {
+            recordError("readLogPayload", e);
+            return null;
         }
     }
 
@@ -438,19 +518,11 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                             anyExpired = true;
                             continue;
                         }
-                        try {
-                            final byte[] bytes = cappedStorage.readMessage(payloadId);
-                            if (bytes == null) {
-                                anyExpired = true;
-                                continue;
-                            }
-                            final Map<String, Object> logMap = GSON.fromJson(new String(bytes, StandardCharsets.UTF_8),
-                                    new TypeToken<Map<String, Object>>(){}.getType());
-                            if (logMap != null) {
-                                logs.add(logMap);
-                            }
-                        } catch (IOException e) {
-                            recordError("queryTrace", e);
+                        final Map<String, Object> logMap = readLogPayload(payloadId, false);
+                        if (logMap == null) {
+                            anyExpired = true;
+                        } else {
+                            logs.add(logMap);
                         }
                     }
                 }
@@ -476,21 +548,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 ps.setInt(1, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
-                        final Map<String, Object> row = new LinkedHashMap<String, Object>();
-                        row.put("traceId", rs.getString("trace_id"));
-                        row.put("traceSegmentId", rs.getString("segment_id"));
-                        row.put("service", rs.getString("service"));
-                        row.put("endpoint", rs.getString("endpoint"));
-                        row.put("startTime", rs.getLong("start_time"));
-                        row.put("latency", rs.getInt("latency"));
-                        row.put("isError", rs.getBoolean("is_error"));
-                        final long payloadId = rs.getLong("payload_id");
-                        final boolean payloadNull = rs.wasNull();
-                        final boolean hasPayload = !payloadNull && payloadId >= 0;
-                        row.put("hasPayload", hasPayload);
-                        row.put("payloadExpired", hasPayload && cappedStorage != null
-                                && cappedStorage.isOverwritten(payloadId));
-                        out.add(row);
+                        out.add(toRecentTraceRow(rs));
                     }
                 }
             } catch (SQLException e) {
@@ -500,27 +558,46 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         return out;
     }
 
+    private Map<String, Object> toRecentTraceRow(final ResultSet rs) throws SQLException {
+        final Map<String, Object> row = new LinkedHashMap<String, Object>();
+        row.put("traceId", rs.getString("trace_id"));
+        row.put("traceSegmentId", rs.getString("segment_id"));
+        row.put("service", rs.getString("service"));
+        row.put("endpoint", rs.getString("endpoint"));
+        row.put("startTime", rs.getLong("start_time"));
+        row.put("latency", rs.getInt("latency"));
+        row.put("isError", rs.getBoolean("is_error"));
+        final long payloadId = rs.getLong("payload_id");
+        final boolean payloadNull = rs.wasNull();
+        final boolean hasPayload = !payloadNull && payloadId >= 0;
+        row.put("hasPayload", hasPayload);
+        row.put("payloadExpired", hasPayload && cappedStorage != null
+                && cappedStorage.isOverwritten(payloadId));
+        return row;
+    }
+
     /**
      * 行数水位上限：超过 {@link #shadowMaxRows} 后按 {@code id} 水位节流清理。
      */
     private void enforceRowCap() {
-        if (shadowMaxRows <= 0) {
-            return;
-        }
+        enforceCap(shadowMaxRows, H2SqlStatements.MAX_ID_SQL, H2SqlStatements.DELETE_CAP_SQL, "enforceRowCap");
+    }
+
+    private void enforceCap(final int waterLevel, final String maxIdSql, final String deleteSql, final String op) {
         try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery(H2SqlStatements.MAX_ID_SQL)) {
+                ResultSet rs = stmt.executeQuery(maxIdSql)) {
             if (rs.next()) {
                 final long maxId = rs.getLong(1);
-                if (maxId > shadowMaxRows) {
-                    final long threshold = maxId - shadowMaxRows;
-                    try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.DELETE_CAP_SQL)) {
+                if (maxId > waterLevel) {
+                    final long threshold = maxId - waterLevel;
+                    try (PreparedStatement ps = connection.prepareStatement(deleteSql)) {
                         ps.setLong(1, threshold);
                         ps.executeUpdate();
                     }
                 }
             }
         } catch (SQLException e) {
-            recordError("enforceRowCap", e);
+            recordError(op, e);
         }
     }
 
@@ -580,21 +657,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     }
 
     private void enforceAuditRowCap() {
-        try (Statement stmt = connection.createStatement();
-                ResultSet rs = stmt.executeQuery(H2SqlStatements.MAX_AUDIT_ID_SQL)) {
-            if (rs.next()) {
-                final long maxId = rs.getLong(1);
-                if (maxId > AUDIT_WATER_LEVEL) {
-                    final long threshold = maxId - AUDIT_WATER_LEVEL;
-                    try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.DELETE_AUDIT_CAP_SQL)) {
-                        ps.setLong(1, threshold);
-                        ps.executeUpdate();
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            recordError("enforceAuditRowCap", e);
-        }
+        enforceCap(AUDIT_WATER_LEVEL, H2SqlStatements.MAX_AUDIT_ID_SQL, H2SqlStatements.DELETE_AUDIT_CAP_SQL,
+                "enforceAuditRowCap");
     }
 
     /**
@@ -611,14 +675,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 ps.setInt(1, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
-                        final Map<String, Object> row = new LinkedHashMap<String, Object>();
-                        row.put("checkTime", rs.getString("check_time"));
-                        row.put("traceId", rs.getString("trace_id"));
-                        row.put("diffType", rs.getString("diff_type"));
-                        row.put("expected", rs.getString("expected"));
-                        row.put("actual", rs.getString("actual"));
-                        row.put("detail", rs.getString("detail"));
-                        rows.add(row);
+                        rows.add(toAuditRow(rs));
                     }
                 }
             } catch (SQLException e) {
@@ -626,6 +683,17 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             }
         }
         return rows;
+    }
+
+    private Map<String, Object> toAuditRow(final ResultSet rs) throws SQLException {
+        final Map<String, Object> row = new LinkedHashMap<String, Object>();
+        row.put("checkTime", rs.getString("check_time"));
+        row.put("traceId", rs.getString("trace_id"));
+        row.put("diffType", rs.getString("diff_type"));
+        row.put("expected", rs.getString("expected"));
+        row.put("actual", rs.getString("actual"));
+        row.put("detail", rs.getString("detail"));
+        return row;
     }
 
     /** 审计表当前行数（水位状态）。 */
@@ -693,13 +761,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 Thread.currentThread().interrupt();
             }
         }
-        final BlockingQueue<TraceSegment> q = writeQueue;
-        if (q != null) {
-            TraceSegment seg;
-            while ((seg = q.poll()) != null) {
-                storeSegment(seg);
-            }
-        }
+        drainQueue();
         if (consoleServer != null) {
             try {
                 consoleServer.stop();
