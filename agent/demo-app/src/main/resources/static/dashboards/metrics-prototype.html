@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — 抛砖用的、一次性代码，不属于生产。评审完删除，答案沉淀进实现 issue。
+  设计问题：「Trace 指标仪表盘该长什么样？」——给领导评审、申请资源用的效果原型。
+  三个结构不同的方案，`?variant=A|B|C` 切换，底部浮动开关或 ← → 键翻页。
+  数据全部为页面内模拟（metrics 尚未实现，契约见 docs/todos/h2化-统一方案.md §5.3 / Phase 5）。
+  参考：SkyWalking UI（层级导航 + 分位数趋势）、Glowroot（单应用仪表盘 + 分位数/事务）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天枢观测台 · Trace 指标仪表盘原型</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b0f17;color:#e6edf3;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+:root{--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+a{color:inherit}
+
+/* ================= 原型外壳（不参与评比） ================= */
+.proto-bar{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;gap:14px;
+  padding:9px 18px;background:#141821;border-bottom:1px solid #2a3142;color:#c7d0e0;font-size:12.5px}
+.proto-tag{background:#f43f5e;color:#fff;font-weight:800;letter-spacing:.14em;font-size:11px;padding:3px 9px;border-radius:5px}
+.proto-title{font-weight:700;color:#fff}
+.proto-q{color:#8b96ad;margin-left:auto;max-width:52%;text-align:right;line-height:1.5}
+.proto-q b{color:#7cc4ff}
+
+.pv{padding:66px 0 92px;min-height:100vh}
+
+.switcher{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;
+  display:flex;align-items:center;gap:14px;background:rgba(15,18,26,.94);border:1px solid #39415a;
+  border-radius:999px;padding:7px 10px;box-shadow:0 10px 34px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.switcher button{width:32px;height:32px;border-radius:999px;border:1px solid #454f6b;background:#1d2230;color:#e8edf7;
+  cursor:pointer;font-size:14px;line-height:1;display:grid;place-items:center}
+.switcher button:hover{background:#2a3145;border-color:#5f6b8f}
+.sw-label{display:flex;flex-direction:column;align-items:center;min-width:190px}
+.sw-label .k{font-family:var(--mono);font-weight:800;font-size:13px;color:#7cc4ff;letter-spacing:.1em}
+.sw-label .n{font-size:12.5px;color:#cfd7e6}
+.sw-hint{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);z-index:70;color:#5f6980;font-size:11px}
+
+/* ================= 共享组件 kit（原子件，布局各变体自定） ================= */
+.vA,.vB,.vC{--r:12px}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:var(--r);padding:14px 16px;min-width:0}
+.card-h{font-size:11.5px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;font-weight:800;margin:0 0 12px}
+.kpi-row{display:flex;gap:12px;flex-wrap:wrap}
+.kpi{flex:1 1 150px;background:var(--panel);border:1px solid var(--bd);border-radius:var(--r);padding:12px 14px;min-width:0}
+.kpi .k-label{font-size:12px;color:var(--mut)}
+.kpi .k-val{font-family:var(--mono);font-weight:800;font-size:25px;margin:5px 0 3px;letter-spacing:-.02em}
+.kpi .k-sub{font-size:11.5px;color:var(--mut)}
+.kpi .k-sub.up{color:var(--err)} .kpi .k-sub.down{color:var(--ok)}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill.error{background:color-mix(in srgb,var(--err) 20%,transparent);color:var(--err)}
+.pill.slow{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.pill.normal,.pill.ok{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.pill.info{background:color-mix(in srgb,var(--ac) 20%,transparent);color:var(--ac)}
+.pill.mute{background:color-mix(in srgb,var(--mut) 18%,transparent);color:var(--mut)}
+.dot{width:8px;height:8px;border-radius:999px;background:var(--err);display:inline-block}
+.dot.live{box-shadow:0 0 0 0 color-mix(in srgb,var(--err) 70%,transparent);animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--err) 60%,transparent)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;color:var(--mut);font-weight:700;font-size:11.5px;letter-spacing:.03em;padding:7px 10px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.tbl td{padding:8px 10px;border-bottom:1px solid var(--bd);vertical-align:middle}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:color-mix(in srgb,var(--ac) 7%,transparent)}
+.tbl .mono{font-family:var(--mono);font-size:12px}
+.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.lv{font-weight:800;font-size:12px}
+.lv.error{color:var(--err)} .lv.slow{color:var(--warn)} .lv.normal{color:var(--ok)}
+
+.ch-svg{width:100%;height:auto;display:block;overflow:visible}
+.ch-grid{stroke:var(--bd);stroke-width:1}
+.ch-ylab,.ch-xlab{fill:var(--mut);font-size:10px;font-family:var(--mono)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--mut)}
+.legend i{display:inline-block;width:16px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.spark{width:100%;height:26px;display:block;opacity:.9}
+
+.gauge{position:relative;width:112px;height:112px;display:grid;place-items:center}
+.gauge svg{width:112px;height:112px;transform:rotate(0deg)}
+.g-track{fill:none;stroke:var(--bd);stroke-width:9}
+.g-fill{fill:none;stroke-width:9;stroke-linecap:round;transition:stroke-dashoffset .6s}
+.gauge .g-val{position:absolute;font-family:var(--mono);font-weight:800;font-size:21px;top:42px}
+.gauge .g-sub{position:absolute;top:68px;font-size:11px;color:var(--mut);text-align:center;width:100%}
+
+.hm{display:grid;gap:2px}
+.hm-row{display:grid;grid-template-columns:210px 1fr;gap:8px;align-items:center}
+.hm-lab{font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hm-cells{display:grid;gap:2px}
+.hm-cell{height:18px;border-radius:3px;background:#141a2a}
+.hm-axis{display:grid;grid-template-columns:210px 1fr;gap:8px}
+.hm-axis .t{display:grid;font-size:10px;color:var(--mut);font-family:var(--mono)}
+
+.tl{display:flex;flex-direction:column;gap:5px}
+.tl-row{display:grid;grid-template-columns:280px 1fr 74px;gap:10px;align-items:center;font-size:12px}
+.tl-op{font-family:var(--mono);font-size:11.5px;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.tl-track{position:relative;height:15px;background:color-mix(in srgb,var(--mut) 12%,transparent);border-radius:4px;overflow:hidden}
+.tl-bar{position:absolute;top:0;bottom:0;border-radius:3px;min-width:3px}
+.tl-bar.Entry{background:var(--ac)} .tl-bar.Exit{background:var(--ok)} .tl-bar.Local{background:var(--mut)}
+.tl-bar.err{background:var(--err)}
+.tl-dur{font-family:var(--mono);color:var(--mut);text-align:right}
+.empty{color:var(--mut);text-align:center;padding:26px 0;font-size:13px}
+
+/* ================= 变体 A：APM 控制台（深蓝，SkyWalking 门面） ================= */
+.vA{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;
+  background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);min-height:100vh}
+.vA .wrap{display:grid;grid-template-columns:246px 1fr;gap:0;min-height:calc(100vh - 66px)}
+.vA .rail{background:#0c1526;border-right:1px solid var(--bd);padding:18px 12px}
+.vA .brand{display:flex;align-items:center;gap:9px;padding:0 8px 16px;border-bottom:1px solid var(--bd);margin-bottom:14px}
+.vA .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#38bdf8,#6366f1);display:grid;place-items:center;font-weight:900;color:#04101f;font-size:15px}
+.vA .brand h1{margin:0;font-size:15px} .vA .brand p{margin:2px 0 0;font-size:10.5px;color:var(--mut);letter-spacing:.06em}
+.vA .rail-h{font-size:10.5px;color:var(--mut);letter-spacing:.1em;font-weight:800;margin:14px 8px 7px}
+.vA .svc{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,#38bdf8 13%,transparent);color:#bfe4ff;font-size:12.5px;font-weight:700}
+.vA .ep{padding:6px 10px 6px 22px;font-family:var(--mono);font-size:11px;color:var(--mut);border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vA .ep.on{background:#16233d;color:#dbeafe}
+.vA .main{padding:20px 22px;min-width:0}
+.vA .head{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.vA .head h2{margin:0;font-size:19px}
+.vA .head .meta{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mut)}
+.vA .seg{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.vA .seg span{padding:4px 11px;font-size:12px;color:var(--mut)}
+.vA .seg span.on{background:#1c2b4a;color:#dbeafe;font-weight:700}
+.vA .grid2{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px}
+.vA .cols{display:grid;grid-template-columns:1fr 340px;gap:14px}
+@media(max-width:1180px){.vA .wrap{grid-template-columns:1fr}.vA .rail{display:none}.vA .grid2,.vA .cols{grid-template-columns:1fr}}
+
+/* ================= 变体 B：单应用体检（浅色，Glowroot 门面） ================= */
+.vB{--bg:#f6f8fb;--panel:#ffffff;--bd:#e2e8f0;--tx:#1e293b;--mut:#64748b;--ac:#0e9f6e;--ok:#0e9f6e;--warn:#d97706;--err:#dc2626;
+  background:var(--bg);color:var(--tx);min-height:100vh}
+.vB .wrap{max-width:1140px;margin:0 auto;padding:24px 22px}
+.vB .head{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.vB .logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#0e9f6e,#0ea5e9);display:grid;place-items:center;color:#fff;font-weight:900}
+.vB .head h2{margin:0;font-size:20px} .vB .head p{margin:3px 0 0;color:var(--mut);font-size:12.5px}
+.vB .head .right{margin-left:auto;text-align:right;font-size:12px;color:var(--mut)}
+.vB .hero{display:grid;grid-template-columns:220px 1fr;gap:14px;margin-bottom:14px}
+.vB .gauges{display:flex;gap:8px;justify-content:space-around;flex-wrap:wrap}
+.vB .grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin-bottom:14px}
+.vB .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:960px){.vB .hero,.vB .grid2,.vB .cols{grid-template-columns:1fr}}
+
+/* ================= 变体 C：指挥台 · 品牌主页（近黑霓虹，自创品牌） ================= */
+.vC{--bg:#05060b;--panel:rgba(20,24,38,.72);--bd:rgba(125,145,220,.2);--tx:#eef2ff;--mut:#8b93b8;--ac:#8b5cf6;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;
+  background:
+    radial-gradient(900px 460px at 12% -8%, rgba(124,92,255,.20), transparent 60%),
+    radial-gradient(760px 420px at 96% 4%, rgba(34,211,238,.14), transparent 60%),
+    #05060b;color:var(--tx);min-height:100vh}
+.vC .wrap{max-width:1240px;margin:0 auto;padding:26px 22px}
+.vC .hero-brand{display:grid;grid-template-columns:1fr 360px;gap:22px;align-items:center;margin-bottom:20px}
+.vC .lockup{display:flex;align-items:center;gap:16px}
+.vC .mark{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#8b5cf6,#22d3ee);display:grid;place-items:center;font-weight:900;font-size:28px;color:#070b16;box-shadow:0 12px 40px rgba(124,92,255,.4)}
+.vC .lockup h2{margin:0;font-size:30px;letter-spacing:-.01em}
+.vC .lockup .en{font-size:12px;letter-spacing:.32em;color:var(--mut);margin-top:3px;text-transform:uppercase}
+.vC .tagline{margin:14px 0 0;color:#c7cff0;font-size:14.5px;line-height:1.75;max-width:640px}
+.vC .diff{display:flex;flex-direction:column;gap:9px}
+.vC .diff .row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--bd);border-radius:11px;padding:10px 13px;font-size:12.5px}
+.vC .diff .row b{color:#fff}
+.vC .diff .row .chk{color:var(--ac);font-weight:900}
+.vC .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:13px;margin-bottom:16px}
+.vC .tile{background:var(--panel);border:1px solid var(--bd);border-radius:14px;padding:15px 16px;position:relative;overflow:hidden}
+.vC .tile::after{content:"";position:absolute;inset:0 auto auto 0;width:100%;height:2px;background:linear-gradient(90deg,var(--ac),transparent)}
+.vC .tile .t-l{font-size:12px;color:var(--mut)}
+.vC .tile .t-v{font-family:var(--mono);font-weight:800;font-size:29px;margin:6px 0 3px;background:linear-gradient(90deg,#fff,#b9c6ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.vC .tile .t-s{font-size:11.5px;color:var(--mut)}
+.vC .grid2{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;margin-bottom:14px}
+.vC .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.vC .glass{background:var(--panel);border:1px solid var(--bd);border-radius:16px;padding:16px 18px;backdrop-filter:blur(9px)}
+.vC .matrix{width:100%;border-collapse:collapse;font-size:12.5px}
+.vC .matrix th,.vC .matrix td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left}
+.vC .matrix th{color:var(--mut);font-size:11px;letter-spacing:.04em}
+.vC .matrix .yes{color:var(--ok);font-weight:800} .vC .matrix .no{color:var(--mut)}
+.vC .matrix tr:last-child td{border-bottom:0}
+@media(max-width:1080px){.vC .hero-brand,.vC .grid2,.vC .cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header class="proto-bar">
+  <span class="proto-tag">PROTOTYPE</span>
+  <span class="proto-title">天枢观测台 · Trace 指标仪表盘</span>
+  <span class="proto-q" id="proto-q"></span>
+</header>
+
+<main id="app"></main>
+
+<div class="switcher">
+  <button id="sw-prev" title="上一个方案（←）">◀</button>
+  <div class="sw-label"><span class="k" id="sw-k">A</span><span class="n" id="sw-n"></span></div>
+  <button id="sw-next" title="下一个方案（→）">▶</button>
+</div>
+<div class="sw-hint">← → 切换方案 · ?variant=A|B|C · 数据为模拟，仅用于效果评审</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   1) 模拟数据（纯数据模块，契约对齐 h2化方案 §5.3 trace_metrics_minute）
+   ============================================================ */
+var NOW = Date.now();
+var N = 1440;               /* 24h，1 分钟一桶 */
+var BUCKET_MS = 60000;
+
+function rng(seed){ return function(){ seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }; }
+
+var EP_DEFS = [
+  { name:"GET:/api/order/{id}",          weight:.24, p50:46,  p99m:6, errBase:.004, slowBase:.03 },
+  { name:"GET:/longTimeTask",            weight:.05, p50:1420,p99m:4, errBase:.002, slowBase:.22 },
+  { name:"GET:/queryDbByMybatis",        weight:.11, p50:78,  p99m:7, errBase:.006, slowBase:.05 },
+  { name:"GET:/queryDbByJdbc",           weight:.09, p50:60,  p99m:6, errBase:.005, slowBase:.04 },
+  { name:"GET:/api/trace-alert-demo/slow",   weight:.015,p50:4020,p99m:2, errBase:.001, slowBase:.9 },
+  { name:"GET:/api/trace-alert-demo/error",  weight:.005,p50:22, p99m:3, errBase:.9,   slowBase:.02 },
+  { name:"GET:/api/trace-alert-demo/http500",weight:.005,p50:18, p99m:3, errBase:.9,   slowBase:.01 },
+  { name:"POST:/profile",                weight:.02, p50:34,  p99m:3, errBase:.01,  slowBase:.02 },
+  { name:"GET:/inner/sw/trace-alert/recent", weight:.05, p50:14, p99m:2, errBase:.002, slowBase:.01 }
+];
+
+function buildData(){
+  var r = rng(20260923);
+  var times = [], i;
+  for (i = 0; i < N; i++) times.push(NOW - (N - 1 - i) * BUCKET_MS);
+  var eps = EP_DEFS.map(function(d){ return { name:d.name, def:d, req:[], err:[], slow:[], p50:[], p90:[], p95:[], p99:[], max:[] }; });
+  var gReq=[], gErr=[], gSlow=[], gP50=[], gP90=[], gP95=[], gP99=[];
+  var INC_LAT = [590, 613], INC_ERR = [1000, 1017];
+
+  for (i = 0; i < N; i++){
+    var hour = new Date(times[i]).getHours();
+    var diur = .30 + .70 * Math.sin(Math.PI * Math.min(Math.max((hour - 5) / 14, .001), .999));
+    var inLat = i >= INC_LAT[0] && i <= INC_LAT[1];
+    var inErr = i >= INC_ERR[0] && i <= INC_ERR[1];
+    var base = 180 * diur * (.82 + .36 * r());
+    var sumReq = 0, sumErr = 0, sumSlow = 0, w50 = 0, w90 = 0, w95 = 0, w99 = 0;
+
+    eps.forEach(function(e){
+      var d = e.def;
+      var req = Math.max(0, Math.round(base * d.weight * (.75 + .5 * r())));
+      var err = Math.round(req * (d.errBase + (inErr ? .16 : 0)) * (.6 + .8 * r()));
+      var slow = Math.round(req * (d.slowBase + (inLat ? .12 : 0)) * (.7 + .6 * r()));
+      var p50 = Math.round(d.p50 * (inLat ? 1.3 : 1) * (.88 + .24 * r()));
+      var p90 = Math.round(p50 * (1.8 + .4 * r()));
+      var p95 = Math.round(p50 * (2.4 + .6 * r()) * (inLat ? 1.5 : 1));
+      var p99 = Math.round(p95 * (1 + d.p99m / 22) * (.95 + .15 * r()) * (inLat ? 1.25 : 1));
+      e.req.push(req); e.err.push(err); e.slow.push(slow);
+      e.p50.push(p50); e.p90.push(p90); e.p95.push(p95); e.p99.push(p99);
+      e.max.push(Math.round(p99 * (1.2 + .8 * r())));
+      sumReq += req; sumErr += err; sumSlow += slow; w50 += p50 * req; w90 += p90 * req; w95 += p95 * req; w99 += p99 * req;
+    });
+
+    gReq.push(sumReq); gErr.push(sumErr); gSlow.push(sumSlow);
+    gP50.push(Math.round(sumReq ? w50 / sumReq : 0));
+    gP90.push(Math.round(sumReq ? w90 / sumReq : 0));
+    gP95.push(Math.round(sumReq ? w95 / sumReq : 0));
+    gP99.push(Math.round(sumReq ? w99 / sumReq : 0));
+  }
+
+  eps.forEach(function(e){
+    var tReq=0,tErr=0,tSlow=0,a50=0,a95=0,a99=0,mx=0;
+    for (i = 0; i < N; i++){ tReq+=e.req[i]; tErr+=e.err[i]; tSlow+=e.slow[i]; a50+=e.p50[i]; a95+=e.p95[i]; a99+=e.p99[i]; if (e.max[i] > mx) mx = e.max[i]; }
+    e.sum = { req:tReq, err:tErr, errRate:tReq ? tErr/tReq : 0, slow:tSlow, slowRate:tReq ? tSlow/tReq : 0,
+              p50:Math.round(a50/N), p95:Math.round(a95/N), p99:Math.round(a99/N), max:mx, spark:e.req.slice(-64) };
+  });
+
+  var tReq=0,tErr=0,tSlow=0;
+  for (i = 0; i < N; i++){ tReq+=gReq[i]; tErr+=gErr[i]; tSlow+=gSlow[i]; }
+  var gSum = { req:tReq, err:tErr, slow:tSlow, errRate:tReq?tErr/tReq:0, slowRate:tReq?tSlow/tReq:0,
+               p50:gP50[N-1], p95:gP95[N-1], p99:gP99[N-1] };
+  var lastHourReq = gReq.slice(-60).reduce(function(a,b){return a+b;},0);
+  var lastHourErr = gErr.slice(-60).reduce(function(a,b){return a+b;},0);
+
+  var incidents = [
+    { at: times[INC_ERR[0]], level:"error", title:"错误率突增",
+      desc:"GET:/api/trace-alert-demo/error 与 http500 命中激增，全站错误率冲高至 12.4%，持续约 17 分钟。", endpoint:"GET:/api/trace-alert-demo/error" },
+    { at: times[INC_LAT[0]], level:"slow", title:"响应时间劣化",
+      desc:"GET:/api/order/{id} P99 升至基线 3.2×（下探到下游 gRPC），持续约 23 分钟。", endpoint:"GET:/api/order/{id}" }
+  ];
+
+  var storage = {
+    h2: { enabled:true, mode:"file", file:"~/.skywalking-local/trace.mv.db", sizeMB:12.4, rows:18320,
+          level:{ error:412, slow:17908 }, ttl:{ error:"7 天", slow:"24 小时" } },
+    capped: { file:"~/.skywalking-local/payload.ring", usedMB:43.7, capMB:128, blocks:21450, overwritten:1180 },
+    queue: { depth:12, cap:4096, dropped:0, writer:"RUNNING", lastFlushMs:180 },
+    hot: { used:1204, cap:2000, evicted:90412 },
+    parity: { enabled:true, checked:18320, diffs:0, last:"0 秒前" }
+  };
+
+  var traces = [
+    { id:"a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6", level:"slow", endpoint:"GET:/api/order/{id}", dur:4120, segs:2, at:NOW-3*3600e3, errorSpans:0 },
+    { id:"9f8e7d6c5b4a39281706f5e4d3c2b1a0", level:"error", endpoint:"GET:/api/trace-alert-demo/error", dur:27, segs:1, at:NOW-40*60000, errorSpans:1 },
+    { id:"11223344556677889900aabbccddeeff", level:"normal", endpoint:"GET:/queryDbByMybatis", dur:83, segs:1, at:NOW-8*60000, errorSpans:0 },
+    { id:"ffee00112233445566778899aabbccdd", level:"slow", endpoint:"GET:/longTimeTask", dur:6280, segs:1, at:NOW-22*60000, errorSpans:0 }
+  ];
+
+  return { times:times, eps:eps, gReq:gReq, gErr:gErr, gSlow:gSlow, gP50:gP50, gP90:gP90, gP95:gP95, gP99:gP99,
+           gSum:gSum, lastHourReq:lastHourReq, lastHourErr:lastHourErr, incidents:incidents,
+           storage:storage, traces:traces, service:"demo-app", instance:"demo-app@10.8.3.17:9600" };
+}
+var D = buildData();
+
+/* ============================================================
+   2) 工具 + 共享图表 kit（无依赖，返回 SVG/HTML 字符串）
+   ============================================================ */
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+function fmtInt(n){ return n == null ? "-" : Number(n).toLocaleString("en-US"); }
+function fmtMs(v){ return v >= 1000 ? (v/1000).toFixed(2) + " s" : Math.round(v) + " ms"; }
+function pct(v,d){ return v == null ? "-" : (v*100).toFixed(d == null ? 2 : d) + "%"; }
+function hhmm(t){ var d = new Date(t); return ("0"+d.getHours()).slice(-2) + ":" + ("0"+d.getMinutes()).slice(-2); }
+function hhmmss(t){ var d = new Date(t); return hhmm(t) + ":" + ("0"+d.getSeconds()).slice(-2); }
+function shortId(id){ return id && id.length > 22 ? id.slice(0, 10) + "…" + id.slice(-8) : (id || "-"); }
+function ds(arr, step){ step = step || 10; var o = []; for (var i = 0; i < arr.length; i += step) o.push(arr[i]); return o; }
+function dlabels(times, step){ step = step || 10; var o = []; for (var i = 0; i < times.length; i += step) o.push(hhmm(times[i])); return o; }
+
+function kpi(label, val, sub, tone, extra){
+  return '<div class="kpi '+(extra||"")+'"><div class="k-label">'+esc(label)+'</div><div class="k-val">'+val+'</div><div class="k-sub '+(tone||"")+'">'+sub+'</div></div>';
+}
+function card(title, body, extra){
+  return '<section class="card '+(extra||"")+'">'+(title ? '<h3 class="card-h">'+esc(title)+'</h3>' : "")+body+'</section>';
+}
+function pill(t, cls){ return '<span class="pill '+(cls||"")+'">'+esc(t)+'</span>'; }
+
+function svgWrap(w, h, inner){ return '<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none" class="ch-svg">'+inner+'</svg>'; }
+
+/* 折线/面积/分位带图 */
+function lineChart(cfg){
+  var w = cfg.w || 660, h = cfg.h || 190, pl = 46, pr = 12, pt = 14, pb = 24;
+  var n = 0;
+  if (cfg.series && cfg.series.length) n = cfg.series[0].values.length;
+  else if (cfg.bands && cfg.bands.length) n = cfg.bands[0].upper.length;
+  if (!n) return svgWrap(w, h, "");
+  var all = [];
+  if (cfg.series) cfg.series.forEach(function(s){ all = all.concat(s.values); });
+  if (cfg.bands) cfg.bands.forEach(function(b){ all = all.concat(b.upper, b.lower); });
+  var lo = cfg.min != null ? cfg.min : Math.min.apply(null, all);
+  var hi = cfg.max != null ? cfg.max : Math.max.apply(null, all);
+  if (hi === lo) hi = lo + 1;
+  function X(i){ return pl + i / (n - 1) * (w - pl - pr); }
+  function Y(v){ return pt + (1 - (v - lo) / (hi - lo)) * (h - pt - pb); }
+  var s = "";
+  for (var g = 0; g <= 4; g++){
+    var v = lo + (hi - lo) * g / 4, y = Y(v);
+    s += '<line x1="'+pl+'" y1="'+y.toFixed(1)+'" x2="'+(w-pr)+'" y2="'+y.toFixed(1)+'" class="ch-grid"/>';
+    s += '<text x="'+(pl-7)+'" y="'+(y+3).toFixed(1)+'" class="ch-ylab" text-anchor="end">'+(cfg.yfmt ? cfg.yfmt(v) : Math.round(v))+'</text>';
+  }
+  if (cfg.bands) cfg.bands.forEach(function(b){
+    var up = b.upper.map(function(v,i){ return (i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
+    var dn = "";
+    for (var i = b.lower.length - 1; i >= 0; i--) dn += "L"+X(i).toFixed(1)+" "+Y(b.lower[i]).toFixed(1)+" ";
+    s += '<path d="'+up+" "+dn+'Z" fill="'+b.color+'" opacity="'+(b.opacity == null ? .16 : b.opacity)+'"/>';
+  });
+  if (cfg.series) cfg.series.forEach(function(se){
+    var d = se.values.map(function(v,i){ return (i?"L":"M")+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
+    if (se.fill) s += '<path d="'+d+" L"+X(n-1).toFixed(1)+" "+(h-pb)+" L"+X(0).toFixed(1)+" "+(h-pb)+' Z" fill="'+se.color+'" opacity=".10"/>';
+    s += '<path d="'+d+'" fill="none" stroke="'+se.color+'" stroke-width="'+(se.width||2)+'"'+(se.dash?' stroke-dasharray="4 3"':'')+' stroke-linejoin="round"/>';
+  });
+  var ticks = cfg.xticks || 7;
+  for (var t = 0; t < ticks; t++){
+    var idx = Math.round(t / (ticks - 1) * (n - 1));
+    s += '<text x="'+X(idx).toFixed(1)+'" y="'+(h-6)+'" class="ch-xlab" text-anchor="middle">'+(cfg.xlabels ? cfg.xlabels[idx] : "")+'</text>';
+  }
+  return svgWrap(w, h, s);
+}
+
+function sparkline(vals, color){
+  var w = 110, h = 26, min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
+  if (max === min) max = min + 1;
+  var d = vals.map(function(v,i){ return (i?"L":"M")+(i/(vals.length-1)*w).toFixed(1)+" "+(h-2-(v-min)/(max-min)*(h-4)).toFixed(1); }).join(" ");
+  return '<svg viewBox="0 0 '+w+' '+h+'" class="spark" preserveAspectRatio="none"><path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/></svg>';
+}
+
+function gauge(val, max, label, sub, color){
+  var p = Math.max(0, Math.min(1, val / max)), R = 44, C = 2 * Math.PI * R, off = C * (1 - p);
+  return '<div class="gauge"><svg viewBox="0 0 112 112"><circle cx="56" cy="56" r="'+R+'" class="g-track"/>'+
+    '<circle cx="56" cy="56" r="'+R+'" class="g-fill" stroke="'+color+'" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 56 56)"/></svg>'+
+    '<div class="g-val" style="color:'+color+'">'+label+'</div><div class="g-sub">'+esc(sub)+'</div></div>';
+}
+
+function heatColor(v, lo, hi){
+  var t = Math.max(0, Math.min(1, (v - lo) / ((hi - lo) || 1)));
+  var st = [[13,26,54],[17,94,140],[34,197,180],[250,204,21],[248,113,113]];
+  var x = t * (st.length - 1), i = Math.min(st.length - 2, Math.floor(x)), f = x - i;
+  var a = st[i], b = st[i+1];
+  return "rgb("+Math.round(a[0]+(b[0]-a[0])*f)+","+Math.round(a[1]+(b[1]-a[1])*f)+","+Math.round(a[2]+(b[2]-a[2])*f)+")";
+}
+
+/* 热力图：行=endpoint，列=时间窗；值取该窗 P95 */
+function heatmapHtml(rows, cols, valFn, timeLabels){
+  var cellsByRow = [], vals = [];
+  rows.forEach(function(rw){
+    var c = [];
+    for (var i = 0; i < cols; i++){ var v = valFn(rw, i); c.push(v); vals.push(v); }
+    cellsByRow.push(c);
+  });
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var out = '<div class="hm">';
+  rows.forEach(function(rw, ri){
+    out += '<div class="hm-row"><div class="hm-lab" title="'+esc(rw.name)+'">'+esc(rw.name)+'</div><div class="hm-cells" style="grid-template-columns:repeat('+cols+',1fr)">';
+    cellsByRow[ri].forEach(function(v){
+      out += '<div class="hm-cell" style="background:'+heatColor(v,lo,hi)+'" title="'+esc(rw.name)+' · P95 '+fmtMs(v)+'"></div>';
+    });
+    out += '</div></div>';
+  });
+  out += '<div class="hm-axis"><div></div><div class="t" style="grid-template-columns:repeat('+cols+',1fr)">';
+  timeLabels.forEach(function(l){ out += '<span>'+esc(l)+"</span>"; });
+  out += '</div></div></div>';
+  return out;
+}
+
+function timelineHtml(spans){
+  var min = Infinity, max = 0;
+  spans.forEach(function(s){ if (s.start < min) min = s.start; if (s.start + s.dur > max) max = s.start + s.dur; });
+  var range = (max - min) || 1;
+  var out = '<div class="tl">';
+  spans.forEach(function(s){
+    var left = (s.start - min) / range * 100, w = Math.max(s.dur / range * 100, .6);
+    out += '<div class="tl-row"><div class="tl-op" title="'+esc(s.op)+'">'+esc(s.op)+'</div>'+
+      '<div class="tl-track"><div class="tl-bar '+esc(s.type)+(s.err?" err":"")+'" style="left:'+left.toFixed(2)+'%;width:'+w.toFixed(2)+'%"></div></div>'+
+      '<div class="tl-dur">'+fmtMs(s.dur)+'</div></div>';
+  });
+  return out + '</div>';
+}
+
+function traceSpans(t){
+  if (t.level === "error") return [
+    { op:"GET:/api/trace-alert-demo/error", type:"Entry", start:0, dur:27, err:true },
+    { op:"OrderController.throwBizException (Local)", type:"Local", start:4, dur:18, err:true }
+  ];
+  if (t.level === "slow" && t.endpoint.indexOf("longTimeTask") >= 0) return [
+    { op:"GET:/longTimeTask", type:"Entry", start:0, dur:6280, err:false },
+    { op:"Thread.sleep (Local)", type:"Local", start:12, dur:6120, err:false }
+  ];
+  if (t.level === "normal") return [
+    { op:"GET:/queryDbByMybatis", type:"Entry", start:0, dur:83, err:false },
+    { op:"HikariCP/getConnection", type:"Exit", start:10, dur:9, err:false },
+    { op:"Mysql/PreparedStatement/executeQuery", type:"Exit", start:26, dur:41, err:false }
+  ];
+  return [
+    { op:"GET:/api/order/{id}", type:"Entry", start:0, dur:4120, err:false },
+    { op:"OrderService.load (Local)", type:"Local", start:40, dur:120, err:false },
+    { op:"HikariCP/getConnection", type:"Exit", start:12, dur:74, err:false },
+    { op:"Mysql/PreparedStatement/executeQuery", type:"Exit", start:96, dur:198, err:false },
+    { op:"Redis/GET order:cache", type:"Exit", start:300, dur:20, err:false },
+    { op:"grpc/InventoryService/Deduct", type:"Exit", start:336, dur:3620, err:false },
+    { op:"grpc/InventoryService/Deduct inner retry", type:"Exit", start:720, dur:3180, err:false }
+  ];
+}
+
+/* ============================================================
+   3) 变体 A —— APM 控制台（SkyWalking 门面）
+   ============================================================ */
+function renderA(){
+  var d = D, L = dlabels(d.times, 10);
+  var kpis = '<div class="kpi-row">' +
+    kpi("近 1h 请求数", fmtInt(d.lastHourReq), "24h 累计 "+fmtInt(d.gSum.req)) +
+    kpi("近 1h 错误率", pct(d.lastHourReq ? d.lastHourErr/d.lastHourReq : 0), "24h "+fmtInt(d.gSum.err)+" 次错误", "") +
+    kpi("P95 延迟", fmtMs(d.gSum.p95), "P99 "+fmtMs(d.gSum.p99)) +
+    kpi("慢调用(24h)", fmtInt(d.gSum.slow), pct(d.gSum.slowRate)+" 占比", "", "") +
+    kpi("活跃 Endpoint", d.eps.length, "服务 demo-app") +
+    kpi("H2 落盘", d.storage.h2.rows ? "在线" : "关闭", fmtInt(d.storage.h2.rows)+" 行 · "+d.storage.h2.sizeMB+" MB") +
+    '</div>';
+
+  var main = '<div class="grid2">' +
+    card("响应时间分位数趋势 · 近 24h",
+      lineChart({ w:660, h:210, min:0, xlabels:L, yfmt:function(v){ return v>=1000?(v/1000).toFixed(0)+"s":Math.round(v); },
+        bands:[ { upper:ds(d.gP99,10), lower:ds(d.gP90,10), color:"#fb7185", opacity:.14 },
+                { upper:ds(d.gP95,10), lower:ds(d.gP50,10), color:"#38bdf8", opacity:.16 } ],
+        series:[ { values:ds(d.gP50,10), color:"#38bdf8" }, { values:ds(d.gP99,10), color:"#fb7185", width:1.6, dash:true } ] }) +
+      '<div class="legend"><span><i style="background:#38bdf8"></i>P50</span><span><i style="background:rgba(56,189,248,.35)"></i>P50–P95</span><span><i style="background:rgba(251,113,133,.35)"></i>P90–P99</span><span><i style="background:#fb7185"></i>P99</span></div>') +
+    card("吞吐 / 错误 · 近 24h",
+      lineChart({ w:300, h:210, min:0, xlabels:L,
+        series:[ { values:ds(d.gReq,10), color:"#38bdf8", fill:true }, { values:ds(d.gErr,10).map(function(v){return v*12;}), color:"#fb7185", width:1.6 } ] }) +
+      '<div class="legend"><span><i style="background:#38bdf8"></i>请求量/分钟</span><span><i style="background:#fb7185"></i>错误×12</span></div>') +
+    '</div>';
+
+  var rows = d.eps.slice().sort(function(a,b){ return b.sum.req - a.sum.req; }).map(function(e){
+    var level = e.sum.errRate > .1 ? "error" : (e.sum.slowRate > .15 ? "slow" : "normal");
+    return '<tr><td class="mono" title="'+esc(e.name)+'">'+esc(e.name)+'</td>'+
+      '<td class="num">'+fmtInt(e.sum.req)+'</td>'+
+      '<td class="num '+(e.sum.errRate>.05?"lv error":"")+'">'+pct(e.sum.errRate)+'</td>'+
+      '<td class="num">'+fmtMs(e.sum.p50)+'</td>'+
+      '<td class="num">'+fmtMs(e.sum.p95)+'</td>'+
+      '<td class="num">'+fmtMs(e.sum.p99)+'</td>'+
+      '<td class="num">'+fmtInt(e.sum.slow)+'</td>'+
+      '<td style="width:110px">'+sparkline(e.sum.spark, level === "error" ? "#fb7185" : (level === "slow" ? "#fbbf24" : "#38bdf8"))+'</td>'+
+      '<td>'+pill(level.toUpperCase(), level)+'</td></tr>';
+  }).join("");
+
+  var top = d.traces[0];
+  var pane = card("链路下钻 · "+shortId(top.id),
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+
+      pill(top.level.toUpperCase(), top.level) + pill(top.endpoint, "info") + pill(fmtMs(top.dur), "mute") + pill(top.segs+" segment", "mute")+'</div>'+
+    timelineHtml(traceSpans(top)));
+
+  var table = card("Endpoint 指标（24h）",
+    '<table class="tbl"><thead><tr><th>Endpoint</th><th class="num">请求</th><th class="num">错误率</th><th class="num">P50</th>'+
+    '<th class="num">P95</th><th class="num">P99</th><th class="num">慢</th><th>趋势</th><th>分级</th></tr></thead><tbody>'+rows+'</tbody></table>');
+
+  return '<div class="vA pv"><div class="wrap">'+
+    '<aside class="rail">'+
+      '<div class="brand"><div class="logo">天</div><div><h1>天枢观测台</h1><p>TIANSHU · SINGLE-APP</p></div></div>'+
+      '<div class="rail-h">应用</div>'+
+      '<div class="svc"><span>demo-app</span>'+pill("UP","ok")+'</div>'+
+      '<div class="rail-h">Endpoint（按延迟）</div>'+
+      d.eps.slice().sort(function(a,b){ return b.sum.p95 - a.sum.p95; }).map(function(e,i){
+        return '<div class="ep '+(i===0?"on":"")+'">'+esc(e.name)+'</div>';
+      }).join("")+
+      '<div class="rail-h">数据面</div>'+
+      '<div class="ep">H2 file · '+d.storage.h2.sizeMB+' MB</div>'+
+      '<div class="ep">环形载荷 · '+d.storage.capped.usedMB+'/'+d.storage.capped.capMB+' MB</div>'+
+      '<div class="ep">影子对账 · 差异 '+d.storage.parity.diffs+'</div>'+
+    '</aside>'+
+    '<div class="main">'+
+      '<div class="head"><h2>demo-app · Trace 指标</h2>'+
+        '<span class="meta"><span class="dot live" style="background:#34d399"></span>实时 · 3s</span>'+
+        '<span class="seg"><span>1h</span><span>6h</span><span class="on">24h</span><span>7d</span></span>'+
+        '<span class="meta">'+esc(d.instance)+'</span></div>'+
+      kpis + main + table +
+      '<div style="height:14px"></div>' + pane +
+    '</div>'+
+  '</div></div>';
+}
+
+/* ============================================================
+   4) 变体 B —— 单应用体检（Glowroot 门面）
+   ============================================================ */
+function renderB(){
+  var d = D, L = dlabels(d.times, 10);
+  var errRate = d.lastHourReq ? d.lastHourErr / d.lastHourReq : 0;
+  var health = Math.max(0, Math.round(100 - errRate*220 - Math.min(d.gSum.p95/20, 24)));
+
+  var hero = '<div class="hero">'+
+    card("", gauge(health, 100, health, "健康评分", health > 85 ? "var(--ok)" : (health > 65 ? "var(--warn)" : "var(--err)"))) +
+    card("应用脉搏", '<div class="gauges">'+
+      gauge(d.gSum.p95, 1200, fmtMs(d.gSum.p95), "P95 响应", "var(--ac)") +
+      gauge(errRate*100, 15, pct(errRate,1), "错误率", "var(--err)") +
+      gauge(d.gSum.slowRate*100, 30, pct(d.gSum.slowRate,1), "慢调用占比", "var(--warn)") +
+      gauge(d.storage.capped.usedMB, d.storage.capped.capMB, d.storage.capped.usedMB+"MB", "环形载荷占用", "var(--ac)") +
+    '</div>')+
+  '</div>';
+
+  var band = card("响应时间分布 · 近 24h（P50 / P90 / P99）",
+    lineChart({ w:660, h:200, min:0, xlabels:L, yfmt:function(v){ return v>=1000?(v/1000).toFixed(0)+"s":Math.round(v); },
+      bands:[ { upper:ds(d.gP99,10), lower:ds(d.gP90,10), color:"#dc2626", opacity:.12 },
+              { upper:ds(d.gP95,10), lower:ds(d.gP50,10), color:"#0e9f6e", opacity:.15 } ],
+      series:[ { values:ds(d.gP50,10), color:"#0e9f6e" }, { values:ds(d.gP99,10), color:"#dc2626", dash:true, width:1.6 } ] }) +
+    '<div class="legend"><span><i style="background:#0e9f6e"></i>P50</span><span><i style="background:rgba(14,159,110,.35)"></i>P50–P95</span><span><i style="background:rgba(220,38,38,.3)"></i>P90–P99</span><span><i style="background:#dc2626"></i>P99</span></div>');
+
+  var errors = card("错误与慢调用 · 近 24h",
+    lineChart({ w:300, h:200, min:0, xlabels:L,
+      series:[ { values:ds(d.gErr,10), color:"#dc2626", fill:true }, { values:ds(d.gSlow,10), color:"#d97706", fill:true } ] }) +
+    '<div class="legend"><span><i style="background:#dc2626"></i>错误</span><span><i style="background:#d97706"></i>慢调用</span></div>');
+
+  var tx = card("事务（Transactions）· 按总耗时排序",
+    '<table class="tbl"><thead><tr><th>事务 / Endpoint</th><th class="num">请求</th><th class="num">总耗时</th><th class="num">均值</th><th class="num">P95</th><th class="num">最大</th><th>分级</th></tr></thead><tbody>'+
+    d.eps.slice().sort(function(a,b){ return (b.sum.req*b.sum.p95) - (a.sum.req*a.sum.p95); }).map(function(e){
+      var level = e.sum.errRate > .1 ? "error" : (e.sum.slowRate > .15 ? "slow" : "normal");
+      return '<tr><td class="mono">'+esc(e.name)+'</td><td class="num">'+fmtInt(e.sum.req)+'</td>'+
+        '<td class="num">'+fmtMs(e.sum.req*e.sum.p95)+'</td><td class="num">'+fmtMs(e.sum.p50)+'</td>'+
+        '<td class="num">'+fmtMs(e.sum.p95)+'</td><td class="num">'+fmtMs(e.sum.max)+'</td>'+
+        '<td>'+pill(level.toUpperCase(), level)+'</td></tr>';
+    }).join("")+'</tbody></table>');
+
+  var recent = card("最近慢 / 错链路",
+    '<div style="display:flex;flex-direction:column;gap:11px">'+
+    d.traces.filter(function(t){ return t.level !== "normal"; }).map(function(t){
+      return '<div><div style="display:flex;gap:8px;align-items:center;margin-bottom:5px">'+
+        pill(t.level.toUpperCase(), t.level)+'<span class="mono" style="font-size:12px">'+esc(shortId(t.id))+'</span>'+
+        '<span style="color:var(--mut);font-size:12px">'+esc(t.endpoint)+' · '+fmtMs(t.dur)+' · '+hhmmss(t.at)+'</span></div>'+
+        timelineHtml(traceSpans(t))+'</div>';
+    }).join("")+'</div>');
+
+  var store = card("存储与保留（OAP-less 本地持久化）",
+    '<table class="tbl"><tbody>'+
+    '<tr><td>H2 明细（error/slow）</td><td class="num">'+fmtInt(d.storage.h2.rows)+' 行 · '+d.storage.h2.sizeMB+' MB</td></tr>'+
+    '<tr><td>保留策略</td><td class="num">error '+d.storage.h2.ttl.error+' / slow '+d.storage.h2.ttl.slow+' / normal 仅内存</td></tr>'+
+    '<tr><td>环形载荷文件</td><td class="num">'+d.storage.capped.usedMB+' / '+d.storage.capped.capMB+' MB（硬封顶）</td></tr>'+
+    '<tr><td>写队列</td><td class="num">深度 '+d.storage.queue.depth+' / '+fmtInt(d.storage.queue.cap)+' · 丢弃 '+d.storage.queue.dropped+'</td></tr>'+
+    '<tr><td>内存热层</td><td class="num">'+fmtInt(d.storage.hot.used)+' / '+fmtInt(d.storage.hot.cap)+' trace（FIFO）</td></tr>'+
+    '<tr><td>影子对账</td><td class="num">检查 '+fmtInt(d.storage.parity.checked)+' · 差异 '+d.storage.parity.diffs+'</td></tr>'+
+    '</tbody></table>');
+
+  return '<div class="vB pv"><div class="wrap">'+
+    '<div class="head"><div class="logo">天</div><div><h2>天枢观测台 · demo-app 体检</h2><p>OAP-less · 单进程自观测 · 数据与展示解耦</p></div>'+
+      '<div class="right">'+esc(d.instance)+'<br>updated '+hhmmss(NOW)+' · 模拟数据</div></div>'+
+    hero +
+    '<div class="grid2">'+band+errors+'</div>'+
+    '<div class="cols">'+tx+recent+'</div>'+
+    store +
+  '</div></div>';
+}
+
+/* ============================================================
+   5) 变体 C —— 指挥台 · 品牌主页（自创品牌 + 定位差异）
+   ============================================================ */
+function renderC(){
+  var d = D;
+  var heatRows = d.eps.slice(0, 6);
+  var cols = 48, step = N / cols;
+  var timeLabels = [];
+  for (var c = 0; c < cols; c++) timeLabels.push(c % 6 === 0 ? hhmm(d.times[Math.floor(c*step)]) : "");
+  var heat = heatmapHtml(heatRows, cols, function(rw, i){
+    var a = Math.floor(i*step), b = Math.floor((i+1)*step), s = 0, n = 0;
+    for (var k = a; k < b && k < N; k++){ s += rw.p95[k]; n++; }
+    return n ? s/n : 0;
+  }, timeLabels);
+
+  var tiles = '<div class="tiles">'+
+    '<div class="tile"><div class="t-l">24h 请求总量</div><div class="t-v">'+fmtInt(d.gSum.req)+'</div><div class="t-s">峰值 '+fmtInt(Math.max.apply(null, d.gReq))+' / 分钟</div></div>'+
+    '<div class="tile"><div class="t-l">错误率</div><div class="t-v" style="background:linear-gradient(90deg,#fb7185,#f472b6);-webkit-background-clip:text;background-clip:text">'+pct(d.gSum.errRate)+'</div><div class="t-s">'+fmtInt(d.gSum.err)+' 次错误</div></div>'+
+    '<div class="tile"><div class="t-l">P95 / P99</div><div class="t-v">'+fmtMs(d.gSum.p95)+'</div><div class="t-s">P99 '+fmtMs(d.gSum.p99)+'</div></div>'+
+    '<div class="tile"><div class="t-l">慢调用</div><div class="t-v" style="background:linear-gradient(90deg,#fbbf24,#fb923c);-webkit-background-clip:text;background-clip:text">'+fmtInt(d.gSum.slow)+'</div><div class="t-s">'+pct(d.gSum.slowRate)+' 占比</div></div>'+
+    '<div class="tile"><div class="t-l">持久化磁盘</div><div class="t-v">'+(d.storage.h2.sizeMB+d.storage.capped.usedMB).toFixed(1)+'M</div><div class="t-s">H2 + 环形（硬封顶 128M）</div></div>'+
+    '<div class="tile"><div class="t-l">影子对账差异</div><div class="t-v" style="background:linear-gradient(90deg,#34d399,#22d3ee);-webkit-background-clip:text;background-clip:text">'+d.storage.parity.diffs+'</div><div class="t-s">'+fmtInt(d.storage.parity.checked)+' 条已核对</div></div>'+
+    '</div>';
+
+  var hero = '<div class="hero-brand">'+
+    '<div><div class="lockup"><div class="mark">天</div><div><h2>天枢观测台</h2><div class="en">TianShu · OAPless Observability</div></div></div>'+
+      '<p class="tagline">把全链路与指标留在应用进程内 —— 不部署 OAP、不依赖外部后端，单应用即可跨重启回溯、审计与聚合。<br>本原型展示 <b>基于 Trace 的指标面</b>：请求数、错误率、慢调用与 P50–P99 分位数。</p></div>'+
+    '<div class="diff">'+
+      '<div class="row"><span class="chk">◆</span><b>OAP-less 自足</b>：零后端、单进程内持久化</div>'+
+      '<div class="row"><span class="chk">◆</span><b>分级持久化</b>：error 7d / slow 24h / normal 仅内存</div>'+
+      '<div class="row"><span class="chk">◆</span><b>磁盘可预测</b>：H2 header + 环形封顶载荷</div>'+
+      '<div class="row"><span class="chk">◆</span><b>数据与展示解耦</b>：只出标准化 Map，外部任意消费</div>'+
+    '</div></div>';
+
+  var matrix = '<div class="glass"><h3 class="card-h" style="margin:0 0 12px">自研定位 · 与对标产品差异</h3>'+
+    '<table class="matrix"><thead><tr><th>能力</th><th>天枢（本方案）</th><th>SkyWalking</th><th>Glowroot</th></tr></thead><tbody>'+
+    '<tr><td>部署依赖</td><td class="yes">零后端 / OAP-less</td><td class="no">OAP + 存储 + UI</td><td class="yes">单进程</td></tr>'+
+    '<tr><td>数据形态</td><td class="yes">Trace 指标 + 分级明细</td><td class="yes">全量 APM</td><td class="no">JVM / 事务为主</td></tr>'+
+    '<tr><td>与宿主 API 边界</td><td class="yes">仅 JDK 原生 Map</td><td class="no">gRPC 上报</td><td class="no">内嵌 UI</td></tr>'+
+    '<tr><td>可嵌入既有 Agent</td><td class="yes">SkyWalking 插件</td><td class="no">独立系统</td><td class="no">独立 agent</td></tr>'+
+    '<tr><td>展示层</td><td class="yes">数据 API，可对接 Grafana/IDE</td><td class="no">自带 UI</td><td class="no">自带 UI</td></tr>'+
+    '</tbody></table></div>';
+
+  var heatCard = '<div class="glass"><h3 class="card-h" style="margin:0 0 12px">Endpoint × 时间 · P95 热力图（近 24h）</h3>'+heat+'</div>';
+
+  var incidents = '<div class="glass"><h3 class="card-h" style="margin:0 0 12px">异常事件时间线</h3>'+
+    '<div style="display:flex;flex-direction:column;gap:12px">'+
+    d.incidents.map(function(ev){
+      return '<div style="display:flex;gap:12px;align-items:flex-start">'+
+        '<div style="min-width:66px;font-family:var(--mono);color:var(--mut);font-size:12px">'+hhmmss(ev.at)+'</div>'+
+        '<div>'+pill(ev.level.toUpperCase(), ev.level)+' <b style="font-size:13px">'+esc(ev.title)+'</b>'+
+        '<div style="color:var(--mut);font-size:12.5px;line-height:1.6;margin-top:4px">'+esc(ev.desc)+'</div></div></div>';
+    }).join("")+'</div></div>';
+
+  var dataplane = '<div class="glass"><h3 class="card-h" style="margin:0 0 12px">数据面健康</h3>'+
+    '<table class="tbl"><tbody>'+
+    '<tr><td>H2 明细（file）</td><td class="num">'+fmtInt(d.storage.h2.rows)+' 行 · '+d.storage.h2.sizeMB+' MB</td></tr>'+
+    '<tr><td>环形载荷</td><td class="num">'+d.storage.capped.usedMB+' / '+d.storage.capped.capMB+' MB · 覆盖 '+fmtInt(d.storage.capped.overwritten)+'</td></tr>'+
+    '<tr><td>写队列 / 丢弃</td><td class="num">'+d.storage.queue.depth+' / '+fmtInt(d.storage.queue.cap)+' · '+d.storage.queue.dropped+'</td></tr>'+
+    '<tr><td>内存热层</td><td class="num">'+fmtInt(d.storage.hot.used)+' / '+fmtInt(d.storage.hot.cap)+' trace</td></tr>'+
+    '<tr><td>分级保留</td><td class="num">error '+d.storage.h2.ttl.error+' · slow '+d.storage.h2.ttl.slow+' · normal 内存</td></tr>'+
+    '</tbody></table></div>';
+
+  var top = d.traces[0];
+  var drill = '<div class="glass"><h3 class="card-h" style="margin:0 0 12px">链路下钻 · '+esc(shortId(top.id))+'</h3>'+
+    '<div style="display:flex;gap:6px;margin-bottom:10px">'+pill(top.level.toUpperCase(), top.level)+pill(top.endpoint,"info")+pill(fmtMs(top.dur),"mute")+'</div>'+
+    timelineHtml(traceSpans(top))+'</div>';
+
+  return '<div class="vC pv"><div class="wrap">'+
+    hero + tiles +
+    '<div class="grid2" style="grid-template-columns:1.65fr 1fr">'+heatCard+matrix+'</div>'+
+    '<div class="cols" style="grid-template-columns:1.3fr 1fr">'+drill+dataplane+'</div>'+
+    '<div style="height:14px"></div>'+incidents+
+  '</div></div>';
+}
+
+/* ============================================================
+   6) 切换器（?variant= + ← →）
+   ============================================================ */
+var VARIANTS = [
+  { key:"A", name:"应用控制台", render:renderA,
+    q:"<b>A · 门面方案</b>｜左树右图，借鉴 SkyWalking UI 的层级导航与分位数趋势，适合作为单体应用的自观测门面。" },
+  { key:"B", name:"单应用体检", render:renderB,
+    q:"<b>B · 自足方案</b>｜无导航单页体检，借鉴 Glowroot 的仪表盘，突出『无需 OAP、单进程自观测』。" },
+  { key:"C", name:"指挥台 · 品牌主页", render:renderC,
+    q:"<b>C · 品牌方案</b>｜霓虹指挥台 + 热力图 + 定位差异矩阵，用于讲清自研价值与专属品牌。" }
+];
+
+function currentKey(){
+  var k = (new URLSearchParams(location.search).get("variant") || "A").toUpperCase();
+  return VARIANTS.some(function(v){ return v.key === k; }) ? k : "A";
+}
+function idxOf(k){ for (var i = 0; i < VARIANTS.length; i++) if (VARIANTS[i].key === k) return i; return 0; }
+
+function render(){
+  var k = currentKey(), v = VARIANTS[idxOf(k)];
+  document.getElementById("app").innerHTML = v.render();
+  document.getElementById("proto-q").innerHTML = v.q;
+  document.getElementById("sw-k").textContent = v.key;
+  document.getElementById("sw-n").textContent = v.name;
+  document.title = "天枢观测台 · " + v.name + "（原型）";
+}
+function go(delta){
+  var i = (idxOf(currentKey()) + delta + VARIANTS.length) % VARIANTS.length;
+  history.replaceState(null, "", "?variant=" + VARIANTS[i].key);
+  render();
+  window.scrollTo({ top:0, behavior:"smooth" });
+}
+document.getElementById("sw-prev").addEventListener("click", function(){ go(-1); });
+document.getElementById("sw-next").addEventListener("click", function(){ go(1); });
+document.addEventListener("keydown", function(e){
+  var t = e.target, tag = (t && t.tagName) || "";
+  if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+  if (e.key === "ArrowLeft") { go(-1); } else if (e.key === "ArrowRight") { go(1); }
+});
+window.addEventListener("popstate", render);
+render();
+</script>
+</body>
+</html>
