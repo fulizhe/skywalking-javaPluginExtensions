@@ -127,6 +127,36 @@ consume(data):
 
 ---
 
+## 9. 实证补充：跨线程 ⇒ 新段（`@CrossThread` / servlet async）
+
+**问题**：`afterFinished(TraceSegment)` 里的段，是否包含"整条链路"？—— **否**。每次回调只给**一条** segment，且只含产生它的那个线程在一次 trace 上下文里的 span；一条 trace 有 N 条段 ⇒ 触发 N 次回调，任何一次都拿不到整链。
+
+**实证（本机 agent 9.4.0 反编译）**：跨线程包装（`@TraceCrossThread` / `RunnableWrapper` / `CallableWrapper`）由 `CallableOrRunnableInvokeInterceptor` 实现，其 `beforeMethod` 调用：
+
+- `ContextManager.createLocalSpan(...)`
+- `ContextManager.continued(ContextSnapshot)` —— 在**工作线程**上续接父上下文 ⇒ **新建 segment**（带 ref 指回父段的 `spanId`）。
+
+| 回调 | 段内 span |
+|---|---|
+| 入口段（Tomcat 线程）`afterFinished` | 入口 span + 该线程**同步**工作；**无**异步线程 span |
+| 异步段（线程池线程）`afterFinished` | 异步 Local span（**独立**触发，可能晚很多） |
+
+**Servlet 3 async 的特殊点（待实测）**：agent 里存在 `ContextManager.awaitFinishAsync(AbstractSpan)` ⇒ SW 对 servlet 异步**有专门支持**，**入口 span 保持到异步完成才结束**，故**入口段 duration 可覆盖整个异步请求**。但"异步线程新产生的 span 落在哪条段"取决于容器重新 dispatch 时上下文如何恢复——**本稿不断言，需实测确认**。
+
+**对 (a1) 的影响**：
+
+- 这是 (a1) 的论据：回调本就**逐段**，就应在**入口段**上算事务指标，而非指望某次回调拿到整链。
+- 待确认：**入口 span 的 duration 是否覆盖异步等待**——servlet-async（`awaitFinishAsync`）覆盖；纯线程池 fire-and-forget **不覆盖**（入口段随 HTTP 线程返回即结束），与 Glowroot 把 async 单独归属同义，非误差。
+- "整链"只有**合并后**才存在；merge 可归集段，但跨段父子结构**缺 `refs`**（§2）。
+
+**自验方法（用现有工具，不靠文档）**：跑 `/helloAsync3`（`HelloService.java:172-180` 的 `@TraceCrossThread`）与 **`/helloAsyncServlet`**（Servlet 3 `request.startAsync()` + 子线程 `@TraceCrossThread`，`HelloController.java:131-139` 与 `:223-247`；本次新增）→ `queryTrace(traceId).logs` 看**段条数**、看各段 span 的 `spanType`（异步 Local span 是**在入口段内**还是**自成一段**）。
+
+> **demo 样例**：`HelloController` 原有 `/helloAsync`（Spring `@Async`）、`/helloAsync2`（`RunnableWrapper`）、`/helloAsync3`（`@TraceCrossThread` + 裸线程），**缺 Servlet 3 async**；本次补 `/helloAsyncServlet`，代表"Servlet 3 async + 跨线程续接"这条链路。
+>
+> **复现 / 调试步骤**：见 [`h2化-phase5-metrics-异步链路调试说明.md`](h2化-phase5-metrics-异步链路调试说明.md)。
+
+---
+
 ## 附：本讨论涉及的关键代码锚点
 
 | 主题 | 位置 |
@@ -138,3 +168,7 @@ consume(data):
 | `refs` 丢弃 | `SegmentLogConverter.java:26` · `Log.java:92` |
 | 有界 FIFO 淘汰 | `KeyedLocalStore.java:37,61` |
 | H2 按 traceId 聚回整链 | `H2TraceSegmentStorage.java:498` |
+| 跨线程续接 → 新段（`continued`） | agent `activations/apm-toolkit-trace-activation-9.4.0.jar` · `CallableOrRunnableInvokeInterceptor` |
+| servlet-async 保持入口 span | agent `skywalking-agent.jar` · `ContextManager.awaitFinishAsync` |
+| `@TraceCrossThread` demo 用法 | `HelloService.java:172-180` |
+| Servlet 3 async demo 样例（新增） | `HelloController.java:131-139`（`/helloAsyncServlet`）· `:223-247`（`AsyncServletTask`） |
