@@ -79,7 +79,12 @@
 
 每次错误请求 → 插件**同步 POST 回同一个 app** 的 `/inner/sw/trace-alert` → 该 POST 又被 agent 采集 → 有效流量被放大，Eden 高分配率相当部分来自这条自环（webhook body＝整个 trace JSON）。接收端 `TraceAlertWebhookStore`（`agent/demo-app/.../tracealert/TraceAlertWebhookStore.java`）`MAX_EVENTS=50`，有界。
 
-> 要纯粹观测**指标聚合**稳定性，压测别带 error 端点或关 `alert.enabled`；要压**告警链路**再保留。
+## 压测姿势：指标稳定性与告警稳定性要分开压
+
+- 想纯粹看**指标聚合**稳定性：压测别带 error 端点（`-Paths` 只给正常端点）或关掉 `alert.enabled`。
+- 想压**告警链路**：保留 error 端点 + `alert.enabled`。
+- ⚠️ **当前默认两者混在一起**（`run-with-agent.ps1` 起应用时开了 alert；`HttpLoadTest` 默认路径含 error 端点），所以指标与告警的稳定性是**耦合观测**的——Eden 高分配率与 `NotifiedFlagsCache` 的增长里有很大一部分来自告警/webhook，不能单独归因给指标聚合。
+- 佐证：`stress.ps1 -StartApp` 自己启动应用时**不带 alert**（swArgs 仅 `javaagent + keep_tracing + h2.enabled`），即"纯指标"路径；而本次观测的 PID 13644 是 `run-with-agent.ps1` 起的（alert 开），才出现 ERROR webhook 自环。
 
 ## 插件侧结构有界性清单
 
@@ -95,7 +100,10 @@
 | webhook 监听器（`alert/HttpTraceAnomalyListener.java`） | 单线程同步 | **不新建线程** |
 | 插件常驻线程 | 3 个（`H2Shadow-Writer`/`LogfileTraceAlert`/`TraceMetrics-Flush`） | O(1)；`STARTED-COUNT=6063` 多为 Tomcat/JIT/Arthas |
 
-两个真实增长点：**① `NotifiedFlagsCache` 无 `maximumSize`**；**② 端点基数×蓄水池**（真实应用 URL 带 path 变量冲到 500 上限时，最坏 ~80MB 样本数组 + 分钟表行数 ×500；本压测端点固定 7 个，故 `endpointOverflow=0` 观察不到）。
+### 两个真实增长点（详情）
+
+1. **`NotifiedFlagsCache` 无 `maximumSize`**（见上表）：≈ QPS×600s，随 QPS 线性增长。
+2. **端点基数 × 蓄水池**：真实应用 URL 带 path 变量时，端点会冲到 `MAX_ENDPOINTS_PER_BUCKET=500`（`endpointOverflow` 此时才开始计数）；则 `4×501×40KB ≈ 80MB` 仅为样本数组（每键一个 `long[5000]`），且分钟表行数 ×500。**当前压测端点是固定的 7 个，所以 `endpointOverflow=0`，观察不到这个上限。**
 
 ## 建议
 
