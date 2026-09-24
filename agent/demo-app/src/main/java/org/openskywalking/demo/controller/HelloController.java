@@ -17,11 +17,15 @@
 
 package org.openskywalking.demo.controller;
 
+import java.io.IOException;
+
+import javax.servlet.AsyncContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.skywalking.apm.toolkit.trace.ActiveSpan;
 import org.apache.skywalking.apm.toolkit.trace.TraceContext;
+import org.apache.skywalking.apm.toolkit.trace.TraceCrossThread;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -124,6 +128,16 @@ public class HelloController {
 		return "helloAsync2";
 	}
 
+	@ApiOperation(value = "Servlet3 异步 + @TraceCrossThread", notes = "request.startAsync() 后交给子线程处理, 子线程用 @TraceCrossThread 续接父上下文")
+	@ApiOperationSupport(order = 14)
+	@GetMapping("/helloAsyncServlet")
+	public void helloAsyncServlet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+		final AsyncContext asyncContext = request.startAsync();
+		asyncContext.setTimeout(10_000L);
+		Console.log("### servlet3 async started, CURRENT THREAD NAME : 【 {} 】", Thread.currentThread().getName());
+		new Thread(new AsyncServletTask(asyncContext, response)).start();
+	}
+
 	@ApiOperation(value = "查询数据库-Mybatis", notes = "查询数据库-Mybatis")
 	@ApiOperationSupport(order = 6)
 	@GetMapping("/queryDbByMybatis")
@@ -204,5 +218,32 @@ public class HelloController {
 
 		return "@PathVariable";
 
+	}
+
+	@TraceCrossThread
+	private static class AsyncServletTask implements Runnable {
+
+		private final AsyncContext asyncContext;
+
+		private final HttpServletResponse response;
+
+		AsyncServletTask(AsyncContext asyncContext, HttpServletResponse response) {
+			this.asyncContext = asyncContext;
+			this.response = response;
+		}
+
+		@Override
+		public void run() {
+			Console.log("### servlet3 async task running, CURRENT THREAD NAME : 【 {} 】", Thread.currentThread().getName());
+			try {
+				ThreadUtil.safeSleep(RandomUtil.randomLong(200, 800));
+				response.getWriter().write("helloAsyncServlet|traceId=" + TraceContext.traceId() + "|segmentId="
+						+ TraceContext.segmentId() + "|thread=" + Thread.currentThread().getName());
+			} catch (Exception e) {
+				LoggerFactory.getLogger(this.getClass()).error("async servlet task failed", e);
+			} finally {
+				asyncContext.complete();
+			}
+		}
 	}
 }

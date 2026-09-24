@@ -57,7 +57,23 @@ public class StatisticController {
     /** 按 traceId 从 H2/环形文件取回整条链路(与旧 data[traceId].logs 同契约),供人工查看 */
     @GetMapping("/inner/sw/trace-query")
     public Object traceQuery(@RequestParam("traceId") String traceId) {
-        return SWTraceParityUtils.queryTrace(traceId);
+        Object result = SWTraceParityUtils.queryTrace(traceId);
+        if (result instanceof Map) {
+            loadComponentMapIfNeeded();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+            Object logsObj = ((Map<?, ?>) result).get("logs");
+            if (logsObj instanceof Iterable) {
+                for (Object log : (Iterable<?>) logsObj) {
+                    if (log instanceof Map) {
+                        Object spansObj = ((Map<?, ?>) log).get("spans");
+                        if (spansObj instanceof Iterable) {
+                            enrichSpans((Map<String, Object>) log, (Iterable<?>) spansObj, sdf);
+                        }
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     /** 最近 N 条 segment header(供挑选 traceId) */

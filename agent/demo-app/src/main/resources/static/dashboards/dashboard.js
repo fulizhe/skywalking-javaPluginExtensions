@@ -124,7 +124,7 @@ RENDER.statistic = function (results, box) {
     panel.appendChild(el("h3", null, "trace 缓存表(点击行展开 span 时间线)"));
     var table = el("table");
     var thead = el("thead");
-    thead.innerHTML = "<tr><th>traceId</th><th>segment</th><th>span</th><th>错误</th><th>操作</th><th>开始</th><th>结束</th></tr>";
+    thead.innerHTML = "<tr><th>traceId</th><th>segment</th><th>span</th><th>错误</th><th>操作</th><th>开始</th><th>结束</th><th>链路</th></tr>";
     table.appendChild(thead);
     var tbody = el("tbody");
     entries.slice(0, 200).forEach(function (e) {
@@ -138,8 +138,13 @@ RENDER.statistic = function (results, box) {
             "<td>" + logs.length + "</td><td>" + spans.length + "</td>" +
             "<td>" + (errs ? badge(errs + " 错误", "err") : "-") + "</td>" +
             "<td title='" + esc(ops.join(", ")) + "'>" + esc(ops.slice(0, 3).join(", ")) + (ops.length > 3 ? " …" : "") + "</td>" +
-            "<td class='mono'>" + esc(minStart(spans)) + "</td><td class='mono'>" + esc(maxEndReadable(e[1])) + "</td>";
+            "<td class='mono'>" + esc(minStart(spans)) + "</td><td class='mono'>" + esc(maxEndReadable(e[1])) + "</td>" +
+            "<td><button class='link-btn' type='button'>查看</button></td>";
         tr.appendChild(expandRow(e[0], logs));
+        tr.querySelector("button.link-btn").addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            openTraceModal(e[0]);
+        });
         tr.addEventListener("click", function () {
             var detail = tr.nextElementSibling;
             detail.style.display = detail.style.display === "none" ? "" : "none";
@@ -183,7 +188,7 @@ function expandRow(traceId, logs) {
     var tr = el("tr");
     tr.style.display = "none";
     var td = el("td");
-    td.colSpan = 7;
+    td.colSpan = 8;
     var spans = [];
     var spansBySeg = [];
     logs.forEach(function (l) {
@@ -643,6 +648,46 @@ function emptyBox(box) {
 function showHint(data, box) {
     box.innerHTML = "";
     box.appendChild(el("div", "empty", esc(data.hint || "插件未挂载或数据为空。")));
+}
+
+/* ---------------- 链路视图弹框(联动 dashboards/trace-view.html) ---------------- */
+
+function ensureTraceModal() {
+    var modal = document.getElementById("trace-modal");
+    if (modal) return modal;
+    modal = el("div", "trace-modal");
+    modal.id = "trace-modal";
+    modal.innerHTML =
+        "<div class='trace-modal-panel'>" +
+        "  <div class='trace-modal-bar'>" +
+        "    <span class='title' id='trace-modal-title'>链路视图</span>" +
+        "    <span class='spacer'></span>" +
+        "    <a id='trace-modal-open' href='#' target='_blank' rel='noopener'>新标签打开</a>" +
+        "    <button id='trace-modal-close' type='button'>关闭</button>" +
+        "  </div>" +
+        "  <iframe id='trace-modal-frame' src='about:blank'></iframe>" +
+        "</div>";
+    document.body.appendChild(modal);
+    modal.addEventListener("click", function (ev) { if (ev.target === modal) closeTraceModal(); });
+    modal.querySelector("#trace-modal-close").addEventListener("click", closeTraceModal);
+    document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closeTraceModal(); });
+    return modal;
+}
+
+function openTraceModal(traceId) {
+    var modal = ensureTraceModal();
+    var url = "trace-view.html?traceid=" + encodeURIComponent(traceId);
+    modal.querySelector("#trace-modal-title").textContent = "链路视图 · " + traceId;
+    modal.querySelector("#trace-modal-open").href = url;
+    modal.querySelector("#trace-modal-frame").src = url;
+    modal.style.display = "flex";
+}
+
+function closeTraceModal() {
+    var modal = document.getElementById("trace-modal");
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.querySelector("#trace-modal-frame").src = "about:blank";
 }
 
 /* ---------------- 启动 ---------------- */

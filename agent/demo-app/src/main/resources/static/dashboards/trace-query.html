@@ -37,6 +37,7 @@
 <div class="row">
   traceId: <input id="traceId" placeholder="点列表行自动填入，或手动粘贴">
   <button onclick="loadTrace()">查询整条链路</button>
+  <a id="viewLink" href="trace-view.html" target="_blank" style="margin-left:8px">可视化视图 →</a>
 </div>
 <div id="traceMsg" class="muted"></div>
 <pre id="traceDetail" style="display:none"></pre>
@@ -79,6 +80,7 @@ function loadRecent() {
 function loadTrace() {
   var traceId = document.getElementById("traceId").value.trim();
   if (!traceId) { document.getElementById("traceMsg").textContent = "请输入 traceId"; return; }
+  document.getElementById("viewLink").href = "trace-view.html?traceid=" + encodeURIComponent(traceId);
   fetch("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId))
     .then(function (r) { return r.json(); })
     .then(function (data) {

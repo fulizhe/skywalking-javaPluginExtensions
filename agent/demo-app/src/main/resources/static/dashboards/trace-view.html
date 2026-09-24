@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>H2 链路可视化（单条 Trace）</title>
+<script src="../lib/echarts.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #23272e; color: #eaeaea;
+               font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; }
+  .bar { padding: 10px 16px; background: #1c2027; border-bottom: 1px solid #333; display: flex;
+         flex-wrap: wrap; gap: 8px; align-items: center; position: sticky; top: 0; z-index: 10; }
+  .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; color: #7fd1ff; }
+  input { padding: 5px 8px; font-family: monospace; background: #2b313a; color: #eaeaea;
+          border: 1px solid #3d4650; border-radius: 4px; width: 360px; }
+  button { padding: 5px 12px; cursor: pointer; background: #3b82f6; color: #fff; border: 0;
+           border-radius: 4px; }
+  button.sec { background: #3d4650; }
+  button:hover { filter: brightness(1.12); }
+  .summary { margin-left: auto; color: #9aa4b2; font-size: 12px; font-family: monospace; }
+  .summary b { color: #eaeaea; }
+  .expired { color: #ff6b6b; font-weight: bold; }
+  .layout { display: flex; gap: 12px; padding: 12px 16px; align-items: flex-start; }
+  #recentPane { width: 380px; flex: 0 0 380px; max-height: 82vh; overflow: auto;
+                background: #1c2027; border: 1px solid #333; border-radius: 6px; }
+  #recentPane.collapsed { display: none; }
+  #recentPane h2 { font-size: 13px; margin: 8px 12px; color: #7fd1ff; }
+  #chart { flex: 1 1 auto; height: 82vh; min-width: 320px; background: #23272e;
+           border: 1px solid #333; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  #recentPane th, #recentPane td { border-bottom: 1px solid #2c333c; padding: 4px 8px; text-align: left; }
+  #recentPane th { position: sticky; top: 0; background: #232a33; color: #9aa4b2; }
+  #recentPane tr { cursor: pointer; }
+  #recentPane tr:hover { background: #2a313b; }
+  #spansWrap { padding: 0 16px 24px; }
+  #spansWrap h2 { font-size: 14px; color: #7fd1ff; }
+  #spanTable { background: #1c2027; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
+  #spanTable th, #spanTable td { border-bottom: 1px solid #2c333c; padding: 5px 8px; text-align: left;
+                                 font-family: monospace; white-space: nowrap; }
+  #spanTable th { background: #232a33; color: #9aa4b2; }
+  #spanTable tr { cursor: pointer; }
+  #spanTable tr:hover { background: #2a313b; }
+  .durbar { position: relative; height: 12px; background: #2c333c; border-radius: 3px; min-width: 120px; }
+  .durbar > span { position: absolute; top: 0; bottom: 0; background: #3b82f6; border-radius: 3px; }
+  .durbar.err > span { background: #e74c3c; }
+  .tag { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 11px; background: #2c333c; color: #9aa4b2; }
+  .tag.entry { background: #14532d; color: #86efac; }
+  .tag.exit { background: #4a2c14; color: #fdba74; }
+  .tag.local { background: #1e3a5f; color: #93c5fd; }
+  #detail-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9999; }
+  #detail-modal .modal-content { background: #1c2027; color: #eaeaea; border: 1px solid #3d4650;
+      border-radius: 8px; max-width: 760px; margin: 8vh auto; padding: 18px 22px; position: relative; }
+  #detail-modal .close-btn { position: absolute; right: 16px; top: 8px; font-size: 22px; color: #9aa4b2; cursor: pointer; }
+  #detail-modal pre { background: #12151a; color: #d7dde5; padding: 12px; border-radius: 4px;
+      overflow: auto; max-height: 60vh; font-size: 12px; }
+  .muted { color: #9aa4b2; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>H2 链路可视化</h1>
+  traceId <input id="traceId" placeholder="粘贴 traceId，或从右侧列表点选">
+  <button onclick="loadTrace()">查询</button>
+  <button class="sec" onclick="toggleRecent()">最近链路</button>
+  <span id="summary" class="summary"></span>
+</div>
+
+<div class="layout">
+  <div id="recentPane">
+    <h2>最近链路段（点选加载）</h2>
+    <table>
+      <thead><tr><th>traceId</th><th>segment</th><th>endpoint</th><th>ms</th></tr></thead>
+      <tbody id="recentBody"></tbody>
+    </table>
+  </div>
+  <div id="chart"></div>
+</div>
+
+<div id="spansWrap">
+  <h2>Span 明细（按时序）</h2>
+  <div id="spanTable">
+    <table>
+      <thead><tr>
+        <th>#</th><th>类型</th><th>组件</th><th>操作</th><th>段</th>
+        <th>开始</th><th>耗时</th><th>分布</th><th>错误</th>
+      </tr></thead>
+      <tbody id="spanBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="detail-modal">
+  <div class="modal-content">
+    <span class="close-btn" onclick="document.getElementById('detail-modal').style.display='none'">&times;</span>
+    <h3 id="modal-title">Span 详情</h3>
+    <pre id="modal-content"></pre>
+  </div>
+</div>
+
+<script>
+function esc(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function qp(name) { return new URLSearchParams(location.search).get(name); }
+
+/* 组件名兜底：componentName 为空或 Unknown 时，用 operationName 作为标签 */
+function compOf(sp) {
+  var c = sp.componentName;
+  if (!c || c === "Unknown") return "";
+  return c;
+}
+function labelOf(sp) {
+  return compOf(sp) || sp.operationName || "";
+}
+
+var chart = null;
+
+function flatten(logs) {
+  var spans = [];
+  var segIndex = {};
+  logs.forEach(function (seg, i) {
+    var segId = seg.traceSegmentId || ("seg" + i);
+    segIndex[segId] = i + 1;
+    (seg.spans || []).forEach(function (sp) {
+      spans.push(Object.assign({}, sp, { _seg: i + 1, _segId: segId }));
+    });
+  });
+  spans.sort(function (a, b) { return (a.startTime || 0) - (b.startTime || 0); });
+  return { spans: spans, segIndex: segIndex };
+}
+
+function typeClass(t) {
+  if (!t) return "";
+  var l = String(t).toLowerCase();
+  if (l.indexOf("entry") >= 0) return "entry";
+  if (l.indexOf("exit") >= 0) return "exit";
+  return "local";
+}
+function dur(sp) {
+  if (sp.startTime == null || sp.endTime == null) return null;
+  return Math.max(0, sp.endTime - sp.startTime);
+}
+function fmtMs(ms) { return ms == null ? "-" : ms + " ms"; }
+function fmtClock(ms) {
+  if (ms == null) return "-";
+  var d = new Date(ms);
+  function p(n, w) { return String(n).padStart(w || 2, "0"); }
+  return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "." + p(d.getMilliseconds(), 3);
+}
+
+function renderChart(spans) {
+  var nodes = spans.map(function (sp, idx) {
+    return {
+      id: "s" + idx,
+      name: labelOf(sp) || ("span" + idx),
+      symbolSize: 46,
+      itemStyle: {
+        color: sp.isError ? "#e74c3c" : "#3b82f6",
+        borderColor: sp.isError ? "#ffb3b3" : "#a3d8ff",
+        borderWidth: 3
+      },
+      label: { color: "#fff", fontSize: 11, overflow: "break", width: 120 },
+      raw: sp
+    };
+  });
+  var links = [];
+  for (var i = 1; i < nodes.length; i++) {
+    links.push({ source: "s" + (i - 1), target: "s" + i,
+                 lineStyle: { color: "#8a94a0", width: 2, curveness: 0.05 } });
+  }
+  if (!chart) { chart = echarts.init(document.getElementById("chart")); }
+  chart.setOption({
+    backgroundColor: "#23272e",
+    tooltip: {
+      trigger: "item",
+      formatter: function (p) {
+        if (p.dataType !== "node") return "";
+        var s = p.data.raw;
+        return "<b>" + esc(labelOf(s)) + "</b><br/>"
+          + "<span style='color:#9aa4b2'>" + esc(s.operationName) + "</span><br/>"
+          + "类型: " + esc(s.spanType) + "<br/>"
+          + "耗时: " + fmtMs(dur(s)) + "<br/>"
+          + "错误: " + (s.isError ? "<span style='color:#e74c3c'>是</span>" : "否");
+      }
+    },
+    series: [{
+      type: "graph",
+      layout: "force",
+      roam: true,
+      draggable: true,
+      data: nodes,
+      links: links,
+      label: { show: true },
+      force: { repulsion: 260, edgeLength: 110, gravity: 0.12 },
+      edgeSymbol: ["circle", "arrow"],
+      edgeSymbolSize: [4, 12],
+      lineStyle: { color: "#8a94a0", opacity: 0.85 },
+      emphasis: { focus: "adjacency", lineStyle: { width: 4 } }
+    }]
+  }, true);
+  chart.off("click");
+  chart.on("click", function (p) { if (p.dataType === "node") showDetail(p.data.raw); });
+}
+
+function renderTable(spans) {
+  var body = document.getElementById("spanBody");
+  body.innerHTML = "";
+  var t0 = spans.length ? (spans[0].startTime || 0) : 0;
+  var maxDur = spans.reduce(function (m, s) { return Math.max(m, dur(s) || 0); }, 1);
+  spans.forEach(function (sp, i) {
+    var d = dur(sp);
+    var pct = d == null ? 0 : Math.round(d / maxDur * 100);
+    var tr = document.createElement("tr");
+    tr.onclick = function () { showDetail(sp); };
+    tr.innerHTML =
+      "<td>" + (i + 1) + "</td>" +
+      "<td><span class='tag " + typeClass(sp.spanType) + "'>" + esc(sp.spanType || "?") + "</span></td>" +
+      "<td>" + esc(compOf(sp) || "-") + "</td>" +
+      "<td>" + esc(sp.operationName) + "</td>" +
+      "<td>" + (sp._seg || "") + "</td>" +
+      "<td>+" + ((sp.startTime || t0) - t0) + " ms</td>" +
+      "<td>" + fmtMs(d) + "</td>" +
+      "<td><div class='durbar" + (sp.isError ? " err" : "") + "'><span style='left:0;width:" + pct + "%'></span></div></td>" +
+      "<td>" + (sp.isError ? "<span class='expired'>Y</span>" : "N") + "</td>";
+    body.appendChild(tr);
+  });
+}
+
+function showDetail(sp) {
+  var lines = [];
+  lines.push("operationName = " + (sp.operationName || ""));
+  lines.push("component     = " + (compOf(sp) || "-") + " (id=" + (sp.componentId == null ? "" : sp.componentId) + ")");
+  lines.push("spanType      = " + (sp.spanType || "") + "   spanLayer = " + (sp.spanLayer || ""));
+  lines.push("spanId        = " + sp.spanId + "   parentSpanId = " + sp.parentSpanId);
+  lines.push("segment       = " + (sp._segId || ""));
+  lines.push("startTime     = " + (sp.startTimeReadable || sp.startTime));
+  lines.push("endTime       = " + (sp.endTimeReadable || sp.endTime));
+  lines.push("duration      = " + fmtMs(dur(sp)));
+  lines.push("isError       = " + (sp.isError ? "是" : "否"));
+  if (Array.isArray(sp.tagList) && sp.tagList.length) {
+    lines.push("");
+    lines.push("tagList:");
+    sp.tagList.forEach(function (t) { lines.push("  - " + t["tag-key"] + ": " + t["tag-value"]); });
+  }
+  if (Array.isArray(sp.logsList) && sp.logsList.length) {
+    lines.push("");
+    lines.push("logsList:");
+    sp.logsList.forEach(function (l, i) { lines.push("  [" + (i + 1) + "] " + l); });
+  }
+  document.getElementById("modal-content").innerText = lines.join("\n");
+  document.getElementById("detail-modal").style.display = "block";
+}
+
+function loadTrace() {
+  var traceId = document.getElementById("traceId").value.trim();
+  if (!traceId) { document.getElementById("summary").innerHTML = "<span class='expired'>请输入 traceId</span>"; return; }
+  document.getElementById("summary").textContent = "加载中…";
+  fetch("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      var logs = (data && data.logs) ? data.logs : [];
+      var flat = flatten(logs);
+      var spans = flat.spans;
+      if (!spans.length) {
+        document.getElementById("summary").innerHTML = "<span class='expired'>无数据</span>";
+        document.getElementById("spanBody").innerHTML = "";
+        if (chart) chart.clear();
+        return;
+      }
+      var t0 = spans[0].startTime || 0;
+      var tEnd = spans.reduce(function (m, s) { return Math.max(m, s.endTime || 0); }, t0);
+      document.getElementById("summary").innerHTML =
+        "segments=<b>" + logs.length + "</b> spans=<b>" + spans.length + "</b>"
+        + " 端到端=<b>" + (tEnd - t0) + " ms</b>"
+        + (data && data.payloadExpired ? " <span class='expired'>(部分 payload 已过期)</span>" : "");
+      renderChart(spans);
+      renderTable(spans);
+    })
+    .catch(function (e) { document.getElementById("summary").innerHTML = "<span class='expired'>查询失败: " + esc(e) + "</span>"; });
+}
+
+function toggleRecent() { document.getElementById("recentPane").classList.toggle("collapsed"); }
+
+function loadRecent() {
+  fetch("/inner/sw/trace-recent?limit=30")
+    .then(function (r) { return r.json(); })
+    .then(function (rows) {
+      var body = document.getElementById("recentBody");
+      body.innerHTML = "";
+      (rows || []).forEach(function (row) {
+        var tr = document.createElement("tr");
+        tr.onclick = function () { document.getElementById("traceId").value = row.traceId; loadTrace(); };
+        tr.innerHTML =
+          "<td style='font-family:monospace'>" + esc(row.traceId) + "</td>" +
+          "<td>" + esc(row.traceSegmentId || "") + "</td>" +
+          "<td>" + esc(row.endpoint || "") + "</td>" +
+          "<td>" + esc(row.latency == null ? "" : row.latency) + "</td>";
+        body.appendChild(tr);
+      });
+    })
+    .catch(function () {});
+}
+
+(function main() {
+  window.addEventListener("resize", function () { if (chart) chart.resize(); });
+  var tid = qp("traceid") || qp("traceId");
+  if (tid) { document.getElementById("traceId").value = tid; loadTrace(); }
+  loadRecent();
+})();
+</script>
+</body>
+</html>
