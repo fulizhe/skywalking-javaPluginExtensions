@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<!--
+  真实 Trace 指标仪表盘（A 版式）——数据来自真实读口：
+    GET /inner/sw/metrics            实时快照（内存窗口分钟桶 + 运行计数 + 数据面状态）
+    GET /inner/sw/metrics/query      条件查询（endpoint / 桶范围 / 分辨率 / limit）
+  依赖（均本地打包，无外部网络）: ../lib/jquery.min.js · ../lib/echarts.min.js · ../lib/jquery.dataTables.min.js
+  - 图表：ECharts（分位趋势带 + 吞吐/错误 + 行下钻详情）
+  - 表格：jQuery DataTables（endpoint 明细，可搜索/排序/分页）；点击行在底部展开该 endpoint 详情
+  分位与吞吐均取全局保留键 "*" 行（非各 endpoint 分位相加）。
+  头部 1h / 6h / 24h / 7d / 30d：≤24h 走分钟表，7d/30d 走小时表。v1 已知偏差：小时分位为请求数加权平均近似。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trace 指标仪表盘</title>
+<link rel="stylesheet" href="../lib/jquery.dataTables.min.css">
+<script src="../lib/jquery.min.js"></script>
+<script src="../lib/echarts.min.js"></script>
+<script src="../lib/jquery.dataTables.min.js"></script>
+<style>
+*{box-sizing:border-box}
+:root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;min-height:100vh}
+.wrap{display:grid;grid-template-columns:286px 1fr;min-height:100vh}
+.rail{background:#0c1526;border-right:1px solid var(--bd);padding:18px 12px;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:9px;padding:0 8px 16px;border-bottom:1px solid var(--bd);margin-bottom:14px}
+.logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#38bdf8,#6366f1);display:grid;place-items:center;font-weight:900;color:#04101f;font-size:18px}
+.brand h1{margin:0;font-size:16px}.brand p{margin:3px 0 0;font-size:10px;color:var(--mut);letter-spacing:.14em}
+.tagline{font-size:11px;color:var(--mut);line-height:1.65;margin:12px 8px 0}
+.tagline b{color:#c7cff0}
+.diff{display:flex;flex-direction:column;gap:6px;margin:12px 8px 4px}
+.diff .row{display:flex;gap:6px;font-size:10.5px;color:#c7cff0;line-height:1.5;background:rgba(56,189,248,.06);border:1px solid var(--bd);border-radius:8px;padding:6px 8px}
+.diff .row b{color:#fff}
+.diff .row .chk{color:var(--ac);font-weight:900}
+.rail-h{font-size:10.5px;color:var(--mut);letter-spacing:.1em;font-weight:800;margin:14px 8px 7px}
+.svc{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(56,189,248,.13);color:#bfe4ff;font-size:12.5px;font-weight:700}
+.ep{padding:6px 10px 6px 22px;font-family:var(--mono);font-size:11px;color:var(--mut);border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.main{padding:20px 22px;min-width:0}
+.head{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.head h2{margin:0;font-size:19px}
+.head .meta{margin-left:auto;display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mut)}
+.seg{display:flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.seg span{padding:4px 11px;font-size:12px;color:var(--mut);cursor:pointer}
+.seg span.on{background:#1c2b4a;color:#dbeafe;font-weight:700}
+.kpi-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.kpi{flex:1 1 150px;background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;min-width:0}
+.kpi .k-label{font-size:12px;color:var(--mut)}
+.kpi .k-val{font-family:var(--mono);font-weight:800;font-size:25px;margin:5px 0 3px;letter-spacing:-.02em}
+.kpi .k-sub{font-size:11.5px;color:var(--mut)}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;min-width:0}
+.card-h{font-size:11.5px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;font-weight:800;margin:0 0 12px}
+.grid2{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px}
+.chart{width:100%;height:240px}
+.mono{font-family:var(--mono)}
+.num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.pill.error{background:rgba(251,113,133,.2);color:var(--err)}
+.pill.slow{background:rgba(251,191,36,.2);color:var(--warn)}
+.pill.normal{background:rgba(52,211,153,.18);color:var(--ok)}
+.dot{width:8px;height:8px;border-radius:999px;background:var(--ok);display:inline-block}
+.err-banner{background:rgba(251,113,133,.14);border:1px solid rgba(251,113,133,.4);color:#ffd7de;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12.5px;display:none}
+a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
+.btn{background:#1c2b4a;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer}
+.btn:hover{background:#24365c}
+.detail-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px}
+.detail-info .cell{background:#0c1526;border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
+.detail-info .cell .l{font-size:11px;color:var(--mut)}
+.detail-info .cell .v{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:2px}
+.note{font-size:12px;color:var(--mut);line-height:1.7;border-top:1px dashed var(--bd);padding-top:10px;margin-top:10px}
+/* ---- DataTables 暗色适配 ---- */
+.dataTables_wrapper{color:var(--tx);font-size:12.5px}
+.dataTables_wrapper .dt-top,.dataTables_wrapper .dt-bottom{display:flex;align-items:center;gap:12px;margin:6px 0}
+.dataTables_wrapper .dataTables_filter{margin-left:auto}
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .dataTables_length select{background:#0c1526;color:var(--tx);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;outline:none}
+table.dataTable{width:100%;border-collapse:collapse;font-size:12.5px}
+table.dataTable thead th{background:#0e1830;color:var(--mut);border-bottom:1px solid var(--bd);padding:8px 10px;white-space:nowrap}
+table.dataTable tbody td{border-bottom:1px solid var(--bd);padding:8px 10px;vertical-align:middle;background:transparent}
+table.dataTable tbody tr{cursor:pointer}
+table.dataTable tbody tr:hover td{background:rgba(56,189,248,.07)}
+table.dataTable tbody tr.sel td{background:rgba(56,189,248,.16)}
+.dataTables_wrapper .dataTables_info,.dataTables_wrapper .dataTables_length,.dataTables_wrapper .dataTables_filter,.dataTables_wrapper .dataTables_paginate{color:var(--mut)}
+.dataTables_wrapper .dataTables_paginate .paginate_button{color:var(--mut)!important;border:1px solid transparent;border-radius:6px}
+.dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.dataTables_wrapper .dataTables_paginate .paginate_button.current:hover{color:#fff!important;background:#1c2b4a!important;border:1px solid var(--bd)!important}
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover{background:#16233d!important;border:1px solid var(--bd)!important;color:#dbeafe!important}
+table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTable thead .sorting_desc{filter:invert(.75) hue-rotate(180deg)}
+@media(max-width:1180px){.wrap{grid-template-columns:1fr}.rail{display:none}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="rail">
+    <div class="brand"><div class="logo">天</div><div><h1>天枢观测台</h1><p>TIANSHU · OAPLESS OBSERVABILITY</p></div></div>
+    <p class="tagline">把全链路与指标留在应用进程内 —— 不部署 OAP、不依赖外部后端，单应用即可跨重启回溯、审计与聚合。基于 <b>Trace</b> 的指标面：请求数、错误率、慢调用与 P50–P99 分位数。</p>
+    <div class="diff">
+      <div class="row"><span class="chk">◆</span><span><b>OAP-less 自足</b>：零后端、单进程内持久化</span></div>
+      <div class="row"><span class="chk">◆</span><span><b>分级持久化</b>：error 7d / slow 24h / normal 仅内存</span></div>
+      <div class="row"><span class="chk">◆</span><span><b>磁盘可预测</b>：H2 header + 环形封顶载荷</span></div>
+      <div class="row"><span class="chk">◆</span><span><b>数据与展示解耦</b>：只出标准化 Map，外部任意消费</span></div>
+    </div>
+    <div class="rail-h">应用</div>
+    <div class="svc"><span>demo-app</span><span class="pill normal">TRACE</span></div>
+    <div class="rail-h">Endpoint（按 P95）</div>
+    <div id="epNav"></div>
+    <div class="rail-h">数据面</div>
+    <div class="ep" id="dStorage">H2 内存 · -</div>
+    <div class="ep" id="dBuckets">窗口桶 · -</div>
+    <div class="ep" id="dCounters">计数 · -</div>
+    <div class="rail-h">页面</div>
+    <div class="ep" style="cursor:pointer" onclick="location.href='index.html'">← 返回仪表盘导航</div>
+  </aside>
+  <div class="main">
+    <div class="head">
+      <h2 id="title">Trace 指标</h2>
+      <span class="meta"><span class="dot"></span>实时 · 轮询 5s</span>
+      <span class="seg" id="ranges">
+        <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
+      </span>
+      <span class="meta" id="updatedAt">-</span>
+    </div>
+    <div class="err-banner" id="errBanner"></div>
+    <div class="kpi-row" id="kpis"></div>
+    <div class="grid2">
+      <section class="card"><h3 class="card-h" id="trendTitle">响应时间分位数趋势</h3><div id="trendChart" class="chart"></div></section>
+      <section class="card"><h3 class="card-h" id="thrTitle">吞吐 / 错误</h3><div id="thrChart" class="chart"></div></section>
+    </div>
+    <section class="card">
+      <h3 class="card-h" id="tableTitle">Endpoint 指标</h3>
+      <table id="epTable" class="display" style="width:100%">
+        <thead><tr>
+          <th>Endpoint</th><th>请求</th><th>错误率</th><th>P50</th><th>P95</th><th>P99</th><th>慢</th><th>趋势</th><th>分级</th>
+        </tr></thead>
+      </table>
+      <div class="note" id="tableNote" style="display:none"></div>
+    </section>
+    <div style="height:14px"></div>
+    <section class="card" id="detailCard" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <h3 class="card-h" id="detailTitle" style="margin:0">Endpoint 详情</h3>
+        <span style="margin-left:auto"></span>
+        <button class="btn" id="detailClose">收起</button>
+      </div>
+      <div class="detail-info" id="detailInfo"></div>
+      <div id="detailChart" class="chart" style="height:260px"></div>
+      <div class="note" id="detailNote"></div>
+    </section>
+    <div style="height:14px"></div>
+    <section class="card"><h3 class="card-h">链路下钻</h3>
+      <div style="font-size:12.5px;color:var(--mut);line-height:1.7">指标只提供「指标 → endpoint / 时间」；具体链路明细复用既有读口：
+        <a href="dashboard.html?p=statistic">Trace 缓存统计</a> ·
+        <a href="/inner/sw/trace-recent?limit=20" target="_blank">最近链路(recent)</a> ·
+        <a href="/inner/sw/trace-parity">H2 影子对账</a>。
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+var RANGES = { "1h":60, "6h":360, "24h":1440, "7d":10080, "30d":43200 };
+var MINUTE_MS = 60000, HOUR_MS = 3600000;
+var currentRange = "24h";
+var lastResolution = "minute";
+var lastEps = [];
+var selectedEndpoint = null;
+var series = { p50:[], p90:[], p95:[], p99:[], req:[], err:[], slow:[], times:[], labels:[] };
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function fmtInt(n){return n==null?"-":Number(n).toLocaleString("en-US");}
+function fmtMs(v){return v==null?"-":(v>=1000?(v/1000).toFixed(2)+" s":Math.round(v)+" ms");}
+function pct(v,d){return v==null?"-":(v*100).toFixed(d==null?2:d)+"%";}
+function bucketMs(res){return res==="hour"?HOUR_MS:MINUTE_MS;}
+function hhmm(t){var d=new Date(t);return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
+function mmdd(t){var d=new Date(t);return (d.getMonth()+1)+"/"+d.getDate()+" "+hhmm(t);}
+function labelFor(res,t){return res==="hour"?mmdd(t):hhmm(t);}
+function rangeLabel(){ return { "1h":"近 1h", "6h":"近 6h", "24h":"近 24h", "7d":"近 7d", "30d":"近 30d" }[currentRange]; }
+
+function jget(url){
+  return new Promise(function(resolve,reject){
+    $.ajax({url:url,dataType:"json",cache:false})
+      .done(resolve)
+      .fail(function(xhr,status,err){ reject(new Error((status||"error")+" "+url)); });
+  });
+}
+function computeBuckets(range){
+  var to = Math.floor(Date.now()/MINUTE_MS);
+  var from = to - (RANGES[range]-1);
+  return { from:from, to:to, res:(to-from)<=1440?"minute":"hour" };
+}
+function rangeText(){
+  if(!series.times.length) return "-";
+  return labelFor(lastResolution, series.times[0]) + " ~ " + labelFor(lastResolution, series.times[series.times.length-1]);
+}
+
+var trendChart=null, thrChart=null, detailChart=null, epTable=null;
+var axisCommonBase = {
+  axisLine:{lineStyle:{color:"#1d2a49"}},
+  axisLabel:{color:"#7d8db3",fontSize:10},
+  splitLine:{lineStyle:{color:"#141f38"}}
+};
+var tooltipBase = { trigger:"axis", backgroundColor:"rgba(12,21,38,.95)", borderColor:"#1d2a49", textStyle:{color:"#dde6f5",fontSize:12} };
+
+function refresh(){
+  var b = computeBuckets(currentRange);
+  var globalUrl = "/inner/sw/metrics/query?endpoint=" + encodeURIComponent("*")
+    + "&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  var allUrl = "/inner/sw/metrics/query?fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  Promise.all([ jget("/inner/sw/metrics"), jget(globalUrl), jget(allUrl) ])
+    .then(function(res){
+      var status = res[0]||{}, global = res[1]||{}, all = res[2]||{};
+      if(status.enabled === false){ showError("指标聚合已关闭（plugin.logfilereporter.metrics.enabled=false）。"); }
+      else { hideError(); }
+      renderStatus(status);
+      lastResolution = global.resolution||b.res;
+      buildSeries((global.rows||[]).slice(), lastResolution);
+      renderCharts();
+      lastEps = aggregateEndpoints(all.rows||[]);
+      renderTable(lastEps, all.truncated);
+      renderNav(lastEps);
+      renderKpis(lastEps, all.truncated);
+      if(selectedEndpoint && findEp(selectedEndpoint)) { renderDetail(selectedEndpoint); }
+      else if(selectedEndpoint) { hideDetail(); }
+      document.getElementById("updatedAt").textContent = new Date().toLocaleTimeString();
+    })
+    .catch(function(e){ showError("读口失败："+e.message); });
+}
+
+function showError(msg){var el=document.getElementById("errBanner");el.textContent=msg;el.style.display="block";}
+function hideError(){document.getElementById("errBanner").style.display="none";}
+
+function renderStatus(status){
+  var counters = status.counters||{};
+  document.getElementById("dStorage").textContent = "H2 内存 · " + (status.storageEnabled?"启用":"关闭");
+  document.getElementById("dBuckets").textContent = "窗口桶 · " + (status.buckets?status.buckets.length:0)
+    + " · 留存 " + (status.minuteRetentionBuckets||"-") + "m/" + (status.hourRetentionBuckets||"-") + "h";
+  document.getElementById("dCounters").textContent = "计数 · upsert " + (counters.rowsUpserted||0)
+    + " · 丢弃 " + (counters.lateDropped||0) + " · 溢出 " + (counters.sampleOverflow||0);
+  document.getElementById("trendTitle").textContent = "响应时间分位数趋势 · " + rangeLabel();
+  document.getElementById("thrTitle").textContent = "吞吐 / 错误 · " + rangeLabel();
+  document.getElementById("tableTitle").textContent = "Endpoint 指标 · " + rangeLabel();
+}
+
+function buildSeries(gRows, resolution){
+  var times=[],labels=[],p50=[],p90=[],p95=[],p99=[],req=[],err=[],slow=[];
+  gRows.forEach(function(r){
+    var t=(r.timeBucket||0)*bucketMs(resolution);
+    times.push(t); labels.push(labelFor(resolution,t));
+    var v50 = r.p50==null?0:r.p50;
+    p50.push(v50);
+    p90.push(r.p90==null?v50:r.p90);
+    p95.push(r.p95==null?(r.p90==null?v50:r.p90):r.p95);
+    p99.push(r.p99==null?(r.p95==null?v50:r.p95):r.p99);
+    req.push(r.requestCount||0); err.push(r.errorCount||0); slow.push(r.slowCount||0);
+  });
+  series = { p50:p50,p90:p90,p95:p95,p99:p99,req:req,err:err,slow:slow,times:times,labels:labels };
+}
+
+function renderCharts(){
+  if(!trendChart || !thrChart){
+    trendChart = echarts.init(document.getElementById("trendChart"));
+    thrChart = echarts.init(document.getElementById("thrChart"));
+    window.addEventListener("resize", function(){ trendChart && trendChart.resize(); thrChart && thrChart.resize(); detailChart && detailChart.resize(); });
+  }
+  if(!series.labels.length){
+    trendChart.clear(); thrChart.clear();
+    trendChart.setOption({title:{text:"暂无数据",left:"center",top:"middle",textStyle:{color:"#7d8db3",fontSize:13,fontWeight:"normal"}},xAxis:{show:false},yAxis:{show:false},series:[]});
+    thrChart.setOption({xAxis:{show:false},yAxis:{show:false},series:[]});
+    return;
+  }
+  var d95 = series.p95.map(function(v,i){return Math.max(0, v - series.p50[i]);});
+  var d99 = series.p99.map(function(v,i){return Math.max(0, v - series.p95[i]);});
+  trendChart.setOption({
+    grid:{left:52,right:14,top:16,bottom:28},
+    tooltip:$.extend({},tooltipBase,{formatter:function(params){
+      var i=params[0].dataIndex;
+      return "<b>"+esc(series.labels[i])+"</b><br/>P50 "+fmtMs(series.p50[i])+"<br/>P90 "+fmtMs(series.p90[i])
+        +"<br/>P95 "+fmtMs(series.p95[i])+"<br/>P99 "+fmtMs(series.p99[i]);
+    }}),
+    legend:{data:["P50","P90","P95","P99"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
+    xAxis:$.extend({type:"category",boundaryGap:false,data:series.labels},axisCommonBase),
+    yAxis:$.extend({type:"value",axisLabel:{color:"#7d8db3",fontSize:10,formatter:function(v){return v>=1000?(v/1000).toFixed(0)+"s":v;}}},axisCommonBase),
+    series:[
+      { name:"P50", type:"line", stack:"band", symbol:"none", smooth:true, data:series.p50,
+        lineStyle:{width:1.6,color:"#38bdf8"}, itemStyle:{color:"#38bdf8"}, areaStyle:{color:"rgba(56,189,248,.10)"}, z:3 },
+      { name:"band95", type:"line", stack:"band", symbol:"none", smooth:true, data:d95,
+        lineStyle:{opacity:0}, areaStyle:{color:"rgba(56,189,248,.16)"}, z:2, tooltip:{show:false}, legendHoverLink:false },
+      { name:"band99", type:"line", stack:"band", symbol:"none", smooth:true, data:d99,
+        lineStyle:{opacity:0}, areaStyle:{color:"rgba(251,113,133,.14)"}, z:1, tooltip:{show:false}, legendHoverLink:false },
+      { name:"P90", type:"line", symbol:"none", smooth:true, data:series.p90, lineStyle:{width:1.4,type:"dashed",color:"#a78bfa"}, itemStyle:{color:"#a78bfa"}, z:4 },
+      { name:"P95", type:"line", symbol:"none", smooth:true, data:series.p95, lineStyle:{width:1.8,color:"#fbbf24"}, itemStyle:{color:"#fbbf24"}, z:5 },
+      { name:"P99", type:"line", symbol:"none", smooth:true, data:series.p99, lineStyle:{width:1.6,type:"dashed",color:"#fb7185"}, itemStyle:{color:"#fb7185"}, z:6 }
+    ]
+  }, true);
+
+  thrChart.setOption({
+    grid:{left:48,right:48,top:16,bottom:28},
+    tooltip:$.extend({},tooltipBase,{formatter:function(params){
+      var i=params[0].dataIndex;
+      return "<b>"+esc(series.labels[i])+"</b><br/>请求 "+fmtInt(series.req[i])+"<br/>错误 "+fmtInt(series.err[i])+"<br/>慢 "+fmtInt(series.slow[i]);
+    }}),
+    legend:{data:["请求","错误","慢"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
+    xAxis:$.extend({type:"category",data:series.labels},axisCommonBase),
+    yAxis:[
+      $.extend({type:"value",name:"请求",nameTextStyle:{color:"#7d8db3",fontSize:10}},axisCommonBase),
+      $.extend({type:"value",name:"错/慢",nameTextStyle:{color:"#7d8db3",fontSize:10},splitLine:{show:false}},axisCommonBase)
+    ],
+    series:[
+      { name:"请求", type:"bar", data:series.req, itemStyle:{color:"rgba(56,189,248,.65)"}, barMaxWidth:14 },
+      { name:"错误", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:series.err, lineStyle:{color:"#fb7185",width:2}, itemStyle:{color:"#fb7185"} },
+      { name:"慢", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:series.slow, lineStyle:{color:"#fbbf24",width:1.6}, itemStyle:{color:"#fbbf24"} }
+    ]
+  }, true);
+}
+
+function aggregateEndpoints(rows){
+  var map = {};
+  rows.forEach(function(r){
+    var a = map[r.endpoint];
+    if(!a){ a = { endpoint:r.endpoint, req:0, err:0, slow:0, total:0, max:0, sample:0,
+                   w50:0,w90:0,w95:0,w99:0,c:0, series:[], buckets:0 }; map[r.endpoint]=a; }
+    a.req += r.requestCount||0; a.err += r.errorCount||0; a.slow += r.slowCount||0;
+    a.total += r.totalLatency||0; a.max = Math.max(a.max, r.maxLatency||0); a.sample += r.sampleCount||0;
+    a.buckets += 1;
+    if(r.p50!=null){a.w50 += r.p50*r.requestCount; a.c += r.requestCount;}
+    if(r.p90!=null){a.w90 += r.p90*r.requestCount;}
+    if(r.p95!=null){a.w95 += r.p95*r.requestCount;}
+    if(r.p99!=null){a.w99 += r.p99*r.requestCount;}
+    a.series.push({ t:r.timeBucket, p50:r.p50, p90:r.p90, p95:r.p95, p99:r.p99,
+                    req:r.requestCount||0, err:r.errorCount||0, slow:r.slowCount||0, sample:r.sampleCount||0 });
+  });
+  var out = [];
+  for(var k in map){ if(!Object.prototype.hasOwnProperty.call(map,k)) continue;
+    var a = map[k];
+    a.p50 = a.c>0?Math.round(a.w50/a.c):null;
+    a.p90 = a.c>0?Math.round(a.w90/a.c):null;
+    a.p95 = a.c>0?Math.round(a.w95/a.c):null;
+    a.p99 = a.c>0?Math.round(a.w99/a.c):null;
+    a.avg = a.req>0?Math.round(a.total/a.req):0;
+    a.errRate = a.req>0?a.err/a.req:0; a.slowRate = a.req>0?a.slow/a.req:0;
+    a.series.sort(function(x,y){return x.t-y.t;});
+    out.push(a);
+  }
+  out.sort(function(x,y){return y.req-x.req;});
+  return out;
+}
+function findEp(name){ for(var i=0;i<lastEps.length;i++){ if(lastEps[i].endpoint===name) return lastEps[i]; } return null; }
+
+function levelOf(a){ if(a.errRate>0.1)return "error"; if(a.slowRate>0.15)return "slow"; return "normal"; }
+
+/* 内联 SVG sparkline（趋势列） */
+function sparkSvg(vals,color){
+  if(!vals.length) return "";
+  var w=110,h=26,min=Math.min.apply(null,vals),max=Math.max.apply(null,vals);
+  if(max===min)max=min+1;
+  var d=vals.map(function(v,i){return (i?"L":"M")+(i/(vals.length-1)*w).toFixed(1)+" "+(h-2-(v-min)/(max-min)*(h-4)).toFixed(1);}).join(" ");
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/></svg>';
+}
+
+function renderTable(eps, truncated){
+  var data = eps.map(function(a){
+    var level = levelOf(a);
+    var color = level==="error"?"#fb7185":(level==="slow"?"#fbbf24":"#38bdf8");
+    return {
+      endpoint: a.endpoint,
+      req: a.req,
+      errRate: a.errRate,
+      p50: a.p50, p95: a.p95, p99: a.p99,
+      slow: a.slow,
+      spark: sparkSvg(a.series.map(function(s){return (s.p95!=null?s.p95:(s.p50||0));}), color),
+      level: level
+    };
+  });
+  if(!epTable){
+    epTable = $("#epTable").DataTable({
+      data: data,
+      dom: '<"dt-top"lf>rt<"dt-bottom"ip>',
+      order: [[1,"desc"]],
+      pageLength: 10,
+      lengthMenu: [[10,20,50,-1],[10,20,50,"全部"]],
+      autoWidth: false,
+      deferRender: true,
+      language: {
+        search: "过滤：", lengthMenu: "每页 _MENU_ 条", info: "第 _START_–_END_ 条 / 共 _TOTAL_ 条",
+        infoEmpty: "无数据", zeroRecords: "暂无 Endpoint 指标", emptyTable: "暂无 Endpoint 指标",
+        paginate: { first:"首页", last:"末页", next:"下一页", previous:"上一页" }
+      },
+      columns: [
+        { data:"endpoint", render:function(d,t){ return t==="display" ? '<span class="mono" title="'+esc(d)+'">'+esc(d)+'</span>' : d; } },
+        { data:"req", className:"num", render:function(d,t){ return t==="display" ? fmtInt(d) : d; } },
+        { data:"errRate", className:"num", render:function(d,t){ return t==="display" ? pct(d) : d; } },
+        { data:"p50", className:"num", render:function(d,t){ return t==="display" ? fmtMs(d) : (d==null?0:d); } },
+        { data:"p95", className:"num", render:function(d,t){ return t==="display" ? fmtMs(d) : (d==null?0:d); } },
+        { data:"p99", className:"num", render:function(d,t){ return t==="display" ? fmtMs(d) : (d==null?0:d); } },
+        { data:"slow", className:"num", render:function(d,t){ return t==="display" ? fmtInt(d) : d; } },
+        { data:"spark", orderable:false, render:function(d,t){ return t==="display" ? d : ""; } },
+        { data:"level", render:function(d,t){ return t==="display" ? '<span class="pill '+d+'">'+d.toUpperCase()+'</span>' : d; } }
+      ]
+    });
+    epTable.on("draw", applyHighlight);
+  } else {
+    epTable.clear();
+    if(data.length) { epTable.rows.add(data); }
+    epTable.draw(false);
+  }
+  var note = document.getElementById("tableNote");
+  if(truncated){ note.style.display=""; note.textContent="提示：数据点已达上限并截断，缩小时间范围可见更细粒度。"; }
+  else { note.style.display="none"; }
+}
+
+function applyHighlight(){
+  if(!epTable) return;
+  $("#epTable tbody tr").removeClass("sel");
+  if(!selectedEndpoint) return;
+  epTable.rows().every(function(){
+    var d = this.data();
+    if(d && d.endpoint === selectedEndpoint){ $(this.node()).addClass("sel"); }
+  });
+}
+
+function renderNav(eps){
+  var top = eps.slice().sort(function(a,b){return (b.p95||0)-(a.p95||0);}).slice(0,12);
+  document.getElementById("epNav").innerHTML = top.map(function(a){
+    return '<div class="ep" title="'+esc(a.endpoint)+'">'+esc(a.endpoint)+'</div>';
+  }).join("") || '<div class="ep">-</div>';
+}
+
+function renderKpis(eps, truncated){
+  var req=0,err=0,slow=0;
+  series.req.forEach(function(v,i){req+=v;err+=series.err[i];slow+=series.slow[i];});
+  var n = series.labels.length;
+  var i99 = n? n-1 : -1;
+  var kpis = [
+    ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 已截断":"")],
+    ["错误率", pct(req?err/req:0), fmtInt(err)+" 次错误"],
+    ["P95", i99>=0?fmtMs(series.p95[i99]):"-", "P99 "+(i99>=0?fmtMs(series.p99[i99]):"-")],
+    ["慢调用", fmtInt(slow), pct(req?slow/req:0)+" 占比"],
+    ["活跃 Endpoint", eps.length, "全局行 *"],
+    ["分辨率", lastResolution, n+" 个数据点"]
+  ];
+  document.getElementById("kpis").innerHTML = kpis.map(function(k){
+    return '<div class="kpi"><div class="k-label">'+esc(k[0])+'</div><div class="k-val">'+k[1]+'</div><div class="k-sub">'+esc(k[2])+'</div></div>';
+  }).join("");
+}
+
+/* ================= 行下钻详情 ================= */
+
+function selectEndpoint(name){
+  selectedEndpoint = name;
+  applyHighlight();
+  renderDetail(name);
+}
+function hideDetail(){
+  selectedEndpoint = null;
+  applyHighlight();
+  $("#detailCard").hide();
+}
+
+function renderDetail(name){
+  var a = findEp(name);
+  var card = document.getElementById("detailCard");
+  if(!a){ card.style.display = "none"; return; }
+  card.style.display = "";
+
+  document.getElementById("detailTitle").textContent = "Endpoint 详情 · " + name;
+
+  var cells = [
+    ["请求数", fmtInt(a.req)],
+    ["错误率", pct(a.errRate) + " (" + fmtInt(a.err) + ")"],
+    ["慢调用", fmtInt(a.slow) + " (" + pct(a.slowRate) + ")"],
+    ["平均耗时", fmtMs(a.avg)],
+    ["P50", fmtMs(a.p50)], ["P90", fmtMs(a.p90)], ["P95", fmtMs(a.p95)], ["P99", fmtMs(a.p99)],
+    ["最大耗时", fmtMs(a.max)],
+    ["参与分位样本", fmtInt(a.sample)],
+    ["时间范围", rangeText()],
+    ["分辨率 / 桶数", (lastResolution==="hour"?"小时":"分钟") + " / " + a.buckets]
+  ];
+  document.getElementById("detailInfo").innerHTML = cells.map(function(c){
+    return '<div class="cell"><div class="l">'+esc(c[0])+'</div><div class="v">'+esc(String(c[1]))+'</div></div>';
+  }).join("");
+
+  document.getElementById("detailNote").innerHTML =
+    "数据说明：本行聚合自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的指标桶（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
+    + "计数（请求/错误/慢）与最大耗时为<b>精确合并</b>；P50/P90/P95/P99 为各桶分位按请求数<b>加权平均</b>（≤24h 用分钟分位，7d/30d 用小时分位，小时分位本身为分钟分位的加权近似）。"
+    + "样本不足的桶分位为空、不参与加权（<span class='mono'>sampleCount ≤ requestCount</span>）。"
+    + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。"
+    + "分级规则（前端派生）：错误率 &gt; 10% 记为 <span class='pill error'>ERROR</span>，慢率 &gt; 15% 记为 <span class='pill slow'>SLOW</span>，否则 <span class='pill normal'>NORMAL</span>。";
+
+  if(!detailChart){ detailChart = echarts.init(document.getElementById("detailChart")); }
+  var labels = a.series.map(function(s){ return labelFor(lastResolution, s.t*bucketMs(lastResolution)); });
+  var p50 = a.series.map(function(s){ return s.p50==null?null:s.p50; });
+  var p95 = a.series.map(function(s){ return s.p95==null?null:s.p95; });
+  var p99 = a.series.map(function(s){ return s.p99==null?null:s.p99; });
+  var req = a.series.map(function(s){ return s.req; });
+  detailChart.setOption({
+    grid:{left:52,right:52,top:16,bottom:28},
+    tooltip:$.extend({},tooltipBase,{formatter:function(params){
+      var i=params[0].dataIndex; var s=a.series[i];
+      return "<b>"+esc(labels[i])+"</b><br/>请求 "+fmtInt(s.req)+"　错误 "+fmtInt(s.err)+"　慢 "+fmtInt(s.slow)
+        +"<br/>P50 "+fmtMs(s.p50)+"<br/>P95 "+fmtMs(s.p95)+"<br/>P99 "+fmtMs(s.p99)+"<br/>样本 "+fmtInt(s.sample);
+    }}),
+    legend:{data:["请求","P50","P95","P99"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
+    xAxis:$.extend({type:"category",boundaryGap:true,data:labels},axisCommonBase),
+    yAxis:[
+      $.extend({type:"value",name:"延迟",nameTextStyle:{color:"#7d8db3",fontSize:10},axisLabel:{color:"#7d8db3",fontSize:10,formatter:function(v){return v>=1000?(v/1000).toFixed(0)+"s":v;}}},axisCommonBase),
+      $.extend({type:"value",name:"请求",nameTextStyle:{color:"#7d8db3",fontSize:10},splitLine:{show:false}},axisCommonBase)
+    ],
+    series:[
+      { name:"请求", type:"bar", yAxisIndex:1, data:req, itemStyle:{color:"rgba(56,189,248,.35)"}, barMaxWidth:18 },
+      { name:"P50", type:"line", symbol:"none", smooth:true, data:p50, lineStyle:{width:1.6,color:"#38bdf8"}, itemStyle:{color:"#38bdf8"} },
+      { name:"P95", type:"line", symbol:"none", smooth:true, data:p95, lineStyle:{width:1.8,color:"#fbbf24"}, itemStyle:{color:"#fbbf24"} },
+      { name:"P99", type:"line", symbol:"none", smooth:true, data:p99, lineStyle:{width:1.6,type:"dashed",color:"#fb7185"}, itemStyle:{color:"#fb7185"} }
+    ]
+  }, true);
+  detailChart.resize();
+}
+
+$(function(){
+  $("#ranges").on("click","span[data-r]",function(){
+    currentRange = $(this).data("r");
+    $("#ranges span").removeClass("on"); $(this).addClass("on");
+    refresh();
+  });
+  // DataTables 行点击 → 底部展开详情(再次点击同一行收起)
+  // 注意:委托根必须是静态存在的元素(DataTables 初始化前 <tbody> 尚不存在,绑 #epTable tbody 会落空)
+  $(document).on("click","#epTable tbody tr",function(){
+    if(!epTable) return;
+    var d = epTable.row(this).data();
+    if(!d) return;
+    if(selectedEndpoint === d.endpoint){ hideDetail(); }
+    else { selectEndpoint(d.endpoint); }
+  });
+  $("#detailClose").on("click", hideDetail);
+  refresh();
+  setInterval(refresh, 5000);
+});
+</script>
+</body>
+</html>

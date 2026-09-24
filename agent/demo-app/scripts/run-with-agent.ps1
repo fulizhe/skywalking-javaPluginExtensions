@@ -15,6 +15,10 @@
 #   pwsh ./scripts/run-with-agent.ps1 -AgentDir D:\apps\apache-skywalking-java-agent-9.4.0
 #   pwsh ./scripts/run-with-agent.ps1 -JavaHome D:\apps\java\jdk-17.0.8   # 演示运行时用 JDK 17
 #   pwsh ./scripts/run-with-agent.ps1 -BuildJavaHome D:\apps\java\jdk-17.0.8  # 构建工具链用 JDK 17
+#   pwsh ./scripts/run-with-agent.ps1 -ConsolePort 8093      # H2 Web Console 端口(默认 8092)
+#
+# H2 Web Console:本脚本默认开启(可对内存库 jdbc:h2:mem:sw_trace_segment 执行任意 SQL,仅本机调试用),
+#                启动后访问 http://127.0.0.1:<ConsolePort>(User: sa,密码空)。
 #
 # 退出码:0 全流程通过;1 前置失败(路径/构建/拷贝);2 应用未就绪;3 插件加载未验证
 param(
@@ -23,7 +27,8 @@ param(
     [string]$BuildJavaHome = "",
     [switch]$SkipPluginBuild,
     [switch]$SkipAppBuild,
-    [int]$Port = 9600
+    [int]$Port = 9600,
+    [int]$ConsolePort = 8092
 )
 
 $ErrorActionPreference = "Stop"
@@ -170,12 +175,17 @@ $swArgs = @(
     "-Dskywalking.agent.keep_tracing=true",
     "-Dskywalking.plugin.logfilereporter.alert.enabled=true",
     "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/export/**=60000",
-    "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410"
+    "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410",
+    "-Dskywalking.plugin.logfilereporter.h2.enabled=true",
+    # H2 Web Console(本机调试:可查内存库 jdbc:h2:mem:sw_trace_segment)
+    "-Dskywalking.plugin.logfilereporter.h2.console_enabled=true",
+    "-Dskywalking.plugin.logfilereporter.h2.console_port=$ConsolePort"
 )
 $env:WebPort = "$Port"
 $outLog = Join-Path $demoAppDir "target\run-with-agent-out.log"
 $errLog = Join-Path $demoAppDir "target\run-with-agent-err.log"
 Write-Host "[..] 启动 demo-app (javaagent, WebPort=$Port): http://127.0.0.1:$Port/"
+Write-Host "     H2 Web Console: http://127.0.0.1:$ConsolePort (JDBC URL: jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1, user: sa, pass: <empty>)"
 $proc = Start-Process -FilePath $javaExe -ArgumentList ($swArgs + @("-jar", $appJar)) `
     -WorkingDirectory $demoAppDir -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
 Write-Host "[OK] demo-app PID=$($proc.Id), 日志: $outLog / $errLog"
@@ -213,6 +223,7 @@ Write-Host "验证通过。保持运行中(PID=$($proc.Id))。"
 Write-Host "  - 停止:按 Ctrl+C 或 Stop-Process -Id $($proc.Id) -Force"
 Write-Host "  - agent 日志: $agentDir\logs\skywalking-agent.log / skywalking-api.log"
 Write-Host "  - 应用日志: $outLog"
+Write-Host "  - H2 Web Console: http://127.0.0.1:$ConsolePort (JDBC URL: jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1, user: sa, pass: <empty>)"
 Wait-Process -Id $proc.Id
 Write-Host "[OK] demo-app 已退出。"
 exit 0

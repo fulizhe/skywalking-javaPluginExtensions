@@ -329,6 +329,71 @@ try {
         Assert "整条链路 logs > 0" ($logCount -gt 0) "tid=$tid logs=$logCount"
     }
 
+    # ---- 9c. Trace 指标(Phase 5) ----
+    Write-Host ""
+    Write-Host "---- Trace 指标 /inner/sw/metrics ----"
+    $metricsResp = Invoke-LocalHttp "/inner/sw/metrics"
+    Assert "指标快照 HTTP 200" ("$($metricsResp.StatusCode)" -eq "200") "status=$($metricsResp.StatusCode)"
+    $metricsMetrics = $null
+    try { $metricsMetrics = $metricsResp.Content | ConvertFrom-Json } catch { $metricsMetrics = $null }
+    if ($metricsMetrics) {
+        Assert "metrics.enabled=true" ($metricsMetrics.enabled -eq $true) "enabled=$($metricsMetrics.enabled)"
+        Assert "storageEnabled=true" ($metricsMetrics.storageEnabled -eq $true) "storageEnabled=$($metricsMetrics.storageEnabled)"
+        $bucketCount = if ($metricsMetrics.buckets) { @($metricsMetrics.buckets).Count } else { 0 }
+        Assert "内存窗口桶非空(造数后)" ($bucketCount -gt 0) "buckets=$bucketCount"
+        $hasGlobal = $false
+        foreach ($b in @($metricsMetrics.buckets)) { if ("$($b.endpoint)" -eq "*") { $hasGlobal = $true } }
+        Assert "含全局保留键 *(每桶全局汇总)" $hasGlobal "buckets 中无 endpoint=*"
+    } else {
+        $script:failures++
+        Write-Host "[FAIL] 指标快照返回不可解析的 JSON"
+    }
+
+    $qMetricsResp = Invoke-LocalHttp "/inner/sw/metrics/query?endpoint=%2A&limit=1000"
+    Assert "指标查询 HTTP 200" ("$($qMetricsResp.StatusCode)" -eq "200") "status=$($qMetricsResp.StatusCode)"
+    $qm = $null
+    try { $qm = $qMetricsResp.Content | ConvertFrom-Json } catch { $qm = $null }
+    if ($qm) {
+        Assert "查询分辨率=minute(默认 24h 内)" ("$($qm.resolution)" -eq "minute") "resolution=$($qm.resolution)"
+        $qRows = @($qm.rows)
+        Assert "全局分钟行非空" ($qRows.Count -gt 0) "count=$($qm.count)"
+        $consistent = $true; $bad = ""
+        foreach ($r in $qRows) {
+            if ([long]$r.errorCount + [long]$r.slowCount -gt [long]$r.requestCount) { $consistent = $false; $bad = "error+slow>request @$($r.timeBucket)" }
+            if ([long]$r.sampleCount -gt [long]$r.requestCount) { $consistent = $false; $bad = "sample>request @$($r.timeBucket)" }
+            if ($null -ne $r.p50 -and $null -ne $r.p95 -and $null -ne $r.p99) {
+                if ([long]$r.p50 -gt [long]$r.p95 -or [long]$r.p95 -gt [long]$r.p99) { $consistent = $false; $bad = "p50>p95>p99 @$($r.timeBucket)" }
+            }
+        }
+        Assert "口径自洽(error+slow<=request, sample<=request, p50<=p95<=p99)" $consistent $bad
+    } else {
+        $script:failures++
+        Write-Host "[FAIL] 指标查询返回不可解析的 JSON"
+    }
+
+    # 五档范围路由:1h/6h/24h -> minute, 7d/30d -> hour
+    $nowMinute = [long][math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 60000)
+    $rangeCases = @(
+        @{ name = "1h"; span = 60; expect = "minute" },
+        @{ name = "6h"; span = 360; expect = "minute" },
+        @{ name = "24h"; span = 1440; expect = "minute" },
+        @{ name = "7d"; span = 10080; expect = "hour" },
+        @{ name = "30d"; span = 43200; expect = "hour" }
+    )
+    foreach ($rc in $rangeCases) {
+        $fromB = $nowMinute - ($rc.span - 1)
+        $rResp = Invoke-LocalHttp "/inner/sw/metrics/query?fromBucket=$fromB&toBucket=$nowMinute&limit=1000"
+        $rr = $null; try { $rr = $rResp.Content | ConvertFrom-Json } catch { $rr = $null }
+        $resOk = $rr -and ("$($rr.resolution)" -eq "$($rc.expect)")
+        Assert "范围 $($rc.name) 路由=$($rc.expect)" (("$($rResp.StatusCode)" -eq "200") -and $resOk) "status=$($rResp.StatusCode) resolution=$($rr.resolution)"
+    }
+
+    # limit 截断
+    $limResp = Invoke-LocalHttp "/inner/sw/metrics/query?endpoint=%2A&limit=1"
+    $lim = $null; try { $lim = $limResp.Content | ConvertFrom-Json } catch { $lim = $null }
+    $limCount = if ($lim) { @($lim.rows).Count } else { 0 }
+    Assert "limit=1 截断生效" ($lim -and $limCount -le 1) "count=$limCount"
+
     # ---- 10. 结果 ----
     Write-Host ""
     if ($script:failures -eq 0) {

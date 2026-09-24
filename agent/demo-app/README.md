@@ -101,6 +101,33 @@ pwsh ./scripts/start-demo.ps1
 
 > 本地 HTTP 调用均建议用 `curl.exe --noproxy "*"` 直连(见 ticket 05 记录:交互式 profile 注入的代理默认参数会把回环请求误送外部代理而得到 502)。
 
+### 压测(可选)
+
+用 `scripts/stress.ps1` 对 demo-app 接口打负载,顺带打印 `Trace 指标`读口摘要,便于填充指标/告警/大屏数据。压测实现是测试源码里自包含的 Java 类 `org.openskywalking.demo.load.HttpLoadTest`(默认不参与 `mvn test`)。
+
+```powershell
+# A) 应用已在运行(run-with-agent.ps1 保持运行):直接压测
+pwsh ./scripts/stress.ps1 -Requests 2000 -Threads 16
+
+# B) 一条命令:起应用(带 agent) + 压测 + 指标摘要,压测后自动停
+pwsh ./scripts/stress.ps1 -StartApp -Requests 2000 -Threads 16
+
+# C) 持续时长模式:压 1 小时
+pwsh ./scripts/stress.ps1 -DurationSec 3600 -Threads 16
+
+# D) 无限模式(插件稳定性观测):死循环压测,每 10s 打印吞吐 + 插件计数 + JVM 堆,直到 Ctrl+C
+pwsh ./scripts/stress.ps1 -Continuous -Threads 16
+pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
+```
+
+常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-KeepRunning`、`-SkipMetrics`。
+
+> 稳定性观测:`-Continuous` 下每轮 `[progress]` 行含 `plugin=` 段,即插件 `/inner/sw/metrics` 的计数
+> (`rowsUpserted`/`lateDropped`/`sampleOverflow`/`endpointOverflow`/`persistErrors`/`aggregateErrors`)——
+> 持续观察这些计数是否异常增长、以及 `heap=` 是否持续攀升，即可判断插件在长跑下的稳定性。
+
+压测后浏览器打开 `http://127.0.0.1:9600/dashboards/metrics.html`。
+
 ## 术语指引
 
 | 术语 | 含义 |
@@ -132,6 +159,8 @@ agent/demo-app/
 └── scripts/
     ├── setup.ps1              # 环境自足:检测/下载 agent、装插件、产出启动命令
     ├── validate.ps1           # 验证回路(构建→安装→启动→造数→断言→报告)
+    ├── validate-h2.ps1        # H2 影子存储 + Trace 指标专项验证
+    ├── stress.ps1             # 压测辅助(起应用/压测/指标摘要/停应用;委托 HttpLoadTest)
     ├── run-with-agent.ps1     # IDE/手动模式(同参,保持运行)
     └── start-demo.ps1         # 纯应用启动(无 agent)
 ```

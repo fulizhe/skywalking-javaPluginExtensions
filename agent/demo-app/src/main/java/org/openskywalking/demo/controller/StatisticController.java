@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.skywalking.apm.toolkit.SWLogfileReporterUtils;
+import org.apache.skywalking.apm.toolkit.SWMetricsUtils;
 import org.apache.skywalking.apm.toolkit.SWTraceParityUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -80,6 +81,39 @@ public class StatisticController {
     @GetMapping("/inner/sw/trace-recent")
     public Object traceRecent(@RequestParam(value = "limit", defaultValue = "20") int limit) {
         return SWTraceParityUtils.recentTraces(limit);
+    }
+
+    /** Trace 指标实时快照:/inner/sw/metrics 返回内存窗口分钟桶与运行计数(供大屏 KPI/当前窗口) */
+    @GetMapping("/inner/sw/metrics")
+    public Map<String, Object> metrics() {
+        return SWMetricsUtils.statisticMetrics();
+    }
+
+    /** Trace 指标条件查询:/inner/sw/metrics/query 按 endpoint/桶范围/分辨率返回历史指标行(供大屏趋势与 endpoint 表) */
+    @GetMapping("/inner/sw/metrics/query")
+    public Map<String, Object> metricsQuery(
+            @RequestParam(value = "endpoint", required = false) String endpoint,
+            @RequestParam(value = "fromBucket", required = false) Long fromBucket,
+            @RequestParam(value = "toBucket", required = false) Long toBucket,
+            @RequestParam(value = "resolution", required = false) String resolution,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        Map<String, Object> condition = new HashMap<>(8);
+        if (endpoint != null) {
+            condition.put("endpoint", endpoint);
+        }
+        if (fromBucket != null) {
+            condition.put("fromBucket", fromBucket);
+        }
+        if (toBucket != null) {
+            condition.put("toBucket", toBucket);
+        }
+        if (resolution != null) {
+            condition.put("resolution", resolution);
+        }
+        if (limit != null) {
+            condition.put("limit", limit);
+        }
+        return SWMetricsUtils.queryMetrics(condition);
     }
 
     /** 链路段读口:/statistic 返回 data(按 endTime 倒序、附可读时间与组件名),去掉 jvm/instanceProperties 两流 */
