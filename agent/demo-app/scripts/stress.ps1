@@ -11,6 +11,17 @@
 #   3) 无限模式(稳定性观测):死循环压测,周期性打印吞吐 + 插件自身计数 + JVM 堆,直到 Ctrl+C
 #      pwsh ./scripts/stress.ps1 -Continuous -Threads 16
 #
+# 纯指标 vs 告警耦合(把"指标稳定性"与"告警稳定性"分开压):
+#   - -NormalOnly:本脚本只压正常端点(排除 /error 与 /http500,含 /longTimeTask) -> 压"纯指标聚合"
+#   - 告警开关属于"应用启动"这一层,由 run-with-agent.ps1 控制:
+#       run-with-agent.ps1 -NoAlert  起"纯指标"实例(alert off)
+#       run-with-agent.ps1           起"带告警"实例(默认 alert on,含 webhook 自环)
+#   推荐组合:
+#       纯指标稳定性 : run-with-agent.ps1 -NoAlert  +  stress.ps1 -NormalOnly
+#       指标+告警耦合 : run-with-agent.ps1           +  stress.ps1(默认混合路径,含 error)
+#   注意:stress.ps1 -StartApp 自身起的应用不带 alert(纯指标);直接压已在运行的实例时,
+#         告警开关由该实例启动参数决定(-NoAlert / 默认 on)。
+#
 # 两种应用来源:
 #   A) 应用已在运行(run-with-agent.ps1 保持运行 / validate*.ps1 -KeepRunning):直接压测
 #      pwsh ./scripts/stress.ps1 -BaseUrl http://127.0.0.1:9601 -Paths "/hello,/fullSample"
@@ -42,6 +53,8 @@ param(
     [switch]$StartApp,
     # 由本脚本启动应用时,压测后保留运行(否则自动停止)
     [switch]$KeepRunning,
+    # 只压正常端点(排除 /error 与 /http500):压"纯指标聚合"(告警开关见 run-with-agent.ps1 -NoAlert)
+    [switch]$NormalOnly,
     # 跳过压测后的指标摘要
     [switch]$SkipMetrics,
     # 指标摘要前等待秒数(给翻转线程一点时间)
@@ -65,6 +78,12 @@ $pluginJar = Join-Path $agentModuleDir "logfile-reporter-plugin\target\$pluginJa
 $base = $BaseUrl.TrimEnd('/')
 $port = ([uri]$base).Port
 $script:startedProc = $null
+
+# 正常端点集(排除 /error 与 /http500);用于 -NormalOnly 的"纯指标"压测
+$NORMAL_PATHS = "/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask"
+$effectivePaths = $Paths
+if (-not $effectivePaths -and $NormalOnly) { $effectivePaths = $NORMAL_PATHS }
+$pathsText = if ($effectivePaths) { $effectivePaths } else { "(HttpLoadTest 内置默认:混合,含 error)" }
 
 function Get-DriveRoot { return 'D:' }
 
@@ -175,7 +194,7 @@ function Start-DemoApp {
     $env:WebPort = "$port"
     $outLog = Join-Path $demoAppDir "target\stress-out.log"
     $errLog = Join-Path $demoAppDir "target\stress-err.log"
-    Write-Host "[..] 启动 demo-app (javaagent, WebPort=$port): $base/"
+    Write-Host "[..] 启动 demo-app (javaagent, WebPort=$port, alert=off(纯指标)): $base/"
     $proc = Start-Process -FilePath $javaExe -ArgumentList ($swArgs + @("-jar", $appJar)) `
         -WorkingDirectory $demoAppDir -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
     if (-not (Wait-Ready "$base/" 90)) {
@@ -194,8 +213,8 @@ $mode = if ($Continuous) { "无限(稳定性观测)" } elseif ($DurationSec -gt 
 Write-Host "==============================================================="
 Write-Host " demo-app 压测 (stress)"
 Write-Host "   target=$base  mode=$mode  threads=$Threads  timeout=${TimeoutMs}ms"
-if ($Paths) { Write-Host "   paths=$Paths" }
-Write-Host "   startApp=$StartApp  keepRunning=$KeepRunning  skipMetrics=$SkipMetrics"
+Write-Host "   paths=$pathsText"
+Write-Host "   startApp=$StartApp  normalOnly=$NormalOnly  keepRunning=$KeepRunning  skipMetrics=$SkipMetrics"
 Write-Host "==============================================================="
 
 if ($Threads -le 0) { Write-Host "[FAIL] -Threads 必须为正整数"; exit 1 }
@@ -211,7 +230,7 @@ if (-not $appRunning) {
     }
     $script:startedProc = Start-DemoApp
 } else {
-    Write-Host "[OK] 目标已在运行: $base/"
+    Write-Host "[OK] 目标已在运行: $base/  (告警开关由该实例启动参数决定;纯指标请用 run-with-agent.ps1 -NoAlert 起实例)"
 }
 
 # ---- 跑压测(委托自包含 Java 类) ----

@@ -120,7 +120,13 @@ pwsh ./scripts/stress.ps1 -Continuous -Threads 16
 pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 ```
 
-常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-KeepRunning`、`-SkipMetrics`。
+**指标稳定性 vs 告警稳定性(分开压)**:告警开关属于"应用启动"这一层,由 `run-with-agent.ps1` 控制:
+
+- **纯指标稳定性**:`pwsh ./scripts/run-with-agent.ps1 -NoAlert` 起实例 + `pwsh ./scripts/stress.ps1 -NormalOnly`(只压正常端点,排除 `/error`、`/http500`)。
+- **指标 + 告警耦合**:`run-with-agent.ps1`(默认 alert on) + `stress.ps1`(默认混合路径,含 error);错误请求会触发插件**同步 webhook 回打自身**,形成放大回路。
+- `stress.ps1 -StartApp` 自身起的应用**不带 alert**(纯指标)。
+
+常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`(只压正常端点)、`-KeepRunning`、`-SkipMetrics`。
 
 > 稳定性观测:`-Continuous` 下每轮 `[progress]` 行含 `plugin=` 段,即插件 `/inner/sw/metrics` 的计数
 > (`rowsUpserted`/`lateDropped`/`sampleOverflow`/`endpointOverflow`/`persistErrors`/`aggregateErrors`)——

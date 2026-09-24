@@ -16,9 +16,15 @@
 #   pwsh ./scripts/run-with-agent.ps1 -JavaHome D:\apps\java\jdk-17.0.8   # 演示运行时用 JDK 17
 #   pwsh ./scripts/run-with-agent.ps1 -BuildJavaHome D:\apps\java\jdk-17.0.8  # 构建工具链用 JDK 17
 #   pwsh ./scripts/run-with-agent.ps1 -ConsolePort 8093      # H2 Web Console 端口(默认 8092)
+#   pwsh ./scripts/run-with-agent.ps1 -NoAlert               # 纯指标实例:不开告警(无 webhook 自环)
 #
 # H2 Web Console:本脚本默认开启(可对内存库 jdbc:h2:mem:sw_trace_segment 执行任意 SQL,仅本机调试用),
 #                启动后访问 http://127.0.0.1:<ConsolePort>(User: sa,密码空)。
+#
+# 告警:默认开启(慢/错链路 + webhook),用于告警验证与告警链路压测;
+#      压"纯指标稳定性"时用 -NoAlert 起实例,避免 ERROR→webhook 自环放大负载:
+#        pwsh ./scripts/run-with-agent.ps1 -NoAlert          # 起纯指标实例
+#        pwsh ./scripts/stress.ps1 -NormalOnly               # 只压正常端点
 #
 # 退出码:0 全流程通过;1 前置失败(路径/构建/拷贝);2 应用未就绪;3 插件加载未验证
 param(
@@ -28,7 +34,9 @@ param(
     [switch]$SkipPluginBuild,
     [switch]$SkipAppBuild,
     [int]$Port = 9600,
-    [int]$ConsolePort = 8092
+    [int]$ConsolePort = 8092,
+    # 关闭告警(alert.enabled=false):起"纯指标"实例;默认不开此开关=带告警
+    [switch]$NoAlert
 )
 
 $ErrorActionPreference = "Stop"
@@ -173,18 +181,22 @@ Remove-Item (Join-Path $agentDir "logs\skywalking-agent.log") -Force -ErrorActio
 $swArgs = @(
     "-javaagent:$agentJar",
     "-Dskywalking.agent.keep_tracing=true",
-    "-Dskywalking.plugin.logfilereporter.alert.enabled=true",
-    "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/export/**=60000",
-    "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410",
     "-Dskywalking.plugin.logfilereporter.h2.enabled=true",
     # H2 Web Console(本机调试:可查内存库 jdbc:h2:mem:sw_trace_segment)
     "-Dskywalking.plugin.logfilereporter.h2.console_enabled=true",
     "-Dskywalking.plugin.logfilereporter.h2.console_port=$ConsolePort"
 )
+# 告警(慢/错链路 + webhook):默认开启;-NoAlert 关闭,起"纯指标"实例(避免 webhook 自环放大负载)
+if (-not $NoAlert) {
+    $swArgs += "-Dskywalking.plugin.logfilereporter.alert.enabled=true"
+    $swArgs += "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/export/**=60000"
+    $swArgs += "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/.well-known/**=404;operation:GET:/status/*=503,500,400;operation:GET:/api/exists/*=404;operation:GET:/inner/business-test/**=404,410"
+}
+$alertState = if ($NoAlert) { "off(纯指标)" } else { "on" }
 $env:WebPort = "$Port"
 $outLog = Join-Path $demoAppDir "target\run-with-agent-out.log"
 $errLog = Join-Path $demoAppDir "target\run-with-agent-err.log"
-Write-Host "[..] 启动 demo-app (javaagent, WebPort=$Port): http://127.0.0.1:$Port/"
+Write-Host "[..] 启动 demo-app (javaagent, WebPort=$Port, alert=$alertState): http://127.0.0.1:$Port/"
 Write-Host "     H2 Web Console: http://127.0.0.1:$ConsolePort (JDBC URL: jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1, user: sa, pass: <empty>)"
 $proc = Start-Process -FilePath $javaExe -ArgumentList ($swArgs + @("-jar", $appJar)) `
     -WorkingDirectory $demoAppDir -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru

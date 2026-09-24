@@ -81,10 +81,12 @@
 
 ## 压测姿势：指标稳定性与告警稳定性要分开压
 
-- 想纯粹看**指标聚合**稳定性：压测别带 error 端点（`-Paths` 只给正常端点）或关掉 `alert.enabled`。
-- 想压**告警链路**：保留 error 端点 + `alert.enabled`。
-- ⚠️ **当前默认两者混在一起**（`run-with-agent.ps1` 起应用时开了 alert；`HttpLoadTest` 默认路径含 error 端点），所以指标与告警的稳定性是**耦合观测**的——Eden 高分配率与 `NotifiedFlagsCache` 的增长里有很大一部分来自告警/webhook，不能单独归因给指标聚合。
-- 佐证：`stress.ps1 -StartApp` 自己启动应用时**不带 alert**（swArgs 仅 `javaagent + keep_tracing + h2.enabled`），即"纯指标"路径；而本次观测的 PID 13644 是 `run-with-agent.ps1` 起的（alert 开），才出现 ERROR webhook 自环。
+分层：**告警开关属于"应用启动"层**（`run-with-agent.ps1`），**打哪些端点属于"压测"层**（`stress.ps1`）。
+
+- **纯指标稳定性**：`run-with-agent.ps1 -NoAlert` 起实例（alert off，无 webhook 自环） + `stress.ps1 -NormalOnly`（只压正常端点，排除 `/error`、`/http500`）。
+- **指标 + 告警耦合**：`run-with-agent.ps1`（默认 alert on） + `stress.ps1`（默认混合路径含 error）。
+- ⚠️ 混在一起时（本次 PID 13644 即 `run-with-agent.ps1` 默认启动 + 默认混合路径），指标与告警是**耦合观测**的——Eden 高分配率与 `NotifiedFlagsCache` 的增长里有很大一部分来自告警/webhook，不能单独归因给指标聚合。
+- 佐证：`stress.ps1 -StartApp` 自己起的应用**不带 alert**（纯指标路径）；本次 13644 是 `run-with-agent.ps1` 起的（alert 开）才有 ERROR webhook 自环。
 
 ## 插件侧结构有界性清单
 
