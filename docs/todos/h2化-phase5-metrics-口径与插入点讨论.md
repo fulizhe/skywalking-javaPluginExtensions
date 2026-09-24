@@ -2,7 +2,7 @@
 
 > **文档定位**：单体 + SW 采集背景下，"Glowroot 式统计"如何落地的**讨论记录**。与既有 `h2化-phase5-metrics讨论.md` / `h2化-phase5-metrics实现细化.md` 存在**口径分歧**（见 §7），待对齐。**未实现、未落任何代码。**
 >
-> **状态**：讨论中 —— 已倾向 **a1 + 入口段插入点**，未最终拍板。
+> **状态**：**已采纳（2026-09-24）** —— a1 + **入口段插入点** 成为 Phase 5 的实现口径（配合 H2 内存模式 + 多分辨率）。权威 spec：`.scratch/h2-metrics/spec.md`；`duration` 取入口 span（本文倾向），非 `maxDurationMs`。
 >
 > **相关**：`h2化-统一方案.md`（§4 Phase 5、§5.3、§11）、`h2化-phase5-metrics讨论.md`、`h2化-phase5-metrics实现细化.md`、`docs/reference/sw-glowroot-cat-metrics-implementations.md`。
 
