@@ -27,6 +27,7 @@ import org.apache.skywalking.apm.agent.core.context.trace.TraceSegment;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.SegmentLogConverter;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.TraceParityComparator;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
@@ -153,6 +154,13 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 stmt.execute(H2SqlStatements.CREATE_TABLE_SQL);
                 stmt.execute(H2SqlStatements.CREATE_INDEX_SQL);
                 stmt.execute(H2SqlStatements.CREATE_AUDIT_TABLE_SQL);
+                // Phase 5：Trace 指标双分辨率表（分钟 + 小时）
+                stmt.execute(H2SqlStatements.CREATE_METRICS_MINUTE_TABLE_SQL);
+                stmt.execute(H2SqlStatements.CREATE_METRICS_MINUTE_KEY_INDEX_SQL);
+                stmt.execute(H2SqlStatements.CREATE_METRICS_MINUTE_BUCKET_INDEX_SQL);
+                stmt.execute(H2SqlStatements.CREATE_METRICS_HOUR_TABLE_SQL);
+                stmt.execute(H2SqlStatements.CREATE_METRICS_HOUR_KEY_INDEX_SQL);
+                stmt.execute(H2SqlStatements.CREATE_METRICS_HOUR_BUCKET_INDEX_SQL);
             }
             LOGGER.info("### [H2Shadow] H2TraceSegmentStorage initialized: url={}, shadowMaxRows={}", JDBC_URL, this.shadowMaxRows);
             return conn;
@@ -613,6 +621,132 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         }
     }
 
+    // ==================== Phase 5：Trace 指标落库与查询 ====================
+
+    /** 分辨率判定：{@code hour} 走小时表，其余走分钟表。 */
+    private static boolean isHourResolution(final String resolution) {
+        return "hour".equalsIgnoreCase(resolution);
+    }
+
+    /**
+     * 批量幂等落指标行（指定分辨率）。同键重复写走 H2 原生 {@code MERGE} 的 UPDATE 分支，
+     * 不重复计数；内部异常就地捕获。
+     *
+     * @return 实际写入行数（异常时为 0）
+     */
+    public int storeMetricRows(final String resolution, final List<MetricsRow> rows) {
+        if (!enabled || connection == null || rows == null || rows.isEmpty()) {
+            return 0;
+        }
+        final boolean hour = isHourResolution(resolution);
+        final String sql = hour ? H2SqlStatements.MERGE_METRICS_HOUR_SQL : H2SqlStatements.MERGE_METRICS_MINUTE_SQL;
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                for (MetricsRow r : rows) {
+                    ps.setString(1, r.getService());
+                    ps.setString(2, r.getEndpoint());
+                    ps.setLong(3, r.getTimeBucket());
+                    ps.setLong(4, r.getRequestCount());
+                    ps.setLong(5, r.getErrorCount());
+                    ps.setLong(6, r.getSlowCount());
+                    ps.setLong(7, r.getTotalLatency());
+                    ps.setLong(8, r.getMaxLatency());
+                    setNullableInt(ps, 9, r.getP50());
+                    setNullableInt(ps, 10, r.getP90());
+                    setNullableInt(ps, 11, r.getP95());
+                    setNullableInt(ps, 12, r.getP99());
+                    ps.setInt(13, r.getSampleCount());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                return rows.size();
+            } catch (SQLException e) {
+                recordError("storeMetricRows", e);
+                return 0;
+            }
+        }
+    }
+
+    private static void setNullableInt(final PreparedStatement ps, final int index, final int value)
+            throws SQLException {
+        if (value < 0) {
+            ps.setNull(index, Types.INTEGER);
+        } else {
+            ps.setInt(index, value);
+        }
+    }
+
+    /**
+     * 条件查询指标行（指定分辨率）。
+     *
+     * @param resolution {@code minute} / {@code hour}
+     * @param endpoint   null 或空表示不限（返回范围内全部 endpoint，含保留键 {@code "*"}）
+     * @param fromBucket 起始桶（含，按分辨率单位）
+     * @param toBucket   结束桶（含，按分辨率单位）
+     * @param limit      行数上限
+     */
+    public List<MetricsRow> queryMetricRows(final String resolution, final String endpoint,
+            final long fromBucket, final long toBucket, final int limit) {
+        final List<MetricsRow> out = new ArrayList<MetricsRow>();
+        if (!enabled || connection == null || limit <= 0 || toBucket < fromBucket) {
+            return out;
+        }
+        final boolean hour = isHourResolution(resolution);
+        final boolean byEndpoint = endpoint != null && !endpoint.isEmpty();
+        final String sql = hour
+                ? (byEndpoint ? H2SqlStatements.SELECT_METRICS_HOUR_BY_ENDPOINT_SQL : H2SqlStatements.SELECT_METRICS_HOUR_RANGE_SQL)
+                : (byEndpoint ? H2SqlStatements.SELECT_METRICS_MINUTE_BY_ENDPOINT_SQL : H2SqlStatements.SELECT_METRICS_MINUTE_RANGE_SQL);
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                int i = 1;
+                if (byEndpoint) {
+                    ps.setString(i++, endpoint);
+                }
+                ps.setLong(i++, fromBucket);
+                ps.setLong(i++, toBucket);
+                ps.setInt(i, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        out.add(toMetricsRow(rs));
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("queryMetricRows", e);
+            }
+        }
+        return out;
+    }
+
+    private MetricsRow toMetricsRow(final ResultSet rs) throws SQLException {
+        return new MetricsRow(rs.getString("service"), rs.getString("endpoint"), rs.getLong("time_bucket"),
+                rs.getLong("request_count"), rs.getLong("error_count"), rs.getLong("slow_count"),
+                rs.getLong("total_latency"), rs.getLong("max_latency"),
+                nullableInt(rs, "p50"), nullableInt(rs, "p90"), nullableInt(rs, "p95"), nullableInt(rs, "p99"),
+                rs.getInt("sample_count"));
+    }
+
+    private static int nullableInt(final ResultSet rs, final String column) throws SQLException {
+        final int value = rs.getInt(column);
+        return rs.wasNull() ? -1 : value;
+    }
+
+    /** 按水位删除过期指标行（指定分辨率）；截止桶由 Java 侧算好传入。 */
+    public void deleteMetricsBefore(final String resolution, final long cutoffBucket) {
+        if (!enabled || connection == null) {
+            return;
+        }
+        final String sql = isHourResolution(resolution)
+                ? H2SqlStatements.DELETE_METRICS_HOUR_BEFORE_SQL : H2SqlStatements.DELETE_METRICS_MINUTE_BEFORE_SQL;
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, cutoffBucket);
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                recordError("deleteMetricsBefore", e);
+            }
+        }
+    }
+
     /**
      * 清空所有行（包级可见，供单元测试隔离使用）。
      */
@@ -624,6 +758,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             try (Statement stmt = connection.createStatement()) {
                 stmt.execute(H2SqlStatements.DELETE_ALL_SEGMENTS_SQL);
                 stmt.execute(H2SqlStatements.DELETE_ALL_AUDITS_SQL);
+                stmt.execute(H2SqlStatements.DELETE_ALL_METRICS_MINUTE_SQL);
+                stmt.execute(H2SqlStatements.DELETE_ALL_METRICS_HOUR_SQL);
             } catch (SQLException e) {
                 recordError("clear", e);
             }

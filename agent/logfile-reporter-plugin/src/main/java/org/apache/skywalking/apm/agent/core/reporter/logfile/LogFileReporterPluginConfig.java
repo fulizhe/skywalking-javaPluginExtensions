@@ -82,6 +82,17 @@ public class LogFileReporterPluginConfig {
             }
 
             /**
+             * Trace 指标聚合配置（Phase 5：入口段 a1 流式聚合，落 H2 内存模式多分辨率表）。
+             * 配置键前缀：{@code plugin.logfilereporter.metrics.*}
+             */
+            public static class Metrics {
+
+                // -Dskywalking.plugin.logfilereporter.metrics.enabled=true
+                /** 是否启用 Trace 指标聚合，默认 true */
+                public static Boolean ENABLED = true;
+            }
+
+            /**
              * H2 影子存储配置（Phase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑）。
              * 配置键前缀：{@code plugin.logfilereporter.h2.*}
              */

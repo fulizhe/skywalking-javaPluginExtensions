@@ -4,14 +4,21 @@ import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.BUFFER_SIZ
 import static org.apache.skywalking.apm.agent.core.conf.Config.Buffer.CHANNEL_SIZE;
 
 import java.io.File;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -26,6 +33,11 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.AsyncTraceAlertDispatcher;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsSink;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsAggregator;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsQuery;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsRollup;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.storage.H2TraceSegmentStorage;
 import org.apache.skywalking.apm.commons.datacarrier.DataCarrier;
 import org.apache.skywalking.apm.commons.datacarrier.buffer.BufferStrategy;
@@ -68,6 +80,15 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	/** H2 影子存储（Phase 1：内存模式，与旧 KeyedLocalStore 路径并行双跑；h2.enabled=false 时为 null，零开销） */
 	private H2TraceSegmentStorage traceSegmentStorage;
+
+	/** Trace 指标聚合器（Phase 5：入口段 a1；metrics.enabled=false 时为 null，零开销） */
+	private TraceMetricsAggregator metricsAggregator;
+	/** 指标翻转定时线程（30s 周期：分钟翻转 → 分钟落库 → 上小时 rollup → 保留期清理） */
+	private ScheduledExecutorService metricsFlushExecutor;
+	private boolean metricsEnabled;
+	private static final long METRICS_FLIP_INTERVAL_MS = 30_000L;
+	/** 聚合器内存保留窗口（分钟桶），与 {@link TraceMetricsAggregator} 保持一致 */
+	private static final int METRICS_LATE_WINDOW_BUCKETS = 3;
 
 	/** debug 一致性比对开关（h2.compare_debug），仅 true 时触发对账 */
 	private boolean compareDebug;
@@ -169,6 +190,171 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		return traceSegmentStorage.recentTraces(limit);
 	}
 
+	/**
+	 * Trace 指标实时快照（供 {@code SWMetricsUtils.statisticMetrics()} 经拦截器反射调用）。
+	 * <p>
+	 * 返回 JDK 原生 Map，不暴露 Agent 自定义类型；H2 不可用时仍返回内存累计快照（降级无损）。
+	 * </p>
+	 */
+	public Map<String, Object> getMetricsStatus() {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		result.put("enabled", metricsEnabled);
+		result.put("storageEnabled", traceSegmentStorage != null);
+		result.put("flipIntervalMs", METRICS_FLIP_INTERVAL_MS);
+		result.put("currentBucket", System.currentTimeMillis() / TraceMetricsQuery.MINUTE_MS);
+		result.put("lateWindowBuckets", METRICS_LATE_WINDOW_BUCKETS);
+		result.put("minuteRetentionBuckets", TraceMetricsQuery.MINUTE_RETENTION_BUCKETS);
+		result.put("hourRetentionBuckets", TraceMetricsQuery.HOUR_RETENTION_BUCKETS);
+		result.put("maxQueryPoints", TraceMetricsQuery.MAX_QUERY_POINTS);
+		if (metricsAggregator != null) {
+			final Map<String, Object> snapshot = metricsAggregator.snapshot();
+			result.put("buckets", enrichBucketStart(snapshot.get("buckets")));
+			result.put("counters", snapshot.get("counters"));
+		} else {
+			result.put("buckets", Collections.emptyList());
+			result.put("counters", Collections.emptyMap());
+		}
+		return result;
+	}
+
+	/**
+	 * 指标条件查询（供 {@code SWMetricsUtils.queryMetrics(condition)} 经拦截器反射调用）。
+	 * <p>
+	 * condition 支持：{@code endpoint}（含保留键 {@code "*"}，缺省不限）、{@code fromBucket} /
+	 * {@code toBucket}（分钟桶，缺省最近 24h）、{@code resolution}（缺省按跨度自动选）、
+	 * {@code limit}（默认 200、上限 1000）。返回 JDK 原生 Map。H2 不可用时返回空集。
+	 * </p>
+	 */
+	public Map<String, Object> queryMetrics(final Map<String, Object> condition) {
+		final Map<String, Object> cond = condition != null ? condition : Collections.<String, Object>emptyMap();
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+		final long nowMinute = System.currentTimeMillis() / TraceMetricsQuery.MINUTE_MS;
+		long to = cond.containsKey("toBucket") ? asLong(cond.get("toBucket"), nowMinute) : nowMinute;
+		// 缺省窗口 = 最近 24h（分钟分辨率），与默认路由阈值一致
+		long from = cond.containsKey("fromBucket")
+				? asLong(cond.get("fromBucket"), to - (24L * 60L - 1L))
+				: to - (24L * 60L - 1L);
+		if (to < from) {
+			final long tmp = from;
+			from = to;
+			to = tmp;
+		}
+		String resolution = asString(cond.get("resolution"));
+		if (resolution == null || resolution.isEmpty()) {
+			resolution = TraceMetricsQuery.routeResolution(from, to);
+		}
+		final int limit = TraceMetricsQuery.clampLimit(asInteger(cond.get("limit")));
+		boolean truncated = false;
+		if (traceSegmentStorage != null) {
+			final String endpoint = asString(cond.get("endpoint"));
+			long queryFrom = from;
+			long queryTo = to;
+			if ("hour".equals(resolution)) {
+				queryFrom = from / TraceMetricsQuery.MINUTES_PER_HOUR;
+				queryTo = to / TraceMetricsQuery.MINUTES_PER_HOUR;
+			}
+			final List<MetricsRow> raw = new ArrayList<MetricsRow>(traceSegmentStorage.queryMetricRows(resolution,
+					endpoint, queryFrom, queryTo, TraceMetricsQuery.MAX_QUERY_POINTS));
+			mergeLiveMinuteRows(raw, resolution, endpoint, from, to);
+			truncated = raw.size() >= TraceMetricsQuery.MAX_QUERY_POINTS;
+			final List<MetricsRow> sampled = TraceMetricsRollup.downsample(raw, limit);
+			for (MetricsRow row : sampled) {
+				rows.add(toBucketMap(resolution, row));
+			}
+		}
+		result.put("resolution", resolution);
+		result.put("rows", rows);
+		result.put("count", rows.size());
+		result.put("truncated", truncated);
+		return result;
+	}
+
+	/**
+	 * 把内存窗口中的实时分钟桶并入查询结果（仅分钟分辨率）：整分翻转前读口也能反映当前窗口。
+	 * 同 (endpoint, 桶) 已在 H2 结果中的不重复追加。
+	 */
+	private void mergeLiveMinuteRows(final List<MetricsRow> rows, final String resolution, final String endpoint,
+			final long fromMinute, final long toMinute) {
+		if (metricsAggregator == null || !"minute".equals(resolution)) {
+			return;
+		}
+		final Set<String> seen = new HashSet<String>();
+		for (MetricsRow r : rows) {
+			seen.add(r.getEndpoint() + "@" + r.getTimeBucket());
+		}
+		for (MetricsRow r : metricsAggregator.memoryRows()) {
+			if (r.getTimeBucket() < fromMinute || r.getTimeBucket() > toMinute) {
+				continue;
+			}
+			if (endpoint != null && !endpoint.isEmpty() && !endpoint.equals(r.getEndpoint())) {
+				continue;
+			}
+			if (seen.add(r.getEndpoint() + "@" + r.getTimeBucket())) {
+				rows.add(r);
+			}
+		}
+	}
+
+	private static List<Map<String, Object>> enrichBucketStart(final Object bucketsObj) {
+		final List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+		if (bucketsObj instanceof List) {
+			for (Object item : (List<?>) bucketsObj) {
+				if (item instanceof Map) {
+					@SuppressWarnings("unchecked")
+					final Map<String, Object> row = new LinkedHashMap<String, Object>((Map<String, Object>) item);
+					row.put("bucketStart", bucketStartText("minute", asLong(row.get("timeBucket"), 0L)));
+					out.add(row);
+				}
+			}
+		}
+		return out;
+	}
+
+	private static Map<String, Object> toBucketMap(final String resolution, final MetricsRow row) {
+		final Map<String, Object> map = row.toMap();
+		map.put("bucketStart", bucketStartText(resolution, row.getTimeBucket()));
+		return map;
+	}
+
+	private static String bucketStartText(final String resolution, final long bucket) {
+		final long ms = "hour".equals(resolution) ? bucket * TraceMetricsQuery.HOUR_MS
+				: bucket * TraceMetricsQuery.MINUTE_MS;
+		return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(ms));
+	}
+
+	private static String asString(final Object value) {
+		return value == null ? null : String.valueOf(value);
+	}
+
+	private static long asLong(final Object value, final long defaultValue) {
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		if (value instanceof String) {
+			try {
+				return Long.parseLong((String) value);
+			} catch (NumberFormatException ignored) {
+				return defaultValue;
+			}
+		}
+		return defaultValue;
+	}
+
+	private static Integer asInteger(final Object value) {
+		if (value instanceof Number) {
+			return Integer.valueOf(((Number) value).intValue());
+		}
+		if (value instanceof String) {
+			try {
+				return Integer.valueOf(Integer.parseInt((String) value));
+			} catch (NumberFormatException ignored) {
+				return null;
+			}
+		}
+		return null;
+	}
+
 	// ==================================== @Override
 
 	@Override
@@ -194,6 +380,98 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 		// H2 影子存储初始化（Phase 1：内存模式，与旧路径并行双跑）
 		h2Config();
+
+		// Trace 指标聚合初始化（Phase 5：入口段 a1 + H2 内存模式多分辨率）
+		metricsConfig();
+	}
+
+	private void metricsConfig() {
+		final Boolean configured = LogFileReporterPluginConfig.Plugin.LogFileReporter.Metrics.ENABLED;
+		this.metricsEnabled = configured == null || configured;
+		if (!metricsEnabled) {
+			LOGGER.info("### [Metrics] trace metrics aggregation is disabled (metrics.enabled=false).");
+			return;
+		}
+		final Integer slowConfig = LogFileReporterPluginConfig.Plugin.LogFileReporter.Alert.DEFAULT_SLOW_THRESHOLD_MS;
+		final long slowThresholdMs = (slowConfig != null && slowConfig > 0) ? slowConfig.longValue() : 3000L;
+		final MetricsSink sink = new MetricsSink() {
+			@Override
+			public void store(final List<MetricsRow> rows) {
+				if (traceSegmentStorage != null) {
+					traceSegmentStorage.storeMetricRows("minute", rows);
+				}
+			}
+		};
+		this.metricsAggregator = new TraceMetricsAggregator(sink, Config.Agent.SERVICE_NAME, slowThresholdMs);
+		startMetricsFlushTimer();
+		LOGGER.info("### [Metrics] TraceMetricsAggregator initialized (service={}, slowThresholdMs={}, storageEnabled={}).",
+				Config.Agent.SERVICE_NAME, slowThresholdMs, traceSegmentStorage != null);
+	}
+
+	private void startMetricsFlushTimer() {
+		final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+			@Override
+			public Thread newThread(final Runnable r) {
+				final Thread t = new Thread(r, "TraceMetrics-Flush");
+				t.setDaemon(true);
+				return t;
+			}
+		});
+		executor.scheduleAtFixedRate(new Runnable() {
+			@Override
+			public void run() {
+				flushMetricsSafely();
+			}
+		}, METRICS_FLIP_INTERVAL_MS, METRICS_FLIP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+		this.metricsFlushExecutor = executor;
+	}
+
+	/** 30s 翻转周期：分钟翻转落库 → 上一小时 rollup → 保留期清理；异常全部吞掉。 */
+	private void flushMetricsSafely() {
+		if (metricsAggregator == null) {
+			return;
+		}
+		try {
+			final long now = System.currentTimeMillis();
+			metricsAggregator.flushClosedBuckets(now);
+			rollupPreviousHour(now);
+			cleanupMetricsRetention(now);
+		} catch (Exception e) {
+			LOGGER.error(e, "### [Metrics] flush cycle failed (swallowed).");
+		}
+	}
+
+	/**
+	 * 把上一小时的分钟行 rollup 成小时行（幂等覆盖）。
+	 * <p>
+	 * 每次翻转都重跑上一小时：迟到段在保留窗口内改写分钟行后，本小时行会被重算覆盖，
+	 * 近似值随之收敛（分位为请求数加权平均，v1 已知偏差）。
+	 * </p>
+	 */
+	private void rollupPreviousHour(final long now) {
+		if (traceSegmentStorage == null) {
+			return;
+		}
+		final long prevHourBucket = now / TraceMetricsQuery.HOUR_MS - 1L;
+		final long fromMinute = prevHourBucket * TraceMetricsQuery.MINUTES_PER_HOUR;
+		final long toMinute = fromMinute + TraceMetricsQuery.MINUTES_PER_HOUR - 1L;
+		final List<MetricsRow> minuteRows = traceSegmentStorage.queryMetricRows("minute", null, fromMinute, toMinute,
+				TraceMetricsQuery.MAX_QUERY_POINTS);
+		if (minuteRows.isEmpty()) {
+			return;
+		}
+		final List<MetricsRow> hourRows = TraceMetricsRollup.toHourRows(minuteRows, prevHourBucket);
+		traceSegmentStorage.storeMetricRows("hour", hourRows);
+	}
+
+	private void cleanupMetricsRetention(final long now) {
+		if (traceSegmentStorage == null) {
+			return;
+		}
+		traceSegmentStorage.deleteMetricsBefore("minute",
+				now / TraceMetricsQuery.MINUTE_MS - TraceMetricsQuery.MINUTE_RETENTION_BUCKETS);
+		traceSegmentStorage.deleteMetricsBefore("hour",
+				now / TraceMetricsQuery.HOUR_MS - TraceMetricsQuery.HOUR_RETENTION_BUCKETS);
 	}
 	
 	private void h2Config() {
@@ -246,6 +524,19 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		carrier.shutdownConsumers();
 		if (traceAlertDispatcher != null) {
 			traceAlertDispatcher.shutdown();
+		}
+		// 指标：停定时器 → 最后一次翻转 + rollup（尽量少丢最后的窗口）→ 再关存储
+		if (metricsFlushExecutor != null) {
+			metricsFlushExecutor.shutdownNow();
+		}
+		if (metricsAggregator != null) {
+			try {
+				final long now = System.currentTimeMillis();
+				metricsAggregator.flushClosedBuckets(now);
+				rollupPreviousHour(now);
+			} catch (Exception e) {
+				LOGGER.error(e, "### [Metrics] final flush on shutdown failed (swallowed).");
+			}
 		}
 		if (traceSegmentStorage != null) {
 			traceSegmentStorage.close();
@@ -305,6 +596,12 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			// 这里是traceId一样的放到一起
 			// 先判断当前traceId是否已存在于logfileStatMap中，如果存在则合并logList，否则直接放入
 			mergeLogIntoStatMap(log);
+
+			// Phase 5 入口段 a1：逐段喂入指标聚合器（非入口段由聚合器内部排除并计数）。
+			// 跑在 DataCarrier 消费线程上，只改内存桶、零 I/O，不为业务线程增加延迟。
+			if (metricsAggregator != null) {
+				metricsAggregator.onSegment(segment);
+			}
 		}
 		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 

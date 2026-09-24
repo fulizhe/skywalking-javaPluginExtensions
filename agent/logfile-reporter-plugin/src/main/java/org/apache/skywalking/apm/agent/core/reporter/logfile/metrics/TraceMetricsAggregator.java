@@ -143,6 +143,22 @@ public class TraceMetricsAggregator {
         }
     }
 
+    /**
+     * 当前内存窗口的全部行（含全局 {@code "*"}），供读口在整分翻转前合并出实时点。
+     * 返回新建列表，元素不可变（供只读消费）。
+     */
+    public List<MetricsRow> memoryRows() {
+        final List<MetricsRow> rows = new ArrayList<MetricsRow>();
+        synchronized (lock) {
+            for (Map.Entry<Long, Map<String, Accumulator>> entry : buckets.entrySet()) {
+                for (Map.Entry<String, Accumulator> key : entry.getValue().entrySet()) {
+                    rows.add(toRow(entry.getKey(), key.getKey(), key.getValue()));
+                }
+            }
+        }
+        return rows;
+    }
+
     /** 当前内存窗口的快照（buckets + counters），JDK 原生类型。 */
     public Map<String, Object> snapshot() {
         final List<Map<String, Object>> bucketRows = new ArrayList<Map<String, Object>>();
@@ -168,7 +184,8 @@ public class TraceMetricsAggregator {
         }
         String key = endpoint;
         Accumulator accumulator = byKey.get(key);
-        if (accumulator == null && !GLOBAL_ENDPOINT.equals(key) && byKey.size() >= MAX_ENDPOINTS_PER_BUCKET) {
+        if (accumulator == null && !GLOBAL_ENDPOINT.equals(key)
+                && endpointCount(byKey) >= MAX_ENDPOINTS_PER_BUCKET) {
             counters.endpointOverflow++;
             key = OTHER_ENDPOINT;
             accumulator = byKey.get(key);
@@ -181,6 +198,11 @@ public class TraceMetricsAggregator {
             counters.sampleOverflow++;
         }
         accumulator.add(duration, error, slow, reservoirRandom);
+    }
+
+    /** 端点基数（不含全局保留键 {@code "*"}）：上限只约束真实 endpoint。 */
+    private static int endpointCount(final Map<String, Accumulator> byKey) {
+        return byKey.size() - (byKey.containsKey(GLOBAL_ENDPOINT) ? 1 : 0);
     }
 
     private MetricsRow toRow(final long bucket, final String endpoint, final Accumulator accumulator) {

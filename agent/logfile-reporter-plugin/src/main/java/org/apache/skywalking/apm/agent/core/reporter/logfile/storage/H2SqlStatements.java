@@ -63,6 +63,90 @@ final class H2SqlStatements {
 
     static final String DELETE_ALL_AUDITS_SQL = "DELETE FROM trace_parity_audit";
 
+    // ==================== Phase 5：Trace 指标（分钟 + 小时，双分辨率同结构） ====================
+
+    static final String CREATE_METRICS_MINUTE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS trace_metrics_minute ("
+            + "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
+            + "service VARCHAR(256) NOT NULL, "
+            + "endpoint VARCHAR(512) NOT NULL, "
+            + "time_bucket BIGINT NOT NULL, "
+            + "request_count BIGINT NOT NULL, "
+            + "error_count BIGINT NOT NULL, "
+            + "slow_count BIGINT NOT NULL, "
+            + "total_latency BIGINT NOT NULL, "
+            + "max_latency BIGINT, "
+            + "p50 INT, p90 INT, p95 INT, p99 INT, "
+            + "sample_count INT, "
+            + "create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            + "update_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            + ")";
+
+    static final String CREATE_METRICS_MINUTE_KEY_INDEX_SQL =
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_metrics_minute_key ON trace_metrics_minute(service, endpoint, time_bucket)";
+
+    static final String CREATE_METRICS_MINUTE_BUCKET_INDEX_SQL =
+            "CREATE INDEX IF NOT EXISTS ix_metrics_minute_bucket ON trace_metrics_minute(time_bucket)";
+
+    static final String CREATE_METRICS_HOUR_TABLE_SQL = "CREATE TABLE IF NOT EXISTS trace_metrics_hour ("
+            + "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
+            + "service VARCHAR(256) NOT NULL, "
+            + "endpoint VARCHAR(512) NOT NULL, "
+            + "time_bucket BIGINT NOT NULL, "
+            + "request_count BIGINT NOT NULL, "
+            + "error_count BIGINT NOT NULL, "
+            + "slow_count BIGINT NOT NULL, "
+            + "total_latency BIGINT NOT NULL, "
+            + "max_latency BIGINT, "
+            + "p50 INT, p90 INT, p95 INT, p99 INT, "
+            + "sample_count INT, "
+            + "create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            + "update_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            + ")";
+
+    static final String CREATE_METRICS_HOUR_KEY_INDEX_SQL =
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_metrics_hour_key ON trace_metrics_hour(service, endpoint, time_bucket)";
+
+    static final String CREATE_METRICS_HOUR_BUCKET_INDEX_SQL =
+            "CREATE INDEX IF NOT EXISTS ix_metrics_hour_bucket ON trace_metrics_hour(time_bucket)";
+
+    private static final String MERGE_METRICS_COLUMNS =
+            "(service, endpoint, time_bucket, request_count, error_count, slow_count, total_latency, "
+                    + "max_latency, p50, p90, p95, p99, sample_count, update_at) "
+                    + "KEY(service, endpoint, time_bucket) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
+
+    static final String MERGE_METRICS_MINUTE_SQL = "MERGE INTO trace_metrics_minute " + MERGE_METRICS_COLUMNS;
+
+    static final String MERGE_METRICS_HOUR_SQL = "MERGE INTO trace_metrics_hour " + MERGE_METRICS_COLUMNS;
+
+    private static final String METRICS_SELECT_COLUMNS =
+            "service, endpoint, time_bucket, request_count, error_count, slow_count, total_latency, "
+                    + "max_latency, p50, p90, p95, p99, sample_count";
+
+    static final String SELECT_METRICS_MINUTE_BY_ENDPOINT_SQL = "SELECT " + METRICS_SELECT_COLUMNS
+            + " FROM trace_metrics_minute WHERE endpoint = ? AND time_bucket BETWEEN ? AND ? "
+            + "ORDER BY time_bucket ASC LIMIT ?";
+
+    static final String SELECT_METRICS_MINUTE_RANGE_SQL = "SELECT " + METRICS_SELECT_COLUMNS
+            + " FROM trace_metrics_minute WHERE time_bucket BETWEEN ? AND ? "
+            + "ORDER BY endpoint ASC, time_bucket ASC LIMIT ?";
+
+    static final String SELECT_METRICS_HOUR_BY_ENDPOINT_SQL = "SELECT " + METRICS_SELECT_COLUMNS
+            + " FROM trace_metrics_hour WHERE endpoint = ? AND time_bucket BETWEEN ? AND ? "
+            + "ORDER BY time_bucket ASC LIMIT ?";
+
+    static final String SELECT_METRICS_HOUR_RANGE_SQL = "SELECT " + METRICS_SELECT_COLUMNS
+            + " FROM trace_metrics_hour WHERE time_bucket BETWEEN ? AND ? "
+            + "ORDER BY endpoint ASC, time_bucket ASC LIMIT ?";
+
+    static final String DELETE_METRICS_MINUTE_BEFORE_SQL = "DELETE FROM trace_metrics_minute WHERE time_bucket < ?";
+
+    static final String DELETE_METRICS_HOUR_BEFORE_SQL = "DELETE FROM trace_metrics_hour WHERE time_bucket < ?";
+
+    static final String DELETE_ALL_METRICS_MINUTE_SQL = "DELETE FROM trace_metrics_minute";
+
+    static final String DELETE_ALL_METRICS_HOUR_SQL = "DELETE FROM trace_metrics_hour";
+
     private H2SqlStatements() {
     }
 }
