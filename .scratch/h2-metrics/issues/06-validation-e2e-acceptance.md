@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] `validate-h2.ps1` 增指标断言：指标行存在、含全局行、口径自洽（`error+slow ≤ request`、`p50 ≤ p95 ≤ p99`、`sample_count ≤ request_count`）、四档范围可查、查询上限截断。
-- [ ] `validate.ps1` 全绿（对外零行为变化）。
-- [ ] 端到端：造流量后 `/inner/sw/metrics` 读口与大屏显示一致。
-- [ ] `mvn -o -pl logfile-reporter-plugin test` 全绿。
+- [x] `validate-h2.ps1` 增指标断言：指标行存在、含全局行、口径自洽（`error+slow ≤ request`、`p50 ≤ p95 ≤ p99`、`sample_count ≤ request_count`）、四档范围可查、查询上限截断。
+- [x] `validate.ps1` 全绿（对外零行为变化）。
+- [x] 端到端：造流量后 `/inner/sw/metrics` 读口与大屏显示一致。
+- [x] `mvn -o -pl logfile-reporter-plugin test` 全绿。

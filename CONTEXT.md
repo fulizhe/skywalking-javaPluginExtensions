@@ -48,7 +48,7 @@ _Avoid_: LRU 缓存(历史文档旧称)、将环形队列视为语义
 _Avoid_: 缓存、LRU、一级存储
 
 **trace 持久层 (trace persistence tier)**:
-跨进程重启保留链路数据的分层:只包含 slow/error 明细与 Trace 指标;normal 明细不进入该层。
+链路数据的本地分层存储:只包含 slow/error **明细**与 Trace 指标;normal 明细不进入该层。明细与指标**未来经 file 模式可跨进程重启保留**;**本期 Trace 指标为 H2 内存模式**（随进程存活，不落盘）。
 _Avoid_: 落盘日志、数据库(具体技术)
 
 **链路分级 (trace level)**:
@@ -56,7 +56,7 @@ _Avoid_: 落盘日志、数据库(具体技术)
 _Avoid_: 告警级别、日志级别
 
 **Trace 指标 (trace metrics)**:
-从链路数据流上聚合出的请求数、错误数、错误率、耗时与分位数;与 SkyWalking 自带的 JVM/meter 指标不同源。
+在采集流上按**入口段**（段内含 Entry span 即一次事务，normal 也计入）流式聚合出的请求数、错误数、错误率、耗时与分位数;多分辨率（分钟桶 + 小时 rollup），本期存 H2 **内存模式**（随进程存活，不落盘）。与 SkyWalking 自带的 JVM/meter 指标不同源。
 _Avoid_: 本地指标、监控指标
 
 **影子路径 (shadow path)**:

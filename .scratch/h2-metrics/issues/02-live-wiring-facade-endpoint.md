@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] 挂钩只新增一次喂入调用，既有合并 / 告警 / 存储路径零改动、对外行为不变。
-- [ ] `SWMetricsUtils.statisticMetrics()` 经反射跨 ClassLoader 取值，只返回 JDK 原生 Map。
-- [ ] 演示应用读口返回契约字段（enabled / storageEnabled / currentBucket / buckets / counters…）。
-- [ ] 手工验证：造流量后读口数值与预期一致（请求数 / 错误 / 慢 / 分位随流量增长）。
-- [ ] H2 不可用时不影响实时快照（降级无损）。
+- [x] 挂钩只新增一次喂入调用，既有合并 / 告警 / 存储路径零改动、对外行为不变。
+- [x] `SWMetricsUtils.statisticMetrics()` 经反射跨 ClassLoader 取值，只返回 JDK 原生 Map。
+- [x] 演示应用读口返回契约字段（enabled / storageEnabled / currentBucket / buckets / counters…）。
+- [x] 手工验证：造流量后读口数值与预期一致（请求数 / 错误 / 慢 / 分位随流量增长）。
+- [x] H2 不可用时不影响实时快照（降级无损）。

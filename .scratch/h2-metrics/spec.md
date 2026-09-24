@@ -19,7 +19,7 @@ Status: ready-for-agent
 - 在采集流 `consume` 上**逐段**聚合，口径为"**入口段即一次事务**"（段内含 Entry span）；normal 天然计入，不需要单独分支。
 - 聚合先在进程内累积为**分钟桶**；整分翻转时计算分位数，批量 `MERGE` 写入 H2 **内存模式**表 `trace_metrics_minute`（`jdbc:h2:mem`，随进程存活、不落盘）。除每个 endpoint 各一行外，**每个桶另写一行全局汇总**（保留键 `"*"`），使"全站分位趋势"精确可还原，而非由各 endpoint 分位相加。
 - **多分辨率**：小时整点时把分钟行 rollup 进 `trace_metrics_hour`（同结构，含 `"*"` 行），使 `7d` 乃至未来的 `30d` 只返回百量级点而非上万点。分位数不可相加，小时分位由该小时的分钟行按请求数**加权平均**近似（计数 / 总耗时 / 最大耗时精确合并）；这是 v1 已知偏差，v2 换直方图可消除。
-- **范围路由**：查询按跨度选分辨率——`≤ 24h` 走分钟表（图表再降采样到点数上限），`> 24h` 走小时表。头部四档 `1h / 6h / 24h / 7d` 由此全部可出图；`30d` 只要小时表保留期够即可覆盖（本期保留 30d）。
+- **范围路由**：查询按跨度选分辨率——`≤ 24h` 走分钟表（图表再降采样到点数上限），`> 24h` 走小时表。头部五档 `1h / 6h / 24h / 7d / 30d` 由此全部可出图（`30d` 走小时表，本期小时表保留 30d）。
 - 新增宿主工具类 `SWMetricsUtils`（与 `SWLogfileReporterUtils` / `SWTraceParityUtils` 同范式），暴露 `statisticMetrics()`（当前窗口快照）与 `queryMetrics(condition)`（条件查询），只返回 JDK 原生 `Map`。
 - 演示应用新增读口，并新增**真实的 `metrics.html` 仪表盘**（沿用原型 A 方案：左侧 endpoint 导航 + KPI + 分位趋势 + endpoint 表 + 链路下钻，头部四档范围），数据来自真实指标而非模拟。
 
@@ -31,7 +31,7 @@ Status: ready-for-agent
 2. 作为单体应用的开发者，我想按 endpoint 看到 P50/P90/P95/P99 与平均/最大耗时，以便判断延迟分布而不只是平均值。
 3. 作为单体应用的开发者，我想把 normal 流量也计入总量与耗时分布，以便看到整体口径（而不是只看 slow/error）。
 4. 作为单体应用的开发者，我想按 1h / 6h / 24h / 7d 四档时间范围看趋势，以便从近到远定位突增与劣化。
-5. 作为后续阶段作者，我想预留 30d 档位（小时分辨率足够覆盖），以便未来只调保留期就能上线更长范围。
+5. 作为单体应用的开发者，我想有 30d 档位（小时分辨率足够覆盖），以便回看一个月内的趋势；**本期一并实现**，大屏不再置灰。
 6. 作为插件作者，我想统计挂在**入口段**（含 Entry span 的段）上，以便口径等于 Glowroot 事务 / SkyWalking service 指标，而不是依赖不完备的合并视图。
 7. 作为插件作者，我想**不修改告警包**（不注入 evaluator、不改 `evaluate` 签名），以便告警行为零变化、规则命中计数不被双算。
 8. 作为插件作者，我想聚合发生在**已离开业务线程**的批量消费线程上，以便统计不增加请求延迟。
@@ -86,7 +86,7 @@ Status: ready-for-agent
   - Endpoint 指标表（Endpoint / 请求 / 错误率 / P50 / P95 / P99 / 慢 / 趋势 / 分级）← 桶行的 `requestCount / errorRate / p50 / p95 / p99 / slowCount`；趋势 = 该 endpoint 的分钟序列（按需 `queryMetrics(endpoint=…)`）；分级 = 前端按 `errorRate/slowRate` 阈值派生。
   - KPI（近 1h 请求数 / 错误率、P95/P99、慢调用数、活跃 endpoint）← 近 1h 桶计数求和 + 全局行分位；活跃 endpoint = 范围内 endpoint 去重数。
   - 分位趋势图（P50/P90/P95/P99 分位带）与吞吐 / 错误图 ← 全局行序列：`≤ 24h` 用分钟行、`7d/30d` 用小时行（同一契约，靠 `resolution` 区分）。
-  - 头部四档 `1h / 6h / 24h / 7d`：`1h/6h/24h` → 分钟分辨率，`7d`（及未来 `30d`）→ 小时分辨率；点数已由路由与上限控制。
+   - 头部五档 `1h / 6h / 24h / 7d / 30d`：`1h/6h/24h` → 分钟分辨率，`7d/30d` → 小时分辨率；点数已由路由与上限控制。
   - 数据面卡片（H2 状态/行数、环形载荷占用、影子对账差异）← 既有对账读口；标签按内存模式改为"H2 内存"；环形载荷占用若未暴露则补统计字段或该行留空（实现时定，不新增查询面）。
   - 链路下钻复用既有链路读口（`trace-recent` + 链路视图）；指标契约只提供"指标 → endpoint / 时间"，不提供 traceId 列表。
 - **演示应用**：新增 `/inner/sw/metrics` 读口；新增真实 `metrics.html`（原型 A 布局，轮询 `statisticMetrics()`/`queryMetrics()`，头部四档范围，下钻复用既有链路视图）；原型文件保留不动。
@@ -122,3 +122,9 @@ Status: ready-for-agent
 - **降级语义**：H2 不可用时聚合仍在内存；`queryMetrics` 返回空；`statisticMetrics` 照常。
 - **参考**：`docs/todos/h2化-统一方案.md`（§4 Phase 5、§5.3、§11）、`docs/todos/h2化-phase5-metrics实现细化.md`、`docs/todos/h2化-phase5-metrics讨论.md`、`docs/todos/h2化-phase5-metrics-口径与插入点讨论.md`、`docs/reference/sw-glowroot-cat-metrics-implementations.md`；原型 `agent/demo-app/src/main/resources/static/dashboards/metrics-prototype.html`（A 方案，头部 `1h/6h/24h/7d`）。
 - **领域词表**：使用 `CONTEXT.md` 的 `Trace 指标`、`数据流`、`统计快照`、`宿主工具类`、`trace 内存热层`、`验证回路` 等术语。
+
+## Comments
+
+- 2026-09-24：文档一致性校准完成（统一方案 §2.3/§4 Phase 5/§6.3、`CONTEXT.md` 与 spec 对齐 a1 口径）。**范围追加：`30d` 档本期一并实现**（不再预留/置灰）。实现自票 01 起，状态保持 `ready-for-agent`（无独立 in-progress triage 标签）。
+- 2026-09-24：**实现完成（票 01–06 + 30d）**。`mvn -o -pl logfile-reporter-plugin test` 132 全绿；`validate.ps1` 与 `validate-h2.ps1`（含指标断言：全局行、口径自洽、五档路由、limit 截断）全绿。落地要点：入口段 a1 挂钩 `consume`；自持 30s 守护线程做分钟翻转 → 分钟表 MERGE → 上一小时 rollup → 保留期清理；读口 `SWMetricsUtils.statisticMetrics()/queryMetrics()`（新拦截器 + instrumentation + `.def`）经 `/inner/sw/metrics`、`/inner/sw/metrics/query` 暴露；真实大屏 `dashboards/metrics.html`（五档）。查询读口会并入内存窗口的当前分钟（整分翻转前即可见）。
+- 已知偏差补充：endpoint 基数溢出 v1 为**先到先归并**（非 spec 原文的 top-N 按请求数归并）；对单体低基数场景无实际影响，如需精确 top-N 记后续项。
