@@ -9,3 +9,8 @@
   （基准：`456b191`；已核实：采集阈值、写入路径与背压、H2 + `CappedDatabase` 存储模型、读取路径、partial trace；未核实：默认 Reaper 过期时长 / capped 默认大小等，见 §7）
 - **Glowroot CappedDatabase：H2 行 + 封顶文件存 payload** —— 何时读：评估"H2 只存索引/header、大 payload 走环形封顶文件"或磁盘硬上限方案时。→ `glowroot-capped-database.md`
   （基准：`456b191`；已核实：文件格式、块读写、覆盖判定、压缩/fsync/resize/统计、`TraceDao` 指针语义；未核实：capped 默认大小 / 配置键与 resize 入口，见 §6）
+
+**三家 metrics 实现对照（Phase 5 选型用，一手核实）**：均"在采集流上算、存预聚合"，差别在**算的进程**与**落库时机**。
+
+- **CAT / Glowroot / SkyWalking：metrics 计算与存储实现对照** —— 何时读：设计 trace-based metrics（在哪算、何时落库、分位数方案）时；含 CAT 服务端"收到即算"、Glowroot 进程内 ingest + HdrHistogram、SkyWalking OAL + L1/L2 + 降采样。→ `sw-glowroot-cat-metrics-implementations.md`
+  （基准：CAT `e815e74` / Glowroot `456b191` / SkyWalking `3af86a1`；已核实：统计进程与时机、聚合管线、落库/降采样、分位数算法、原始 vs 预聚合落点；未核实：各家排期细节与实测数据，见 §6）
