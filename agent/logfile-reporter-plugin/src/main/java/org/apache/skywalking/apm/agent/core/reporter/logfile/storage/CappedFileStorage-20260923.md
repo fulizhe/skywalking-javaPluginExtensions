@@ -12,6 +12,8 @@
 本类是 Glowroot `CappedDatabase.java` 的**最小形态移植**（去掉了 resize / isInTheFuture / 压缩率统计，载荷改为每块独立 GZIP）：
 
 > https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/util/CappedDatabase.java
+>
+> 本项目内的姊妹篇：`docs/reference/glowroot-capped-database.md`（Glowroot 拆法的一手核实与"最小形态"依据）、`docs/adr/adr-03-capped-file-payload-for-trace-details.md`（本项目的决策与后果）。
 
 ---
 

@@ -4,6 +4,7 @@
 > **核实基准**：`glowroot/glowroot` @ `456b1910bbeeb152efd78103043d71c08b183975`（main，2026-09-08），逐文件打开源码确认。
 > **证据类型**：`【源码】`；无【实测】（本仓库未运行 Glowroot）。
 > **姊妹篇**：整体范式（采集/写入/查询/保留）见 `glowroot-trace-storage.md`；本文聚焦**存储拆分与 CappedDatabase 文件机制**。
+> **本项目的落地（ADR-03）**：已按本文 §5 的"最小形态"实现（去掉 resize/future/统计，载荷改为每块 GZIP）——见实现笔记 `agent/logfile-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/reporter/logfile/storage/CappedFileStorage-20260923.md` 与决策记录 `docs/adr/adr-03-capped-file-payload-for-trace-details.md`。
 > **已核实**：文件格式、块写入/读取、覆盖判定、压缩、fsync、resize、统计指标、`TraceDao` 的读写与 `Existence` 语义。
 > **未核实**（见 §6）：capped 文件默认大小/配置键与默认值、resize 的触发入口、rollup capped db（非 trace）的用途细节。
 
@@ -179,7 +180,7 @@ isInTheFuture(id) = id >= currIndex                   ← 尚未写入（复制�
 - 文件损坏/复制错位（`isInTheFuture` 场景）要能容错为"读不到"而不是崩；
 - resize 与"保留 min(旧,新)"的基线重算。
 
-**结论**：Phase 2 先按统一方案全进 H2（简单、可审计、与 OAP 对齐）；把本文当**磁盘增长失控时的逃生方案**记录在案，触发条件出现再评估（届时可新写 ADR）。
+**结论（已演进，2026-09-22）**：本项目已按上述**最小形态**落地——H2 只留 header/索引 + `payload_id` 指针，payload 经 GZIP 写**单个环形封顶文件**（`CappedFileStorage`，默认 128MB，写满覆盖最旧），写入异步化、payload 过期只降级。决策与后果见 ADR-03 `docs/adr/adr-03-capped-file-payload-for-trace-details.md`；实现细节与逐段解读见 `agent/logfile-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/reporter/logfile/storage/CappedFileStorage-20260923.md`。（下文原有的"先全进 H2、把本文当逃生方案"结论已被取代，保留 §5 上文仅为记录当时的取舍。）
 
 ---
 
