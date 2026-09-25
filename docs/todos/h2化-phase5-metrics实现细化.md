@@ -1,5 +1,7 @@
 # H2 化 Phase 5：trace-based Metrics 实现细化（决策锁定版）
 
+> **实现备注**：部分实现：数据模型、分钟聚合、分钟/小时 rollup、H2 查询 Facade 与指标保留期清理已实现；§3.1 合并视图、§3.2 `TraceEvaluator` 复用、§7 完整 TTL 空间回收等未全部实现或已被新路线取代。
+>
 > **⚠️ 2026-09-24 路线调整（部分取代）**：本文的 **§3.1 合并事件挂钩**、**§3.2 告警包改造**（evaluator 注入 / `evaluate(snapshot,bool)` / `entryStartTimeMs`）、**§7 TTL** 与 **§11 落地小步** 中相应部分**已被取代**——Phase 5 改为 **入口段 a1（`consume` 逐段）+ H2 内存模式 + 多分辨率（分钟 + 小时）**，**不复用 `TraceEvaluator` / 不改告警包**。**权威 spec：`.scratch/h2-metrics/spec.md`（ready-for-agent）**，冲突处以 spec 为准；本文 §2 数据模型、§4 分位数、§6 线程、§8 facade 契约、§12 决策台账其余项仍可参考。
 >
 > **文档定位**：把 [`h2化-phase5-metrics讨论.md`](h2化-phase5-metrics讨论.md) 的推演**落到当前代码**上，逐项锁定决策，使实现时不再出现大的方向变动。本文是讨论稿的**细化**，不是替代；冲突处以本文为准。

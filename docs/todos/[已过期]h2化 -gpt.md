@@ -1,5 +1,7 @@
 # SkyWalking Java Agent 9.4 本地 Trace / Log 存储演进方案
 
+> **实现备注**：部分实现：H2 存储/查询、Native Type Facade 与 Metrics 等核心能力已有；原 `LogStorage` / `MemoryLogStorage` 抽象、H2 file 模式、分级 TTL 等未全部实现，文档已过期。
+>
 > 本文用于记录 `skywalking-javaPluginExtensions` 项目中本地 Trace / Log 数据采集与存储能力的长期演进方案。
 >
 > 当前项目基于 **Apache SkyWalking Java Agent 9.4**，现有核心入口为 `SWLogfileReporterUtils`，内部通过 `LogReportServiceLocalClient` 管理本地报告数据。

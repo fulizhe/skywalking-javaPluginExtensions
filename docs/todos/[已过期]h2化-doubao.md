@@ -1,5 +1,7 @@
 # SkyWalking Agent 本地链路追踪插件方案评估 & 设计文档
 
+> **实现备注**：部分实现：H2 存储/查询、宿主工具类与 Metrics 已落地；原 `TraceStorage` 抽象、H2 file 模式、normal/slow/error 分级 TTL 及部分 OAP 表复用方案未全部实现，文档已过期。
+>
 > 文档用途：内部Wiki持久化 
 >
 > 项目背景：基于 **SkyWalking Java Agent 9.4**，自定义 Reporter，借鉴 Druid 监控思路，实现单体应用进程内链路采集与查询；当前版本内存存储，计划迁移 H2（参考 Glowroot），**个人兴趣自研、公司无硬性任务，未给资源，内部产品自用，不依赖独立 SkyWalking OAP**。 
