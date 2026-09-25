@@ -552,7 +552,8 @@ RENDER.profile = function (results, box) {
 
 /* ---- 07 H2 影子对账 ---- */
 /* 数据来源 /inner/sw/trace-parity(宿主工具类 SWTraceParityUtils.statisticParity 经拦截器反射取数)。
-   字段:trace 计数 / H2 存储状态 / 审计表水位 / 最近差异明细(trace_parity_audit)。与 H2 Web Console 同源。 */
+   字段:trace 计数 / H2 存储状态 / 审计表水位 / 最近差异明细(trace_parity_audit) / 孤段过滤计数与最近样本(orphanSegments/lastOrphan)。
+   与 H2 Web Console 同源。 */
 RENDER.parity = function (results, box) {
     var s = results[0];
     box.innerHTML = "";
@@ -568,6 +569,7 @@ RENDER.parity = function (results, box) {
     chips.appendChild(chip("已检查 trace", s.checkedCount != null ? s.checkedCount : "-"));
     chips.appendChild(chip("累计差异", s.totalDiffs ? badge(s.totalDiffs, "err") : badge("0", "ok")));
     chips.appendChild(chip("H2 trace 数", s.h2Size != null ? s.h2Size : "-"));
+    chips.appendChild(chip("孤段(过滤)", s.orphanSegments != null ? s.orphanSegments : "-"));
     chips.appendChild(chip("H2 错误数", s.h2ErrorCount != null ? s.h2ErrorCount : "-"));
     chips.appendChild(chip("审计表水位", (s.auditRowCount != null ? s.auditRowCount : "-") + " / " + (s.auditWaterLevel != null ? s.auditWaterLevel : "-")));
     box.appendChild(chips);
@@ -576,6 +578,15 @@ RENDER.parity = function (results, box) {
     docLink.style.cssText = "margin:0 0 14px;font-size:13px;color:#6b7280;";
     docLink.innerHTML = '不知道 H2 控制台怎么用?看 <a href="../SWTraceParityVerify.html" target="_blank">H2 影子对账操作说明 →</a>(含 JDBC URL、登录信息与现成 SQL)';
     box.appendChild(docLink);
+
+    // 最近被过滤的孤段样本(2026-09-25 起)：无 Entry 且无 ref 的段，常见于 HikariCP/JDBC、gRPC 无上下文调用
+    if (s.lastOrphan) {
+        var orphanNote = el("div");
+        orphanNote.style.cssText = "margin:0 0 12px;font-size:12.5px;color:#6b7280;";
+        orphanNote.innerHTML = "最近被过滤的孤段(无 Entry 且无 ref,常见 HikariCP/JDBC、gRPC 无上下文调用): "
+            + "<span class='mono'>" + esc(s.lastOrphan) + "</span>";
+        box.appendChild(orphanNote);
+    }
 
     if (!s.compareDebug) {
         box.appendChild(el("div", "note",
