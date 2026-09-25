@@ -3,95 +3,222 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>H2 链路可视化（单条 Trace）</title>
+<title>Trace 双源对照（单条 Trace）</title>
 <script src="../lib/echarts.min.js"></script>
 <style>
-  html, body { margin: 0; padding: 0; background: #23272e; color: #eaeaea;
+  :root {
+    --bg: #23272e;
+    --surface: #1c2027;
+    --surface-raised: #232a33;
+    --surface-hover: #2a313b;
+    --input: #2b313a;
+    --border: #333;
+    --border-strong: #3d4650;
+    --text: #eaeaea;
+    --muted: #9aa4b2;
+    --blue: #3b82f6;
+    --blue-soft: #7fd1ff;
+    --red: #e74c3c;
+    --red-soft: #ff6b6b;
+    --green: #86efac;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; min-width: 320px; background: var(--bg); color: var(--text);
                font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; }
-  .bar { padding: 10px 16px; background: #1c2027; border-bottom: 1px solid #333; display: flex;
-         flex-wrap: wrap; gap: 8px; align-items: center; position: sticky; top: 0; z-index: 10; }
-  .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; color: #7fd1ff; }
-  input { padding: 5px 8px; font-family: monospace; background: #2b313a; color: #eaeaea;
-          border: 1px solid #3d4650; border-radius: 4px; width: 360px; }
-  button { padding: 5px 12px; cursor: pointer; background: #3b82f6; color: #fff; border: 0;
+  button, input { font: inherit; }
+  .bar { padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+         display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: sticky; top: 0; z-index: 10; }
+  .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; color: var(--blue-soft); }
+  .field { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  input { padding: 5px 8px; font-family: monospace; background: var(--input); color: var(--text);
+          border: 1px solid var(--border-strong); border-radius: 4px; width: 360px; }
+  button { padding: 5px 12px; cursor: pointer; background: var(--blue); color: #fff; border: 0;
            border-radius: 4px; }
-  button.sec { background: #3d4650; }
+  button.sec { background: var(--border-strong); }
   button:hover { filter: brightness(1.12); }
-  .summary { margin-left: auto; color: #9aa4b2; font-size: 12px; font-family: monospace; }
-  .summary b { color: #eaeaea; }
-  .expired { color: #ff6b6b; font-weight: bold; }
-  .layout { display: flex; gap: 12px; padding: 12px 16px; align-items: flex-start; }
-  #recentPane { width: 380px; flex: 0 0 380px; max-height: 82vh; overflow: auto;
-                background: #1c2027; border: 1px solid #333; border-radius: 6px; }
-  #recentPane.collapsed { display: none; }
-  #recentPane h2 { font-size: 13px; margin: 8px 12px; color: #7fd1ff; }
-  #chart { flex: 1 1 auto; height: 82vh; min-width: 320px; background: #23272e;
-           border: 1px solid #333; border-radius: 6px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--blue-soft); outline-offset: 2px; }
+  .summary { flex: 1 1 420px; min-width: 0; margin-left: auto; color: var(--muted); font-size: 12px;
+             font-family: monospace; text-align: right; overflow-wrap: anywhere; }
+  .page { padding: 12px 16px 24px; }
+  .recent-panel { width: 100%; max-height: 260px; overflow: auto; margin-bottom: 12px;
+                  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .recent-panel.collapsed { display: none; }
+  .recent-panel h2 { font-size: 13px; margin: 8px 12px; color: var(--blue-soft); }
+  .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  .source-panel { min-width: 0; overflow: hidden; background: var(--surface);
+                  border: 1px solid var(--border); border-radius: 6px; }
+  .source-header { min-height: 58px; padding: 10px 12px; display: flex; gap: 10px;
+                   align-items: flex-start; justify-content: space-between; border-bottom: 1px solid var(--border); }
+  .source-heading h2 { margin: 0 0 4px; font-size: 14px; color: var(--blue-soft); }
+  .source-heading code { color: var(--muted); font-size: 11px; }
+  .source-state { flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; font-size: 11px;
+                  background: var(--surface-raised); color: var(--muted); }
+  .source-state.loading { color: var(--blue-soft); }
+  .source-state.ready { color: var(--green); }
+  .source-state.error { color: var(--red-soft); }
+  .source-summary { min-height: 38px; padding: 9px 12px; color: var(--muted);
+                    font-family: monospace; font-size: 12px; border-bottom: 1px solid var(--border); }
+  .source-summary b { color: var(--text); }
+  .source-summary .expired { color: var(--red-soft); font-weight: 600; }
+  .chart-wrap { position: relative; height: 300px; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .chart-wrap.compact { height: 180px; }
+  .chart-wrap.medium { height: 250px; }
+  .chart { width: 100%; height: 100%; }
+  .source-feedback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+                     padding: 24px; color: var(--muted); text-align: center; background: rgba(35, 39, 46, .92); }
+  .source-feedback.error { color: var(--red-soft); }
+  [hidden] { display: none !important; }
+  .table-wrap { max-height: 520px; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) var(--surface); }
+  .table-wrap::-webkit-scrollbar { width: 7px; height: 7px; }
+  .table-wrap::-webkit-scrollbar-track { background: var(--surface); }
+  .table-wrap::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
   table { border-collapse: collapse; width: 100%; font-size: 12px; }
-  #recentPane th, #recentPane td { border-bottom: 1px solid #2c333c; padding: 4px 8px; text-align: left; }
-  #recentPane th { position: sticky; top: 0; background: #232a33; color: #9aa4b2; }
-  #recentPane tr { cursor: pointer; }
-  #recentPane tr:hover { background: #2a313b; }
-  #spansWrap { padding: 0 16px 24px; }
-  #spansWrap h2 { font-size: 14px; color: #7fd1ff; }
-  #spanTable { background: #1c2027; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
-  #spanTable th, #spanTable td { border-bottom: 1px solid #2c333c; padding: 5px 8px; text-align: left;
-                                 font-family: monospace; white-space: nowrap; }
-  #spanTable th { background: #232a33; color: #9aa4b2; }
-  #spanTable tr { cursor: pointer; }
-  #spanTable tr:hover { background: #2a313b; }
-  .durbar { position: relative; height: 12px; background: #2c333c; border-radius: 3px; min-width: 120px; }
-  .durbar > span { position: absolute; top: 0; bottom: 0; background: #3b82f6; border-radius: 3px; }
-  .durbar.err > span { background: #e74c3c; }
-  .tag { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 11px; background: #2c333c; color: #9aa4b2; }
-  .tag.entry { background: #14532d; color: #86efac; }
+  #recentPane th, #recentPane td { border-bottom: 1px solid var(--surface-raised); padding: 4px 8px; text-align: left; }
+  #recentPane th { position: sticky; top: 0; background: var(--surface-raised); color: var(--muted); }
+  #recentPane tr[data-trace-id] { cursor: pointer; }
+  #recentPane tr[data-trace-id]:hover { background: var(--surface-hover); }
+  .span-table { min-width: 0; table-layout: fixed; }
+  .span-table th, .span-table td { border-bottom: 1px solid var(--surface-raised); padding: 5px 5px;
+                                     text-align: left; font-family: monospace; white-space: normal; overflow-wrap: anywhere; }
+  .span-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-raised); color: var(--muted); }
+  .span-table th:nth-child(1) { width: 4%; }
+  .span-table th:nth-child(2) { width: 9%; }
+  .span-table th:nth-child(3) { width: 13%; }
+  .span-table th:nth-child(4) { width: 23%; }
+  .span-table th:nth-child(5) { width: 7%; }
+  .span-table th:nth-child(6) { width: 13%; }
+  .span-table th:nth-child(7) { width: 14%; }
+  .span-table th:nth-child(8) { width: 11%; }
+  .span-table th:nth-child(9) { width: 6%; }
+  .span-table tbody tr:not(.message-row) { cursor: pointer; }
+  .span-table tbody tr:not(.message-row):hover { background: var(--surface-hover); }
+  .message-row td { height: 72px; color: var(--muted); text-align: center; }
+  .message-row.error td { color: var(--red-soft); }
+  .durbar { position: relative; height: 12px; background: var(--surface-raised); border-radius: 3px; min-width: 0; width: 100%; }
+  .durbar > span { position: absolute; top: 0; bottom: 0; background: var(--blue); border-radius: 3px; }
+  .durbar.err > span { background: var(--red); }
+  .tag { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 11px; white-space: nowrap;
+         background: var(--surface-raised); color: var(--muted); }
+  .tag.entry { background: #14532d; color: var(--green); }
   .tag.exit { background: #4a2c14; color: #fdba74; }
   .tag.local { background: #1e3a5f; color: #93c5fd; }
-  #detail-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9999; }
-  #detail-modal .modal-content { background: #1c2027; color: #eaeaea; border: 1px solid #3d4650;
+  .expired { color: var(--red-soft); font-weight: 600; }
+  #detail-modal { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 9999; }
+  #detail-modal .modal-content { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong);
       border-radius: 8px; max-width: 760px; margin: 8vh auto; padding: 18px 22px; position: relative; }
-  #detail-modal .close-btn { position: absolute; right: 16px; top: 8px; font-size: 22px; color: #9aa4b2; cursor: pointer; }
+  #detail-modal .close-btn { position: absolute; right: 16px; top: 8px; font-size: 22px; color: var(--muted); cursor: pointer; }
   #detail-modal pre { background: #12151a; color: #d7dde5; padding: 12px; border-radius: 4px;
       overflow: auto; max-height: 60vh; font-size: 12px; }
-  .muted { color: #9aa4b2; font-size: 12px; }
+  @media (max-width: 1080px) {
+    .compare-grid { grid-template-columns: 1fr; }
+    .summary { width: 100%; margin-left: 0; text-align: left; }
+  }
+  @media (max-width: 700px) {
+    .bar { align-items: stretch; }
+    .bar h1 { width: 100%; }
+    .field { width: 100%; }
+    input { flex: 1 1 auto; width: auto; min-width: 0; font-size: 11px; }
+    .page { padding: 10px; }
+    .chart-wrap { height: 280px; }
+    .span-table, .span-table tbody { display: block; }
+    .span-table thead { display: none; }
+    .span-table tbody tr:not(.message-row) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px;
+                                                padding: 8px 10px; border-bottom: 1px solid var(--surface-raised); }
+    .span-table tbody tr:not(.message-row) td { display: block; width: auto; border: 0; padding: 2px 0; }
+    .span-table tbody tr:not(.message-row) td::before { content: attr(data-label); display: block; margin-bottom: 2px;
+                                                        color: var(--muted); font-family: -apple-system, "Segoe UI", sans-serif;
+                                                        font-size: 10px; }
+    .span-table tbody tr:not(.message-row) td:nth-child(1) { grid-column: 1; grid-row: 1; }
+    .span-table tbody tr:not(.message-row) td:nth-child(2) { grid-column: 2; grid-row: 1; }
+    .span-table tbody tr:not(.message-row) td:nth-child(3) { grid-column: 1; grid-row: 2; }
+    .span-table tbody tr:not(.message-row) td:nth-child(5) { grid-column: 2; grid-row: 2; }
+    .span-table tbody tr:not(.message-row) td:nth-child(4) { grid-column: 1 / -1; grid-row: 3; }
+    .span-table tbody tr:not(.message-row) td:nth-child(6) { grid-column: 1; grid-row: 4; }
+    .span-table tbody tr:not(.message-row) td:nth-child(7) { grid-column: 2; grid-row: 4; }
+    .span-table tbody tr:not(.message-row) td:nth-child(8) { grid-column: 1 / -1; grid-row: 5; }
+    .span-table tbody tr:not(.message-row) td:nth-child(9) { grid-column: 1 / -1; grid-row: 6; }
+    .span-table .message-row { display: block; }
+    .span-table .message-row td { display: block; width: auto; }
+    .span-table .message-row td::before { content: none; }
+  }
 </style>
 </head>
 <body>
-<div class="bar">
-  <h1>H2 链路可视化</h1>
-  traceId <input id="traceId" placeholder="粘贴 traceId，或从右侧列表点选">
-  <button onclick="loadTrace()">查询</button>
-  <button class="sec" onclick="toggleRecent()">最近链路</button>
-  <span id="summary" class="summary"></span>
-</div>
+<header class="bar">
+  <h1>Trace 双源对照</h1>
+  <label class="field" for="traceId">traceId
+    <input id="traceId" placeholder="粘贴 traceId，或从最近链路中点选" autocomplete="off"
+           onkeydown="if (event.key === 'Enter') loadTrace()">
+  </label>
+  <button type="button" onclick="loadTrace()">对照查询</button>
+  <button type="button" class="sec" id="recentToggle" aria-expanded="false"
+          aria-controls="recentPane" onclick="toggleRecent()">最近链路</button>
+  <span id="summary" class="summary" aria-live="polite">输入 traceId 后同时查询两个数据源</span>
+</header>
 
-<div class="layout">
-  <div id="recentPane">
+<main class="page">
+  <section id="recentPane" class="recent-panel collapsed" aria-hidden="true">
     <h2>最近链路段（点选加载）</h2>
     <table>
       <thead><tr><th>traceId</th><th>segment</th><th>endpoint</th><th>ms</th></tr></thead>
       <tbody id="recentBody"></tbody>
     </table>
-  </div>
-  <div id="chart"></div>
-</div>
+  </section>
 
-<div id="spansWrap">
-  <h2>Span 明细（按时序）</h2>
-  <div id="spanTable">
-    <table>
-      <thead><tr>
-        <th>#</th><th>类型</th><th>组件</th><th>操作</th><th>段</th>
-        <th>开始</th><th>耗时</th><th>分布</th><th>错误</th>
-      </tr></thead>
-      <tbody id="spanBody"></tbody>
-    </table>
-  </div>
-</div>
+  <div class="compare-grid">
+    <section id="memoryPanel" class="source-panel" aria-labelledby="memoryTitle">
+      <header class="source-header">
+        <div class="source-heading">
+          <h2 id="memoryTitle">trace 内存热层</h2>
+          <code>/statistic</code>
+        </div>
+        <span id="memoryState" class="source-state">待查询</span>
+      </header>
+      <div id="memorySummary" class="source-summary">等待查询</div>
+      <div class="chart-wrap">
+        <div id="memoryChart" class="chart" role="img" aria-label="trace 内存热层拓扑图"></div>
+        <div id="memoryFeedback" class="source-feedback">等待查询</div>
+      </div>
+      <div class="table-wrap">
+        <table class="span-table">
+          <thead><tr>
+            <th>#</th><th>类型</th><th>组件</th><th>操作</th><th>段</th>
+            <th>开始</th><th>耗时</th><th>分布</th><th>错误</th>
+          </tr></thead>
+          <tbody id="memorySpanBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-<div id="detail-modal">
+    <section id="h2Panel" class="source-panel" aria-labelledby="h2Title">
+      <header class="source-header">
+        <div class="source-heading">
+          <h2 id="h2Title">H2 / 环形封顶文件</h2>
+          <code>/inner/sw/trace-query?traceId=…</code>
+        </div>
+        <span id="h2State" class="source-state">待查询</span>
+      </header>
+      <div id="h2Summary" class="source-summary">等待查询</div>
+      <div class="chart-wrap">
+        <div id="h2Chart" class="chart" role="img" aria-label="H2 与环形文件拓扑图"></div>
+        <div id="h2Feedback" class="source-feedback">等待查询</div>
+      </div>
+      <div class="table-wrap">
+        <table class="span-table">
+          <thead><tr>
+            <th>#</th><th>类型</th><th>组件</th><th>操作</th><th>段</th>
+            <th>开始</th><th>耗时</th><th>分布</th><th>错误</th>
+          </tr></thead>
+          <tbody id="h2SpanBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div id="detail-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onclick="if (event.target === this) closeDetail()">
   <div class="modal-content">
-    <span class="close-btn" onclick="document.getElementById('detail-modal').style.display='none'">&times;</span>
+    <span class="close-btn" role="button" tabindex="0" aria-label="关闭" onclick="closeDetail()">&times;</span>
     <h3 id="modal-title">Span 详情</h3>
     <pre id="modal-content"></pre>
   </div>
@@ -106,7 +233,6 @@ function esc(s) {
 }
 function qp(name) { return new URLSearchParams(location.search).get(name); }
 
-/* 组件名兜底：componentName 为空或 Unknown 时，用 operationName 作为标签 */
 function compOf(sp) {
   var c = sp.componentName;
   if (!c || c === "Unknown") return "";
@@ -116,15 +242,20 @@ function labelOf(sp) {
   return compOf(sp) || sp.operationName || "";
 }
 
-var chart = null;
+var charts = { memory: null, h2: null };
+var loadVersions = { memory: 0, h2: 0 };
+var sourceResults = { memory: null, h2: null };
+var sourceNames = { memory: "trace 内存热层", h2: "H2 / 环形封顶文件" };
+var stateLabels = { idle: "待查询", loading: "查询中", ready: "已加载", empty: "无数据", error: "查询失败" };
 
 function flatten(logs) {
   var spans = [];
   var segIndex = {};
-  logs.forEach(function (seg, i) {
+  var segments = Array.isArray(logs) ? logs : [];
+  segments.forEach(function (seg, i) {
     var segId = seg.traceSegmentId || ("seg" + i);
     segIndex[segId] = i + 1;
-    (seg.spans || []).forEach(function (sp) {
+    (Array.isArray(seg.spans) ? seg.spans : []).forEach(function (sp) {
       spans.push(Object.assign({}, sp, { _seg: i + 1, _segId: segId }));
     });
   });
@@ -144,19 +275,36 @@ function dur(sp) {
   return Math.max(0, sp.endTime - sp.startTime);
 }
 function fmtMs(ms) { return ms == null ? "-" : ms + " ms"; }
-function fmtClock(ms) {
-  if (ms == null) return "-";
-  var d = new Date(ms);
-  function p(n, w) { return String(n).padStart(w || 2, "0"); }
-  return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds()) + "." + p(d.getMilliseconds(), 3);
+
+function setSourceMessage(source, state, message) {
+  var stateEl = document.getElementById(source + "State");
+  var summary = document.getElementById(source + "Summary");
+  var chartEl = document.getElementById(source + "Chart");
+  var body = document.getElementById(source + "SpanBody");
+  var chartWrap = chartEl.parentNode;
+  var tableWrap = body.closest(".table-wrap");
+  stateEl.className = "source-state " + state;
+  stateEl.textContent = stateLabels[state];
+  summary.textContent = message;
+  chartWrap.hidden = true;
+  tableWrap.hidden = true;
+  if (charts[source]) charts[source].clear();
+  chartEl.style.visibility = "hidden";
+  body.innerHTML = "";
 }
 
-function renderChart(spans) {
+function renderChart(source, spans) {
+  var chartEl = document.getElementById(source + "Chart");
+  var chartWrap = chartEl.parentNode;
+  chartWrap.classList.toggle("compact", spans.length < 3);
+  chartWrap.classList.toggle("medium", spans.length >= 3 && spans.length < 8);
+  chartEl.style.visibility = "visible";
+  var symbolSize = Math.max(40, Math.min(60, 180 / Math.sqrt(Math.max(1, spans.length))));
   var nodes = spans.map(function (sp, idx) {
     return {
       id: "s" + idx,
       name: labelOf(sp) || ("span" + idx),
-      symbolSize: 46,
+      symbolSize: symbolSize,
       itemStyle: {
         color: sp.isError ? "#e74c3c" : "#3b82f6",
         borderColor: sp.isError ? "#ffb3b3" : "#a3d8ff",
@@ -171,8 +319,9 @@ function renderChart(spans) {
     links.push({ source: "s" + (i - 1), target: "s" + i,
                  lineStyle: { color: "#8a94a0", width: 2, curveness: 0.05 } });
   }
-  if (!chart) { chart = echarts.init(document.getElementById("chart")); }
-  chart.setOption({
+  if (!charts[source]) charts[source] = echarts.init(chartEl);
+  charts[source].resize();
+  charts[source].setOption({
     backgroundColor: "#23272e",
     tooltip: {
       trigger: "item",
@@ -201,12 +350,14 @@ function renderChart(spans) {
       emphasis: { focus: "adjacency", lineStyle: { width: 4 } }
     }]
   }, true);
-  chart.off("click");
-  chart.on("click", function (p) { if (p.dataType === "node") showDetail(p.data.raw); });
+  charts[source].off("click");
+  charts[source].on("click", function (p) {
+    if (p.dataType === "node") showDetail(source, p.data.raw);
+  });
 }
 
-function renderTable(spans) {
-  var body = document.getElementById("spanBody");
+function renderTable(source, spans) {
+  var body = document.getElementById(source + "SpanBody");
   body.innerHTML = "";
   var t0 = spans.length ? (spans[0].startTime || 0) : 0;
   var maxDur = spans.reduce(function (m, s) { return Math.max(m, dur(s) || 0); }, 1);
@@ -214,23 +365,53 @@ function renderTable(spans) {
     var d = dur(sp);
     var pct = d == null ? 0 : Math.round(d / maxDur * 100);
     var tr = document.createElement("tr");
-    tr.onclick = function () { showDetail(sp); };
+    tr.onclick = function () { showDetail(source, sp); };
     tr.innerHTML =
-      "<td>" + (i + 1) + "</td>" +
-      "<td><span class='tag " + typeClass(sp.spanType) + "'>" + esc(sp.spanType || "?") + "</span></td>" +
-      "<td>" + esc(compOf(sp) || "-") + "</td>" +
-      "<td>" + esc(sp.operationName) + "</td>" +
-      "<td>" + (sp._seg || "") + "</td>" +
-      "<td>+" + ((sp.startTime || t0) - t0) + " ms</td>" +
-      "<td>" + fmtMs(d) + "</td>" +
-      "<td><div class='durbar" + (sp.isError ? " err" : "") + "'><span style='left:0;width:" + pct + "%'></span></div></td>" +
-      "<td>" + (sp.isError ? "<span class='expired'>Y</span>" : "N") + "</td>";
+      "<td data-label='序号'>" + (i + 1) + "</td>" +
+      "<td data-label='类型'><span class='tag " + typeClass(sp.spanType) + "'>" + esc(sp.spanType || "?") + "</span></td>" +
+      "<td data-label='组件'>" + esc(compOf(sp) || "-") + "</td>" +
+      "<td data-label='操作'>" + esc(sp.operationName) + "</td>" +
+      "<td data-label='段'>" + (sp._seg || "") + "</td>" +
+      "<td data-label='开始'>+" + ((sp.startTime || t0) - t0) + " ms</td>" +
+      "<td data-label='耗时'>" + fmtMs(d) + "</td>" +
+      "<td data-label='分布'><div class='durbar" + (sp.isError ? " err" : "") + "'><span style='left:0;width:" + pct + "%'></span></div></td>" +
+      "<td data-label='错误'>" + (sp.isError ? "<span class='expired'>Y</span>" : "N") + "</td>";
     body.appendChild(tr);
   });
 }
 
-function showDetail(sp) {
+function renderSource(source, traceId, data) {
+  var logs = Array.isArray(data.logs) ? data.logs : [];
+  var spans = flatten(logs).spans;
+  sourceResults[source] = { traceId: traceId, segments: logs.length, spans: spans.length, payloadExpired: !!data.payloadExpired };
+  if (!spans.length) {
+    setSourceMessage(source, "empty", "该数据源未找到此 traceId");
+    updateComparisonSummary(traceId);
+    return;
+  }
+  var stateEl = document.getElementById(source + "State");
+  var feedback = document.getElementById(source + "Feedback");
+  var chartEl = document.getElementById(source + "Chart");
+  var body = document.getElementById(source + "SpanBody");
+  stateEl.className = "source-state ready";
+  stateEl.textContent = stateLabels.ready;
+  feedback.hidden = true;
+  chartEl.parentNode.hidden = false;
+  body.closest(".table-wrap").hidden = false;
+  var t0 = spans[0].startTime || 0;
+  var tEnd = spans.reduce(function (m, s) { return Math.max(m, s.endTime || 0); }, t0);
+  document.getElementById(source + "Summary").innerHTML =
+    "segments=<b>" + logs.length + "</b> spans=<b>" + spans.length + "</b>"
+    + " 端到端=<b>" + (tEnd - t0) + " ms</b>"
+    + (data.payloadExpired ? " <span class='expired'>部分 payload 已过期</span>" : "");
+  renderChart(source, spans);
+  renderTable(source, spans);
+  updateComparisonSummary(traceId);
+}
+
+function showDetail(source, sp) {
   var lines = [];
+  lines.push("数据源    = " + sourceNames[source]);
   lines.push("operationName = " + (sp.operationName || ""));
   lines.push("component     = " + (compOf(sp) || "-") + " (id=" + (sp.componentId == null ? "" : sp.componentId) + ")");
   lines.push("spanType      = " + (sp.spanType || "") + "   spanLayer = " + (sp.spanLayer || ""));
@@ -250,64 +431,139 @@ function showDetail(sp) {
     lines.push("logsList:");
     sp.logsList.forEach(function (l, i) { lines.push("  [" + (i + 1) + "] " + l); });
   }
+  document.getElementById("modal-title").textContent = sourceNames[source] + " · Span 详情";
   document.getElementById("modal-content").innerText = lines.join("\n");
   document.getElementById("detail-modal").style.display = "block";
 }
 
-function loadTrace() {
-  var traceId = document.getElementById("traceId").value.trim();
-  if (!traceId) { document.getElementById("summary").innerHTML = "<span class='expired'>请输入 traceId</span>"; return; }
-  document.getElementById("summary").textContent = "加载中…";
-  fetch("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId))
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      var logs = (data && data.logs) ? data.logs : [];
-      var flat = flatten(logs);
-      var spans = flat.spans;
-      if (!spans.length) {
-        document.getElementById("summary").innerHTML = "<span class='expired'>无数据</span>";
-        document.getElementById("spanBody").innerHTML = "";
-        if (chart) chart.clear();
-        return;
-      }
-      var t0 = spans[0].startTime || 0;
-      var tEnd = spans.reduce(function (m, s) { return Math.max(m, s.endTime || 0); }, t0);
-      document.getElementById("summary").innerHTML =
-        "segments=<b>" + logs.length + "</b> spans=<b>" + spans.length + "</b>"
-        + " 端到端=<b>" + (tEnd - t0) + " ms</b>"
-        + (data && data.payloadExpired ? " <span class='expired'>(部分 payload 已过期)</span>" : "");
-      renderChart(spans);
-      renderTable(spans);
-    })
-    .catch(function (e) { document.getElementById("summary").innerHTML = "<span class='expired'>查询失败: " + esc(e) + "</span>"; });
+function closeDetail() {
+  document.getElementById("detail-modal").style.display = "none";
 }
 
-function toggleRecent() { document.getElementById("recentPane").classList.toggle("collapsed"); }
+function fetchJson(url) {
+  return fetch(url, { cache: "no-store" }).then(function (response) {
+    if (!response.ok) throw new Error("HTTP " + response.status + " " + response.statusText);
+    return response.json();
+  });
+}
+
+function queryMemory(traceId) {
+  return fetchJson("/statistic").then(function (snapshot) {
+    var data = snapshot && snapshot.data;
+    var entry = data && Object.prototype.hasOwnProperty.call(data, traceId) ? data[traceId] : null;
+    var logs = entry && Array.isArray(entry.logs) ? entry.logs : Array.isArray(entry) ? entry : [];
+    return { logs: logs, payloadExpired: false };
+  });
+}
+
+function queryH2(traceId) {
+  return fetchJson("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId)).then(function (data) {
+    return { logs: data && Array.isArray(data.logs) ? data.logs : [], payloadExpired: !!(data && data.payloadExpired) };
+  });
+}
+
+function loadSource(source, traceId) {
+  var version = ++loadVersions[source];
+  setSourceMessage(source, "loading", "正在查询 " + sourceNames[source] + "…");
+  var request = source === "memory" ? queryMemory(traceId) : queryH2(traceId);
+  request.then(function (data) {
+    if (version === loadVersions[source]) renderSource(source, traceId, data);
+  }).catch(function (error) {
+    if (version !== loadVersions[source]) return;
+    sourceResults[source] = { traceId: traceId, error: String(error) };
+    setSourceMessage(source, "error", "查询失败: " + error);
+    updateComparisonSummary(traceId);
+  });
+}
+
+function updateComparisonSummary(traceId) {
+  var memory = sourceResults.memory;
+  var h2 = sourceResults.h2;
+  var text = traceId;
+  if (memory) {
+    text += memory.error ? " | 内存查询失败" : " | 内存 " + memory.segments + "段/" + memory.spans + " spans";
+  }
+  if (h2) {
+    text += h2.error ? " | H2查询失败" : " | H2 " + h2.segments + "段/" + h2.spans + " spans";
+  }
+  if (memory && h2 && !memory.error && !h2.error) {
+    var delta = h2.spans - memory.spans;
+    text += " | spans 差 " + (delta > 0 ? "+" : "") + delta;
+  }
+  if (h2 && !h2.error && h2.payloadExpired) text += " | H2 payload 部分过期";
+  document.getElementById("summary").textContent = text;
+}
+
+function loadTrace() {
+  var traceId = document.getElementById("traceId").value.trim();
+  sourceResults.memory = null;
+  sourceResults.h2 = null;
+  if (!traceId) {
+    loadVersions.memory++;
+    loadVersions.h2++;
+    setSourceMessage("memory", "idle", "请输入 traceId");
+    setSourceMessage("h2", "idle", "请输入 traceId");
+    document.getElementById("summary").textContent = "请输入 traceId";
+    return;
+  }
+  var url = new URL(location.href);
+  url.searchParams.set("traceid", traceId);
+  history.replaceState(null, "", url);
+  loadSource("memory", traceId);
+  loadSource("h2", traceId);
+}
+
+function toggleRecent() {
+  var pane = document.getElementById("recentPane");
+  var button = document.getElementById("recentToggle");
+  var collapsed = pane.classList.toggle("collapsed");
+  pane.setAttribute("aria-hidden", collapsed ? "true" : "false");
+  button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+  button.textContent = collapsed ? "最近链路" : "收起最近链路";
+}
 
 function loadRecent() {
-  fetch("/inner/sw/trace-recent?limit=30")
-    .then(function (r) { return r.json(); })
-    .then(function (rows) {
-      var body = document.getElementById("recentBody");
-      body.innerHTML = "";
-      (rows || []).forEach(function (row) {
-        var tr = document.createElement("tr");
-        tr.onclick = function () { document.getElementById("traceId").value = row.traceId; loadTrace(); };
-        tr.innerHTML =
-          "<td style='font-family:monospace'>" + esc(row.traceId) + "</td>" +
-          "<td>" + esc(row.traceSegmentId || "") + "</td>" +
-          "<td>" + esc(row.endpoint || "") + "</td>" +
-          "<td>" + esc(row.latency == null ? "" : row.latency) + "</td>";
-        body.appendChild(tr);
-      });
-    })
-    .catch(function () {});
+  fetchJson("/inner/sw/trace-recent?limit=30").then(function (rows) {
+    var body = document.getElementById("recentBody");
+    body.innerHTML = "";
+    if (!Array.isArray(rows) || !rows.length) {
+      body.innerHTML = "<tr><td colspan='4'>暂无最近链路</td></tr>";
+      return;
+    }
+    rows.forEach(function (row) {
+      var tr = document.createElement("tr");
+      tr.dataset.traceId = row.traceId;
+      tr.onclick = function () {
+        document.getElementById("traceId").value = row.traceId;
+        loadTrace();
+      };
+      tr.innerHTML =
+        "<td style='font-family:monospace'>" + esc(row.traceId) + "</td>" +
+        "<td>" + esc(row.traceSegmentId || "") + "</td>" +
+        "<td>" + esc(row.endpoint || "") + "</td>" +
+        "<td>" + esc(row.latency == null ? "" : row.latency) + "</td>";
+      body.appendChild(tr);
+    });
+  }).catch(function (error) {
+    document.getElementById("recentBody").innerHTML =
+      "<tr><td colspan='4'>最近链路加载失败: " + esc(error) + "</td></tr>";
+  });
 }
 
 (function main() {
-  window.addEventListener("resize", function () { if (chart) chart.resize(); });
+  window.addEventListener("resize", function () {
+    Object.keys(charts).forEach(function (key) {
+      if (charts[key]) charts[key].resize();
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeDetail();
+  });
   var tid = qp("traceid") || qp("traceId");
-  if (tid) { document.getElementById("traceId").value = tid; loadTrace(); }
+  if (tid) {
+    document.getElementById("traceId").value = tid;
+    loadTrace();
+  }
   loadRecent();
 })();
 </script>
