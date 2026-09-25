@@ -1,16 +1,12 @@
 @echo off
 rem ============================================================
 rem  编译并拷贝 logfile-reporter-plugin 到 SkyWalking agent
-rem  盘符自动探测：存在 E 盘则用 E，否则用 D（本机无 E 盘，故落 D）
+rem  拷贝目标固定为 D 盘
 rem  仓库路径从脚本自身所在目录推导，无需硬编码
 rem ============================================================
 
-rem 自动选盘（存在 E 盘用 E，否则用 D）
-if exist E:\ (
-    set ROOT=E:
-) else (
-    set ROOT=D:
-)
+rem 固定使用 D 盘
+set ROOT=D:
 
 set AGENT_DIR=%ROOT%\apps\apache-skywalking-java-agent-9.4.0
 rem set JDK17=%ROOT%\apps\java\jdk-17.0.8
