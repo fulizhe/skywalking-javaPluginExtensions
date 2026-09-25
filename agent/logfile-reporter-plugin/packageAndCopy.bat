@@ -1,18 +1,20 @@
 @echo off
 rem ============================================================
-rem  编译并拷贝 logfile-reporter-plugin 到 SkyWalking agent
-rem  拷贝目标固定为 D 盘
-rem  仓库路径从脚本自身所在目录推导，无需硬编码
+rem  Build and copy logfile-reporter-plugin into the SkyWalking agent.
+rem  Copy target is fixed to D: drive.
+rem  Repo location is derived from this script's own path.
+rem  NOTE: keep this file pure ASCII - cmd parses batches per codepage,
+rem  any UTF-8 multibyte comment gets misread as GBK and breaks lines.
+rem  Do NOT add non-ASCII characters to this file.
 rem ============================================================
 
-rem 固定使用 D 盘
 set ROOT=D:
 
 set AGENT_DIR=%ROOT%\apps\apache-skywalking-java-agent-9.4.0
 rem set JDK17=%ROOT%\apps\java\jdk-17.0.8
 rem if defined JDK17 set "PATH=%JDK17%\bin;%PATH%"
 
-rem 仓库 agent 目录 = 脚本目录的上一级
+rem repo agent dir = parent of this script
 set REPO_AGENT=%~dp0..
 
 cd /d "%REPO_AGENT%"
@@ -27,5 +29,5 @@ ls "%AGENT_DIR%\plugins\" | findstr logfile-reporter-plugin-
 goto :eof
 
 :fail
-echo 编译或拷贝失败，请检查错误信息。
+echo Build or copy failed, check error output above.
 exit /b 1
