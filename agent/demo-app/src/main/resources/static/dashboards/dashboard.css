@@ -32,6 +32,22 @@ main { padding: 16px 20px 40px; }
 
 .hint { background: #fff7ed; border: 1px solid #fdba74; color: #7c2d12; border-radius: 8px; padding: 12px 16px; margin-bottom: 14px; line-height: 1.7; }
 .hidden { display: none; }
+.scenario-panel { display: flex; align-items: center; gap: 16px; background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+.scenario-panel.hidden { display: none; }
+.scenario-copy { min-width: 0; }
+.scenario-kicker { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .06em; }
+.scenario-panel h3 { margin: 3px 0 4px; font-size: 14px; }
+.scenario-panel p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.scenario-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+.scenario-actions button { cursor: pointer; background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; font-size: 13px; white-space: nowrap; transition: filter .15s ease, opacity .15s ease; }
+.scenario-actions button:hover { filter: brightness(.94); }
+.scenario-actions button:focus-visible, .scenario-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scenario-actions button:disabled { cursor: wait; opacity: .65; }
+.scenario-status { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.scenario-status.is-success { color: var(--ok); }
+.scenario-status.is-error { color: var(--err); }
+.scenario-link { color: var(--accent); font-size: 12px; }
+@media (max-width: 720px) { .scenario-panel { align-items: flex-start; flex-direction: column; } .scenario-actions { justify-content: flex-start; margin-left: 0; } .scenario-status { max-width: 100%; white-space: normal; } }
 
 /* ---- 通用面板/表格 ---- */
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }

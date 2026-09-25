@@ -21,6 +21,18 @@
         <span id="poll-state" class="poll-state">自动刷新 3s</span>
     </div>
     <div id="hint" class="hint hidden"></div>
+    <section id="async-scenario" class="scenario-panel hidden" aria-labelledby="async-scenario-title">
+        <div class="scenario-copy">
+            <div class="scenario-kicker">异步链路场景</div>
+            <h3 id="async-scenario-title">Servlet 3 async + @TraceCrossThread</h3>
+            <p id="async-scenario-purpose">目的：触发一次 Servlet 3 异步请求，验证同一 traceId 下异步子线程会形成新 segment，入口 span 不包含异步等待；触发后自动刷新下方 Trace 缓存表。</p>
+        </div>
+        <div class="scenario-actions">
+            <button id="async-scenario-btn" type="button" aria-describedby="async-scenario-purpose">触发 /helloAsyncServlet</button>
+            <span id="async-scenario-status" class="scenario-status" role="status" aria-live="polite">未触发</span>
+            <a id="async-scenario-link" class="scenario-link" href="#" target="_blank" rel="noopener" hidden>查看链路</a>
+        </div>
+    </section>
     <div id="content"></div>
 </main>
 <script src="dashboard.js"></script>

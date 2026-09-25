@@ -681,6 +681,53 @@ function showHint(data, box) {
     box.appendChild(el("div", "empty", esc(data.hint || "插件未挂载或数据为空。")));
 }
 
+function setupAsyncScenario(page, refresh) {
+    var panel = document.getElementById("async-scenario");
+    if (!panel) return;
+    panel.classList.toggle("hidden", page !== "statistic");
+    if (page !== "statistic") return;
+
+    var button = document.getElementById("async-scenario-btn");
+    var status = document.getElementById("async-scenario-status");
+    var link = document.getElementById("async-scenario-link");
+    button.addEventListener("click", function () {
+        button.disabled = true;
+        button.textContent = "触发中…";
+        status.className = "scenario-status";
+        status.textContent = "请求中，等待异步线程返回…";
+        status.title = "";
+        link.hidden = true;
+        fetch("/helloAsyncServlet", { cache: "no-store" })
+            .then(function (response) {
+                if (!response.ok) throw new Error("HTTP " + response.status);
+                return response.text();
+            })
+            .then(function (text) {
+                var match = text.match(/(?:^|\\|)traceId=([^|]+)/);
+                var traceId = match ? match[1].trim() : "";
+                if (traceId) {
+                    status.textContent = "已触发 · traceId " + traceId;
+                    status.title = "traceId=" + traceId;
+                    link.href = "trace-view.html?traceid=" + encodeURIComponent(traceId);
+                    link.hidden = false;
+                } else {
+                    status.textContent = "已触发，响应中未返回 traceId";
+                }
+                status.className = "scenario-status is-success";
+                refresh();
+            })
+            .catch(function (error) {
+                status.textContent = "触发失败：" + error.message;
+                status.title = status.textContent;
+                status.className = "scenario-status is-error";
+            })
+            .finally(function () {
+                button.disabled = false;
+                button.textContent = "触发 /helloAsyncServlet";
+            });
+    });
+}
+
 /* ---------------- 链路视图弹框(联动 dashboards/trace-view.html) ---------------- */
 
 function ensureTraceModal() {
@@ -757,6 +804,7 @@ function boot() {
             lastUpdated();
         });
     }
+    setupAsyncScenario(p, refresh);
     refresh();
     setInterval(refresh, page.interval);
 }
