@@ -106,6 +106,7 @@
 
 1. **`NotifiedFlagsCache` 无 `maximumSize`**（见上表）：≈ QPS×600s，随 QPS 线性增长。
 2. **端点基数 × 蓄水池**：真实应用 URL 带 path 变量时，端点会冲到 `MAX_ENDPOINTS_PER_BUCKET=500`（`endpointOverflow` 此时才开始计数）；则 `4×501×40KB ≈ 80MB` 仅为样本数组（每键一个 `long[5000]`），且分钟表行数 ×500。**当前压测端点是固定的 7 个，所以 `endpointOverflow=0`，观察不到这个上限。**
+   → 治理方案（讨论稿）：[`docs/todos/h2化-phase5-metrics-端点基数治理方案.md`](../todos/h2化-phase5-metrics-端点基数治理方案.md)。
 
 ## 建议
 
