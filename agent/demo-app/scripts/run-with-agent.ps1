@@ -44,7 +44,7 @@ $ErrorActionPreference = "Stop"
 $demoAppDir = Split-Path -Parent $PSScriptRoot          # agent/demo-app
 $agentModuleDir = Split-Path -Parent $demoAppDir        # agent
 $repoRoot = Split-Path -Parent $agentModuleDir          # 仓库根
-$pluginJarName = "logfile-reporter-plugin-1.0.0.jar"
+$pluginJarName = "logfile-reporter-plugin-2.0.0.jar"
 $appJar = Join-Path $demoAppDir "target\demo-app-1.0.0.jar"
 $pluginJar = Join-Path $agentModuleDir "logfile-reporter-plugin\target\$pluginJarName"
 
