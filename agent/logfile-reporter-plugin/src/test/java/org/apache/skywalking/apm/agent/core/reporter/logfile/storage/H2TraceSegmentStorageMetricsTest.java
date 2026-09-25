@@ -130,6 +130,33 @@ public class H2TraceSegmentStorageMetricsTest {
     }
 
     @Test
+    public void aggregateByEndpoint_sumsAndWeightedPercentiles_noStarvation() {
+        storage.storeMetricRows("minute", list(
+                row("GET:/a", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1),
+                row("GET:/a", 101L, 3L, 1L, 0L, 60L, 40L, 30, -1, -1, -1, 3),
+                row("GET:/b", 100L, 5L, 0L, 0L, 50L, 20L, 20, -1, -1, -1, 5)));
+
+        final List<MetricsRow> agg = storage.aggregateMetricRows("minute", 0L, 1000L, 100);
+        Assert.assertEquals("两个端点都应出现(不被字典序饿死)", 2, agg.size());
+        Assert.assertEquals("按请求数降序", "GET:/b", agg.get(0).getEndpoint());
+
+        MetricsRow a = null;
+        for (MetricsRow r : agg) {
+            if ("GET:/a".equals(r.getEndpoint())) {
+                a = r;
+            }
+        }
+        Assert.assertNotNull(a);
+        Assert.assertEquals(4L, a.getRequestCount());
+        Assert.assertEquals(1L, a.getErrorCount());
+        Assert.assertEquals(70L, a.getTotalLatency());
+        Assert.assertEquals(40L, a.getMaxLatency());
+        Assert.assertEquals(4, a.getSampleCount());
+        Assert.assertEquals("加权平均 (10*1+30*3)/4", 25, a.getP50());
+        Assert.assertEquals(-1, a.getP90());
+    }
+
+    @Test
     public void disabledStorage_returnsEmptyAndZero() {
         storage.close();
         storage = new H2TraceSegmentStorage(false, 2000, false, null, 0L);

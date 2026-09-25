@@ -139,6 +139,31 @@ final class H2SqlStatements {
             + " FROM trace_metrics_hour WHERE time_bucket BETWEEN ? AND ? "
             + "ORDER BY endpoint ASC, time_bucket ASC LIMIT ?";
 
+    /**
+     * 按 endpoint 聚合的列（每端点一行，用于表格）：计数/总耗时/最大耗时精确求和取最大；
+     * 分位按 request_count 加权平均（与 rollup 的近似口径一致）；{@code time_bucket} 常量 0 占位。
+     */
+    private static final String METRICS_AGG_COLUMNS =
+            "service, endpoint, 0 AS time_bucket, "
+                    + "SUM(request_count) AS request_count, "
+                    + "SUM(error_count) AS error_count, "
+                    + "SUM(slow_count) AS slow_count, "
+                    + "SUM(total_latency) AS total_latency, "
+                    + "MAX(max_latency) AS max_latency, "
+                    + "CAST(ROUND(SUM(p50 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p50 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p50, "
+                    + "CAST(ROUND(SUM(p90 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p90 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p90, "
+                    + "CAST(ROUND(SUM(p95 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p95 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p95, "
+                    + "CAST(ROUND(SUM(p99 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p99 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p99, "
+                    + "SUM(sample_count) AS sample_count";
+
+    static final String SELECT_METRICS_MINUTE_AGG_SQL = "SELECT " + METRICS_AGG_COLUMNS
+            + " FROM trace_metrics_minute WHERE time_bucket BETWEEN ? AND ? "
+            + "GROUP BY service, endpoint ORDER BY SUM(request_count) DESC LIMIT ?";
+
+    static final String SELECT_METRICS_HOUR_AGG_SQL = "SELECT " + METRICS_AGG_COLUMNS
+            + " FROM trace_metrics_hour WHERE time_bucket BETWEEN ? AND ? "
+            + "GROUP BY service, endpoint ORDER BY SUM(request_count) DESC LIMIT ?";
+
     static final String DELETE_METRICS_MINUTE_BEFORE_SQL = "DELETE FROM trace_metrics_minute WHERE time_bucket < ?";
 
     static final String DELETE_METRICS_HOUR_BEFORE_SQL = "DELETE FROM trace_metrics_hour WHERE time_bucket < ?";

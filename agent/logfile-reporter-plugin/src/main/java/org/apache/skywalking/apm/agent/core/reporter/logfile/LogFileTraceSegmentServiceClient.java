@@ -7,6 +7,7 @@ import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -245,6 +246,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			resolution = TraceMetricsQuery.routeResolution(from, to);
 		}
 		final int limit = TraceMetricsQuery.clampLimit(asInteger(cond.get("limit")));
+		if (asBoolean(cond.get("aggregate"))) {
+			return aggregateMetrics(resolution, from, to, limit);
+		}
 		boolean truncated = false;
 		if (traceSegmentStorage != null) {
 			final String endpoint = asString(cond.get("endpoint"));
@@ -294,6 +298,61 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				rows.add(r);
 			}
 		}
+	}
+
+	/**
+	 * 按 endpoint 聚合查询（`aggregate=true`）：SQL 侧 `GROUP BY endpoint` 出每端点一行，
+	 * 避免"全端点逐桶行 + 全局 LIMIT"被字典序端点饿死；再并入内存实时窗口（分钟分辨率）。
+	 * 行按请求数降序；`truncated=true` 表示 endpoint 数达到上限。
+	 */
+	private Map<String, Object> aggregateMetrics(final String resolution, final long fromMinute, final long toMinute,
+			final int limit) {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+		long queryFrom = fromMinute;
+		long queryTo = toMinute;
+		if ("hour".equals(resolution)) {
+			queryFrom = fromMinute / TraceMetricsQuery.MINUTES_PER_HOUR;
+			queryTo = toMinute / TraceMetricsQuery.MINUTES_PER_HOUR;
+		}
+		final List<MetricsRow> agg = traceSegmentStorage != null
+				? new ArrayList<MetricsRow>(traceSegmentStorage.aggregateMetricRows(resolution, queryFrom, queryTo, limit))
+				: new ArrayList<MetricsRow>();
+		final boolean truncated = agg.size() >= limit;
+		// 并入内存实时窗口（分钟分辨率），让当前未翻转的桶也计入表格
+		if (metricsAggregator != null && "minute".equals(resolution)) {
+			for (MetricsRow r : metricsAggregator.memoryRows()) {
+				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute) {
+					agg.add(r);
+				}
+			}
+		}
+		final List<MetricsRow> combined = TraceMetricsRollup.mergeByEndpoint(agg, 0L);
+		Collections.sort(combined, new Comparator<MetricsRow>() {
+			@Override
+			public int compare(final MetricsRow a, final MetricsRow b) {
+				return Long.compare(b.getRequestCount(), a.getRequestCount());
+			}
+		});
+		final int cap = Math.min(combined.size(), limit);
+		for (int i = 0; i < cap; i++) {
+			rows.add(combined.get(i).toMap());
+		}
+		result.put("resolution", resolution);
+		result.put("rows", rows);
+		result.put("count", rows.size());
+		result.put("truncated", truncated);
+		return result;
+	}
+
+	private static boolean asBoolean(final Object value) {
+		if (value instanceof Boolean) {
+			return ((Boolean) value).booleanValue();
+		}
+		if (value instanceof String) {
+			return Boolean.parseBoolean((String) value);
+		}
+		return false;
 	}
 
 	private static List<Map<String, Object>> enrichBucketStart(final Object bucketsObj) {

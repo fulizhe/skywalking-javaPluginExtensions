@@ -717,6 +717,40 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         return out;
     }
 
+    /**
+     * 按 endpoint 聚合查询（指定分辨率）：每端点一行，SQL 侧 {@code GROUP BY} 完成，
+     * 不受"逐桶行 + 全局 LIMIT"的端点饥饿影响。按请求数降序。
+     *
+     * @param resolution {@code minute} / {@code hour}
+     * @param fromBucket 起始桶（含，按分辨率单位）
+     * @param toBucket   结束桶（含，按分辨率单位）
+     * @param limit      endpoint 行数上限
+     */
+    public List<MetricsRow> aggregateMetricRows(final String resolution, final long fromBucket, final long toBucket,
+            final int limit) {
+        final List<MetricsRow> out = new ArrayList<MetricsRow>();
+        if (!enabled || connection == null || limit <= 0 || toBucket < fromBucket) {
+            return out;
+        }
+        final String sql = isHourResolution(resolution)
+                ? H2SqlStatements.SELECT_METRICS_HOUR_AGG_SQL : H2SqlStatements.SELECT_METRICS_MINUTE_AGG_SQL;
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, fromBucket);
+                ps.setLong(2, toBucket);
+                ps.setInt(3, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        out.add(toMetricsRow(rs));
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("aggregateMetricRows", e);
+            }
+        }
+        return out;
+    }
+
     private MetricsRow toMetricsRow(final ResultSet rs) throws SQLException {
         return new MetricsRow(rs.getString("service"), rs.getString("endpoint"), rs.getLong("time_bucket"),
                 rs.getLong("request_count"), rs.getLong("error_count"), rs.getLong("slow_count"),

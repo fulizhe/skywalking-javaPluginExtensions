@@ -25,13 +25,24 @@ public final class TraceMetricsRollup {
      * @param hourBucket 目标小时桶（{@code startTime / 3600000}）
      */
     public static List<MetricsRow> toHourRows(final List<MetricsRow> minuteRows, final long hourBucket) {
-        if (minuteRows == null || minuteRows.isEmpty()) {
+        return mergeByEndpoint(minuteRows, hourBucket);
+    }
+
+    /**
+     * 按 endpoint 合并任意行集合为「每端点一行」（与 rollup 同口径）。
+     * <p>
+     * 用于：小时 rollup、以及读口「按端点聚合」把 SQL 聚合结果与内存实时窗口合并。
+     * 输出行的 {@code timeBucket} = {@code bucket}（聚合场景传 0 占位）。
+     * </p>
+     */
+    public static List<MetricsRow> mergeByEndpoint(final List<MetricsRow> rows, final long bucket) {
+        if (rows == null || rows.isEmpty()) {
             return new ArrayList<MetricsRow>();
         }
-        final Map<String, List<MetricsRow>> byEndpoint = groupByEndpoint(minuteRows);
+        final Map<String, List<MetricsRow>> byEndpoint = groupByEndpoint(rows);
         final List<MetricsRow> out = new ArrayList<MetricsRow>(byEndpoint.size());
         for (Map.Entry<String, List<MetricsRow>> entry : byEndpoint.entrySet()) {
-            out.add(merge(entry.getValue(), hourBucket, entry.getKey()));
+            out.add(merge(entry.getValue(), bucket, entry.getKey()));
         }
         return out;
     }

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <!--
   真实 Trace 指标仪表盘（A 版式）——数据来自真实读口：
-    GET /inner/sw/metrics            实时快照（内存窗口分钟桶 + 运行计数 + 数据面状态）
-    GET /inner/sw/metrics/query      条件查询（endpoint / 桶范围 / 分辨率 / limit）
-  依赖（均本地打包，无外部网络）: ../lib/jquery.min.js · ../lib/echarts.min.js · ../lib/jquery.dataTables.min.js
-  - 图表：ECharts（分位趋势带 + 吞吐/错误 + 行下钻详情）
-  - 表格：jQuery DataTables（endpoint 明细，可搜索/排序/分页）；点击行在底部展开该 endpoint 详情
-  分位与吞吐均取全局保留键 "*" 行（非各 endpoint 分位相加）。
-  头部 1h / 6h / 24h / 7d / 30d：≤24h 走分钟表，7d/30d 走小时表。v1 已知偏差：小时分位为请求数加权平均近似。
+    GET /inner/sw/metrics                实时快照（内存窗口分钟桶 + 运行计数 + 数据面状态）
+    GET /inner/sw/metrics/query?endpoint=*&...   全局逐桶序列（分位带 / 吞吐）
+    GET /inner/sw/metrics/query?aggregate=true&...  按 endpoint 聚合（表格，SQL GROUP BY，避免端点饥饿）
+    GET /inner/sw/metrics/query?endpoint=<ep>&...   单端点逐桶序列（行下钻详情 + 表格 sparkline）
+  依赖（本地打包，无外部网络）: ../lib/jquery.min.js · ../lib/echarts.min.js · ../lib/jquery.dataTables.min.js
+  说明：全端点"逐桶行 + 全局 LIMIT"会被字典序端点饿死，故表格走 aggregate、详情走单端点查询。
+  头部 1h / 6h / 24h / 7d / 30d：≤24h 走分钟表，7d/30d 走小时表。v1 已知偏差：分位按请求数加权平均近似。
 -->
 <html lang="zh-CN">
 <head>
@@ -54,6 +54,7 @@ body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);col
 .chart{width:100%;height:240px}
 .mono{font-family:var(--mono)}
 .num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.muted{color:var(--mut)}
 .pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:2px 10px;font-size:11.5px;font-weight:700;white-space:nowrap}
 .pill.error{background:rgba(251,113,133,.2);color:var(--err)}
 .pill.slow{background:rgba(251,191,36,.2);color:var(--warn)}
@@ -68,7 +69,6 @@ a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
 .detail-info .cell .l{font-size:11px;color:var(--mut)}
 .detail-info .cell .v{font-family:var(--mono);font-size:15px;font-weight:700;margin-top:2px}
 .note{font-size:12px;color:var(--mut);line-height:1.7;border-top:1px dashed var(--bd);padding-top:10px;margin-top:10px}
-/* ---- DataTables 暗色适配 ---- */
 .dataTables_wrapper{color:var(--tx);font-size:12.5px}
 .dataTables_wrapper .dt-top,.dataTables_wrapper .dt-bottom{display:flex;align-items:center;gap:12px;margin:6px 0}
 .dataTables_wrapper .dataTables_filter{margin-left:auto}
@@ -163,9 +163,13 @@ var RANGES = { "1h":60, "6h":360, "24h":1440, "7d":10080, "30d":43200 };
 var MINUTE_MS = 60000, HOUR_MS = 3600000;
 var currentRange = "24h";
 var lastResolution = "minute";
-var lastEps = [];
+var globalSeries = { p50:[], p90:[], p95:[], p99:[], req:[], err:[], slow:[], times:[], labels:[] };
+var tableRows = [];              // 当前表格的聚合行（供 KPI/导航复用）
 var selectedEndpoint = null;
-var series = { p50:[], p90:[], p95:[], p99:[], req:[], err:[], slow:[], times:[], labels:[] };
+var seriesCache = {};            // key: range|endpoint -> 单端点逐桶 rows
+var seriesInflight = {};         // key -> [callbacks]
+var trendChart=null, thrChart=null, detailChart=null, epTable=null;
+var SPARK_COL = 7;               // 趋势列在 columns 中的下标
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
 function fmtInt(n){return n==null?"-":Number(n).toLocaleString("en-US");}
@@ -179,9 +183,7 @@ function rangeLabel(){ return { "1h":"近 1h", "6h":"近 6h", "24h":"近 24h", "
 
 function jget(url){
   return new Promise(function(resolve,reject){
-    $.ajax({url:url,dataType:"json",cache:false})
-      .done(resolve)
-      .fail(function(xhr,status,err){ reject(new Error((status||"error")+" "+url)); });
+    $.ajax({url:url,dataType:"json",cache:false}).done(resolve).fail(function(x,s,e){ reject(new Error((s||"error")+" "+url)); });
   });
 }
 function computeBuckets(range){
@@ -189,39 +191,53 @@ function computeBuckets(range){
   var from = to - (RANGES[range]-1);
   return { from:from, to:to, res:(to-from)<=1440?"minute":"hour" };
 }
-function rangeText(){
-  if(!series.times.length) return "-";
-  return labelFor(lastResolution, series.times[0]) + " ~ " + labelFor(lastResolution, series.times[series.times.length-1]);
-}
+function cacheKey(ep){ return currentRange + "|" + ep; }
+function invalidate(ep){ var k=cacheKey(ep); delete seriesCache[k]; delete seriesInflight[k]; }
+function invalidateAll(){ seriesCache={}; seriesInflight={}; }
 
-var trendChart=null, thrChart=null, detailChart=null, epTable=null;
-var axisCommonBase = {
-  axisLine:{lineStyle:{color:"#1d2a49"}},
-  axisLabel:{color:"#7d8db3",fontSize:10},
-  splitLine:{lineStyle:{color:"#141f38"}}
-};
-var tooltipBase = { trigger:"axis", backgroundColor:"rgba(12,21,38,.95)", borderColor:"#1d2a49", textStyle:{color:"#dde6f5",fontSize:12} };
+/* 单端点逐桶序列：缓存 + 去重并发（表格 sparkline 与详情共用） */
+function ensureSeries(ep, cb){
+  var k = cacheKey(ep);
+  if(seriesCache[k]){ cb(seriesCache[k]); return; }
+  if(seriesInflight[k]){ seriesInflight[k].push(cb); return; }
+  seriesInflight[k]=[cb];
+  var b=computeBuckets(currentRange);
+  var url="/inner/sw/metrics/query?endpoint="+encodeURIComponent(ep)
+    +"&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  jget(url).then(function(res){
+    var rows=(res&&res.rows)||[];
+    seriesCache[k]=rows;
+    var cbs=seriesInflight[k]||[]; delete seriesInflight[k];
+    cbs.forEach(function(f){ try{f(rows);}catch(e){} });
+  }).catch(function(){
+    var cbs=seriesInflight[k]||[]; delete seriesInflight[k];
+    cbs.forEach(function(f){ try{f([]);}catch(e){} });
+  });
+}
 
 function refresh(){
   var b = computeBuckets(currentRange);
   var globalUrl = "/inner/sw/metrics/query?endpoint=" + encodeURIComponent("*")
     + "&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
-  var allUrl = "/inner/sw/metrics/query?fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
-  Promise.all([ jget("/inner/sw/metrics"), jget(globalUrl), jget(allUrl) ])
+  var aggUrl = "/inner/sw/metrics/query?aggregate=true"
+    + "&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  Promise.all([ jget("/inner/sw/metrics"), jget(globalUrl), jget(aggUrl) ])
     .then(function(res){
-      var status = res[0]||{}, global = res[1]||{}, all = res[2]||{};
+      var status = res[0]||{}, global = res[1]||{}, agg = res[2]||{};
       if(status.enabled === false){ showError("指标聚合已关闭（plugin.logfilereporter.metrics.enabled=false）。"); }
       else { hideError(); }
       renderStatus(status);
       lastResolution = global.resolution||b.res;
       buildSeries((global.rows||[]).slice(), lastResolution);
       renderCharts();
-      lastEps = aggregateEndpoints(all.rows||[]);
-      renderTable(lastEps, all.truncated);
-      renderNav(lastEps);
-      renderKpis(lastEps, all.truncated);
-      if(selectedEndpoint && findEp(selectedEndpoint)) { renderDetail(selectedEndpoint); }
-      else if(selectedEndpoint) { hideDetail(); }
+      tableRows = agg.rows||[];
+      renderTable(tableRows, agg.truncated);
+      renderNav(tableRows);
+      renderKpis(tableRows, agg.truncated);
+      if(selectedEndpoint){
+        invalidate(selectedEndpoint);
+        loadDetail(selectedEndpoint);
+      }
       document.getElementById("updatedAt").textContent = new Date().toLocaleTimeString();
     })
     .catch(function(e){ showError("读口失败："+e.message); });
@@ -254,133 +270,83 @@ function buildSeries(gRows, resolution){
     p99.push(r.p99==null?(r.p95==null?v50:r.p95):r.p99);
     req.push(r.requestCount||0); err.push(r.errorCount||0); slow.push(r.slowCount||0);
   });
-  series = { p50:p50,p90:p90,p95:p95,p99:p99,req:req,err:err,slow:slow,times:times,labels:labels };
+  globalSeries = { p50:p50,p90:p90,p95:p95,p99:p99,req:req,err:err,slow:slow,times:times,labels:labels };
 }
+
+var axisCommonBase = {
+  axisLine:{lineStyle:{color:"#1d2a49"}},
+  axisLabel:{color:"#7d8db3",fontSize:10},
+  splitLine:{lineStyle:{color:"#141f38"}}
+};
+var tooltipBase = { trigger:"axis", backgroundColor:"rgba(12,21,38,.95)", borderColor:"#1d2a49", textStyle:{color:"#dde6f5",fontSize:12} };
 
 function renderCharts(){
   if(!trendChart || !thrChart){
     trendChart = echarts.init(document.getElementById("trendChart"));
     thrChart = echarts.init(document.getElementById("thrChart"));
-    window.addEventListener("resize", function(){ trendChart && trendChart.resize(); thrChart && thrChart.resize(); detailChart && detailChart.resize(); });
+    window.addEventListener("resize", function(){ trendChart&&trendChart.resize(); thrChart&&thrChart.resize(); detailChart&&detailChart.resize(); });
   }
-  if(!series.labels.length){
+  if(!globalSeries.labels.length){
     trendChart.clear(); thrChart.clear();
     trendChart.setOption({title:{text:"暂无数据",left:"center",top:"middle",textStyle:{color:"#7d8db3",fontSize:13,fontWeight:"normal"}},xAxis:{show:false},yAxis:{show:false},series:[]});
     thrChart.setOption({xAxis:{show:false},yAxis:{show:false},series:[]});
     return;
   }
-  var d95 = series.p95.map(function(v,i){return Math.max(0, v - series.p50[i]);});
-  var d99 = series.p99.map(function(v,i){return Math.max(0, v - series.p95[i]);});
+  var S=globalSeries;
+  var d95 = S.p95.map(function(v,i){return Math.max(0, v - S.p50[i]);});
+  var d99 = S.p99.map(function(v,i){return Math.max(0, v - S.p95[i]);});
   trendChart.setOption({
     grid:{left:52,right:14,top:16,bottom:28},
-    tooltip:$.extend({},tooltipBase,{formatter:function(params){
-      var i=params[0].dataIndex;
-      return "<b>"+esc(series.labels[i])+"</b><br/>P50 "+fmtMs(series.p50[i])+"<br/>P90 "+fmtMs(series.p90[i])
-        +"<br/>P95 "+fmtMs(series.p95[i])+"<br/>P99 "+fmtMs(series.p99[i]);
-    }}),
+    tooltip:$.extend({},tooltipBase,{formatter:function(p){var i=p[0].dataIndex;
+      return "<b>"+esc(S.labels[i])+"</b><br/>P50 "+fmtMs(S.p50[i])+"<br/>P90 "+fmtMs(S.p90[i])+"<br/>P95 "+fmtMs(S.p95[i])+"<br/>P99 "+fmtMs(S.p99[i]);}}),
     legend:{data:["P50","P90","P95","P99"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
-    xAxis:$.extend({type:"category",boundaryGap:false,data:series.labels},axisCommonBase),
+    xAxis:$.extend({type:"category",boundaryGap:false,data:S.labels},axisCommonBase),
     yAxis:$.extend({type:"value",axisLabel:{color:"#7d8db3",fontSize:10,formatter:function(v){return v>=1000?(v/1000).toFixed(0)+"s":v;}}},axisCommonBase),
     series:[
-      { name:"P50", type:"line", stack:"band", symbol:"none", smooth:true, data:series.p50,
-        lineStyle:{width:1.6,color:"#38bdf8"}, itemStyle:{color:"#38bdf8"}, areaStyle:{color:"rgba(56,189,248,.10)"}, z:3 },
-      { name:"band95", type:"line", stack:"band", symbol:"none", smooth:true, data:d95,
-        lineStyle:{opacity:0}, areaStyle:{color:"rgba(56,189,248,.16)"}, z:2, tooltip:{show:false}, legendHoverLink:false },
-      { name:"band99", type:"line", stack:"band", symbol:"none", smooth:true, data:d99,
-        lineStyle:{opacity:0}, areaStyle:{color:"rgba(251,113,133,.14)"}, z:1, tooltip:{show:false}, legendHoverLink:false },
-      { name:"P90", type:"line", symbol:"none", smooth:true, data:series.p90, lineStyle:{width:1.4,type:"dashed",color:"#a78bfa"}, itemStyle:{color:"#a78bfa"}, z:4 },
-      { name:"P95", type:"line", symbol:"none", smooth:true, data:series.p95, lineStyle:{width:1.8,color:"#fbbf24"}, itemStyle:{color:"#fbbf24"}, z:5 },
-      { name:"P99", type:"line", symbol:"none", smooth:true, data:series.p99, lineStyle:{width:1.6,type:"dashed",color:"#fb7185"}, itemStyle:{color:"#fb7185"}, z:6 }
+      { name:"P50", type:"line", stack:"band", symbol:"none", smooth:true, data:S.p50, lineStyle:{width:1.6,color:"#38bdf8"}, itemStyle:{color:"#38bdf8"}, areaStyle:{color:"rgba(56,189,248,.10)"}, z:3 },
+      { name:"band95", type:"line", stack:"band", symbol:"none", smooth:true, data:d95, lineStyle:{opacity:0}, areaStyle:{color:"rgba(56,189,248,.16)"}, z:2, tooltip:{show:false}, legendHoverLink:false },
+      { name:"band99", type:"line", stack:"band", symbol:"none", smooth:true, data:d99, lineStyle:{opacity:0}, areaStyle:{color:"rgba(251,113,133,.14)"}, z:1, tooltip:{show:false}, legendHoverLink:false },
+      { name:"P90", type:"line", symbol:"none", smooth:true, data:S.p90, lineStyle:{width:1.4,type:"dashed",color:"#a78bfa"}, itemStyle:{color:"#a78bfa"}, z:4 },
+      { name:"P95", type:"line", symbol:"none", smooth:true, data:S.p95, lineStyle:{width:1.8,color:"#fbbf24"}, itemStyle:{color:"#fbbf24"}, z:5 },
+      { name:"P99", type:"line", symbol:"none", smooth:true, data:S.p99, lineStyle:{width:1.6,type:"dashed",color:"#fb7185"}, itemStyle:{color:"#fb7185"}, z:6 }
     ]
   }, true);
-
   thrChart.setOption({
     grid:{left:48,right:48,top:16,bottom:28},
-    tooltip:$.extend({},tooltipBase,{formatter:function(params){
-      var i=params[0].dataIndex;
-      return "<b>"+esc(series.labels[i])+"</b><br/>请求 "+fmtInt(series.req[i])+"<br/>错误 "+fmtInt(series.err[i])+"<br/>慢 "+fmtInt(series.slow[i]);
-    }}),
+    tooltip:$.extend({},tooltipBase,{formatter:function(p){var i=p[0].dataIndex;
+      return "<b>"+esc(S.labels[i])+"</b><br/>请求 "+fmtInt(S.req[i])+"<br/>错误 "+fmtInt(S.err[i])+"<br/>慢 "+fmtInt(S.slow[i]);}}),
     legend:{data:["请求","错误","慢"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
-    xAxis:$.extend({type:"category",data:series.labels},axisCommonBase),
+    xAxis:$.extend({type:"category",data:S.labels},axisCommonBase),
     yAxis:[
       $.extend({type:"value",name:"请求",nameTextStyle:{color:"#7d8db3",fontSize:10}},axisCommonBase),
       $.extend({type:"value",name:"错/慢",nameTextStyle:{color:"#7d8db3",fontSize:10},splitLine:{show:false}},axisCommonBase)
     ],
     series:[
-      { name:"请求", type:"bar", data:series.req, itemStyle:{color:"rgba(56,189,248,.65)"}, barMaxWidth:14 },
-      { name:"错误", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:series.err, lineStyle:{color:"#fb7185",width:2}, itemStyle:{color:"#fb7185"} },
-      { name:"慢", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:series.slow, lineStyle:{color:"#fbbf24",width:1.6}, itemStyle:{color:"#fbbf24"} }
+      { name:"请求", type:"bar", data:S.req, itemStyle:{color:"rgba(56,189,248,.65)"}, barMaxWidth:14 },
+      { name:"错误", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:S.err, lineStyle:{color:"#fb7185",width:2}, itemStyle:{color:"#fb7185"} },
+      { name:"慢", type:"line", yAxisIndex:1, symbol:"none", smooth:true, data:S.slow, lineStyle:{color:"#fbbf24",width:1.6}, itemStyle:{color:"#fbbf24"} }
     ]
   }, true);
 }
 
-function aggregateEndpoints(rows){
-  var map = {};
-  rows.forEach(function(r){
-    var a = map[r.endpoint];
-    if(!a){ a = { endpoint:r.endpoint, req:0, err:0, slow:0, total:0, max:0, sample:0,
-                   w50:0,w90:0,w95:0,w99:0,c:0, series:[], buckets:0 }; map[r.endpoint]=a; }
-    a.req += r.requestCount||0; a.err += r.errorCount||0; a.slow += r.slowCount||0;
-    a.total += r.totalLatency||0; a.max = Math.max(a.max, r.maxLatency||0); a.sample += r.sampleCount||0;
-    a.buckets += 1;
-    if(r.p50!=null){a.w50 += r.p50*r.requestCount; a.c += r.requestCount;}
-    if(r.p90!=null){a.w90 += r.p90*r.requestCount;}
-    if(r.p95!=null){a.w95 += r.p95*r.requestCount;}
-    if(r.p99!=null){a.w99 += r.p99*r.requestCount;}
-    a.series.push({ t:r.timeBucket, p50:r.p50, p90:r.p90, p95:r.p95, p99:r.p99,
-                    req:r.requestCount||0, err:r.errorCount||0, slow:r.slowCount||0, sample:r.sampleCount||0 });
-  });
-  var out = [];
-  for(var k in map){ if(!Object.prototype.hasOwnProperty.call(map,k)) continue;
-    var a = map[k];
-    a.p50 = a.c>0?Math.round(a.w50/a.c):null;
-    a.p90 = a.c>0?Math.round(a.w90/a.c):null;
-    a.p95 = a.c>0?Math.round(a.w95/a.c):null;
-    a.p99 = a.c>0?Math.round(a.w99/a.c):null;
-    a.avg = a.req>0?Math.round(a.total/a.req):0;
-    a.errRate = a.req>0?a.err/a.req:0; a.slowRate = a.req>0?a.slow/a.req:0;
-    a.series.sort(function(x,y){return x.t-y.t;});
-    out.push(a);
-  }
-  out.sort(function(x,y){return y.req-x.req;});
-  return out;
-}
-function findEp(name){ for(var i=0;i<lastEps.length;i++){ if(lastEps[i].endpoint===name) return lastEps[i]; } return null; }
+function levelOf(errRate, slowRate){ if(errRate>0.1)return "error"; if(slowRate>0.15)return "slow"; return "normal"; }
 
-function levelOf(a){ if(a.errRate>0.1)return "error"; if(a.slowRate>0.15)return "slow"; return "normal"; }
-
-/* 内联 SVG sparkline（趋势列） */
-function sparkSvg(vals,color){
-  if(!vals.length) return "";
-  var w=110,h=26,min=Math.min.apply(null,vals),max=Math.max.apply(null,vals);
-  if(max===min)max=min+1;
-  var d=vals.map(function(v,i){return (i?"L":"M")+(i/(vals.length-1)*w).toFixed(1)+" "+(h-2-(v-min)/(max-min)*(h-4)).toFixed(1);}).join(" ");
-  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/></svg>';
-}
-
-function renderTable(eps, truncated){
-  var data = eps.map(function(a){
-    var level = levelOf(a);
-    var color = level==="error"?"#fb7185":(level==="slow"?"#fbbf24":"#38bdf8");
+function renderTable(rows, truncated){
+  var data = rows.map(function(r){
+    var errRate = r.errorRate||0, slowRate = r.slowRate||0;
+    var level = levelOf(errRate, slowRate);
     return {
-      endpoint: a.endpoint,
-      req: a.req,
-      errRate: a.errRate,
-      p50: a.p50, p95: a.p95, p99: a.p99,
-      slow: a.slow,
-      spark: sparkSvg(a.series.map(function(s){return (s.p95!=null?s.p95:(s.p50||0));}), color),
-      level: level
+      endpoint: r.endpoint, req: r.requestCount||0, errRate: errRate,
+      p50: r.p50, p95: r.p95, p99: r.p99, slow: r.slowCount||0,
+      level: level, spark: '<span class="muted">…</span>'
     };
   });
   if(!epTable){
     epTable = $("#epTable").DataTable({
       data: data,
       dom: '<"dt-top"lf>rt<"dt-bottom"ip>',
-      order: [[1,"desc"]],
-      pageLength: 10,
-      lengthMenu: [[10,20,50,-1],[10,20,50,"全部"]],
-      autoWidth: false,
-      deferRender: true,
+      order: [[1,"desc"]], pageLength: 10, lengthMenu: [[10,20,50,-1],[10,20,50,"全部"]],
+      autoWidth: false, deferRender: true,
       language: {
         search: "过滤：", lengthMenu: "每页 _MENU_ 条", info: "第 _START_–_END_ 条 / 共 _TOTAL_ 条",
         infoEmpty: "无数据", zeroRecords: "暂无 Endpoint 指标", emptyTable: "暂无 Endpoint 指标",
@@ -398,15 +364,46 @@ function renderTable(eps, truncated){
         { data:"level", render:function(d,t){ return t==="display" ? '<span class="pill '+d+'">'+d.toUpperCase()+'</span>' : d; } }
       ]
     });
-    epTable.on("draw", applyHighlight);
+    epTable.on("draw", function(){ applyHighlight(); fillVisibleSparks(); });
   } else {
     epTable.clear();
-    if(data.length) { epTable.rows.add(data); }
-    epTable.draw(false);
+    if(data.length){ epTable.rows.add(data); }
+    epTable.draw(false);   // 触发 draw -> applyHighlight + fillVisibleSparks
   }
   var note = document.getElementById("tableNote");
-  if(truncated){ note.style.display=""; note.textContent="提示：数据点已达上限并截断，缩小时间范围可见更细粒度。"; }
+  if(truncated){ note.style.display=""; note.textContent="提示：endpoint 数已达上限并截断（按请求数降序取前 N 个）。"; }
   else { note.style.display="none"; }
+}
+
+function sparkVals(rows){ return rows.map(function(r){ return (r.p95!=null?r.p95:(r.p50||0)); }); }
+
+/* 只给当前页可见行填 sparkline：命中缓存即画，否则懒加载该端点序列 */
+function fillVisibleSparks(){
+  if(!epTable) return;
+  epTable.rows({page:"current"}).every(function(){
+    var d = this.data(); var node = this.node();
+    if(!d || !node) return;
+    var color = d.level==="error"?"#fb7185":(d.level==="slow"?"#fbbf24":"#38bdf8");
+    var key = cacheKey(d.endpoint);
+    var cell = $(node).find("td").eq(SPARK_COL);
+    if(seriesCache[key]){ cell.html(sparkLine(seriesCache[key], color)); return; }
+    cell.html('<span class="muted">…</span>');
+    (function(cellRef, ep, col){
+      ensureSeries(ep, function(rows){
+        var c = col==="error"?"#fb7185":(col==="slow"?"#fbbf24":"#38bdf8");
+        cellRef.html(rows.length ? sparkLine(rows, c) : '<span class="muted">-</span>');
+      });
+    })(cell, d.endpoint, d.level);
+  });
+}
+
+function sparkLine(rows, color){
+  var vals = sparkVals(rows);
+  if(!vals.length) return '<span class="muted">-</span>';
+  var w=110,h=26,min=Math.min.apply(null,vals),max=Math.max.apply(null,vals);
+  if(max===min)max=min+1;
+  var d=vals.map(function(v,i){return (i?"L":"M")+(i/(vals.length-1)*w).toFixed(1)+" "+(h-2-(v-min)/(max-min)*(h-4)).toFixed(1);}).join(" ");
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.6"/></svg>';
 }
 
 function applyHighlight(){
@@ -414,29 +411,28 @@ function applyHighlight(){
   $("#epTable tbody tr").removeClass("sel");
   if(!selectedEndpoint) return;
   epTable.rows().every(function(){
-    var d = this.data();
-    if(d && d.endpoint === selectedEndpoint){ $(this.node()).addClass("sel"); }
+    var d=this.data();
+    if(d && d.endpoint===selectedEndpoint){ $(this.node()).addClass("sel"); }
   });
 }
 
-function renderNav(eps){
-  var top = eps.slice().sort(function(a,b){return (b.p95||0)-(a.p95||0);}).slice(0,12);
-  document.getElementById("epNav").innerHTML = top.map(function(a){
-    return '<div class="ep" title="'+esc(a.endpoint)+'">'+esc(a.endpoint)+'</div>';
+function renderNav(rows){
+  var top = rows.slice().sort(function(a,b){return (b.p95||0)-(a.p95||0);}).slice(0,12);
+  document.getElementById("epNav").innerHTML = top.map(function(r){
+    return '<div class="ep" title="'+esc(r.endpoint)+'">'+esc(r.endpoint)+'</div>';
   }).join("") || '<div class="ep">-</div>';
 }
 
-function renderKpis(eps, truncated){
+function renderKpis(rows, truncated){
   var req=0,err=0,slow=0;
-  series.req.forEach(function(v,i){req+=v;err+=series.err[i];slow+=series.slow[i];});
-  var n = series.labels.length;
-  var i99 = n? n-1 : -1;
+  globalSeries.req.forEach(function(v,i){req+=v;err+=globalSeries.err[i];slow+=globalSeries.slow[i];});
+  var n = globalSeries.labels.length; var i99 = n? n-1 : -1;
   var kpis = [
-    ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 已截断":"")],
+    ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 端点已截断":"")],
     ["错误率", pct(req?err/req:0), fmtInt(err)+" 次错误"],
-    ["P95", i99>=0?fmtMs(series.p95[i99]):"-", "P99 "+(i99>=0?fmtMs(series.p99[i99]):"-")],
+    ["P95", i99>=0?fmtMs(globalSeries.p95[i99]):"-", "P99 "+(i99>=0?fmtMs(globalSeries.p99[i99]):"-")],
     ["慢调用", fmtInt(slow), pct(req?slow/req:0)+" 占比"],
-    ["活跃 Endpoint", eps.length, "全局行 *"],
+    ["活跃 Endpoint", rows.length, "按请求数降序"],
     ["分辨率", lastResolution, n+" 个数据点"]
   ];
   document.getElementById("kpis").innerHTML = kpis.map(function(k){
@@ -444,62 +440,67 @@ function renderKpis(eps, truncated){
   }).join("");
 }
 
-/* ================= 行下钻详情 ================= */
+/* ================= 行下钻详情（单端点逐桶序列） ================= */
 
-function selectEndpoint(name){
-  selectedEndpoint = name;
-  applyHighlight();
-  renderDetail(name);
+function selectEndpoint(name){ selectedEndpoint=name; applyHighlight(); loadDetail(name); }
+function hideDetail(){ selectedEndpoint=null; applyHighlight(); $("#detailCard").hide(); }
+function loadDetail(name){ ensureSeries(name, function(rows){ renderDetail(name, rows); }); }
+
+function aggSeries(rows){
+  var a={req:0,err:0,slow:0,total:0,max:0,sample:0,w50:0,w90:0,w95:0,w99:0,c:0};
+  rows.forEach(function(r){
+    a.req+=r.requestCount||0; a.err+=r.errorCount||0; a.slow+=r.slowCount||0;
+    a.total+=r.totalLatency||0; a.max=Math.max(a.max,r.maxLatency||0); a.sample+=r.sampleCount||0;
+    if(r.p50!=null){a.w50+=r.p50*r.requestCount; a.c+=r.requestCount;}
+    if(r.p90!=null){a.w90+=r.p90*r.requestCount;}
+    if(r.p95!=null){a.w95+=r.p95*r.requestCount;}
+    if(r.p99!=null){a.w99+=r.p99*r.requestCount;}
+  });
+  a.p50=a.c?Math.round(a.w50/a.c):null; a.p90=a.c?Math.round(a.w90/a.c):null;
+  a.p95=a.c?Math.round(a.w95/a.c):null; a.p99=a.c?Math.round(a.w99/a.c):null;
+  a.avg=a.req?Math.round(a.total/a.req):0; a.errRate=a.req?a.err/a.req:0; a.slowRate=a.req?a.slow/a.req:0;
+  return a;
 }
-function hideDetail(){
-  selectedEndpoint = null;
-  applyHighlight();
-  $("#detailCard").hide();
-}
 
-function renderDetail(name){
-  var a = findEp(name);
-  var card = document.getElementById("detailCard");
-  if(!a){ card.style.display = "none"; return; }
-  card.style.display = "";
-
+function renderDetail(name, rows){
+  var card=document.getElementById("detailCard");
+  if(!rows || !rows.length){ card.style.display="none"; return; }
+  card.style.display="";
+  var a = aggSeries(rows);
   document.getElementById("detailTitle").textContent = "Endpoint 详情 · " + name;
-
+  var rangeTxt = labelFor(lastResolution, rows[0].timeBucket*bucketMs(lastResolution))
+    + " ~ " + labelFor(lastResolution, rows[rows.length-1].timeBucket*bucketMs(lastResolution));
   var cells = [
     ["请求数", fmtInt(a.req)],
-    ["错误率", pct(a.errRate) + " (" + fmtInt(a.err) + ")"],
-    ["慢调用", fmtInt(a.slow) + " (" + pct(a.slowRate) + ")"],
+    ["错误率", pct(a.errRate)+" ("+fmtInt(a.err)+")"],
+    ["慢调用", fmtInt(a.slow)+" ("+pct(a.slowRate)+")"],
     ["平均耗时", fmtMs(a.avg)],
     ["P50", fmtMs(a.p50)], ["P90", fmtMs(a.p90)], ["P95", fmtMs(a.p95)], ["P99", fmtMs(a.p99)],
     ["最大耗时", fmtMs(a.max)],
     ["参与分位样本", fmtInt(a.sample)],
-    ["时间范围", rangeText()],
-    ["分辨率 / 桶数", (lastResolution==="hour"?"小时":"分钟") + " / " + a.buckets]
+    ["时间范围", rangeTxt],
+    ["分辨率 / 桶数", (lastResolution==="hour"?"小时":"分钟")+" / "+rows.length]
   ];
   document.getElementById("detailInfo").innerHTML = cells.map(function(c){
     return '<div class="cell"><div class="l">'+esc(c[0])+'</div><div class="v">'+esc(String(c[1]))+'</div></div>';
   }).join("");
-
   document.getElementById("detailNote").innerHTML =
-    "数据说明：本行聚合自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的指标桶（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
+    "数据说明：本行取自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的逐桶序列（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
     + "计数（请求/错误/慢）与最大耗时为<b>精确合并</b>；P50/P90/P95/P99 为各桶分位按请求数<b>加权平均</b>（≤24h 用分钟分位，7d/30d 用小时分位，小时分位本身为分钟分位的加权近似）。"
     + "样本不足的桶分位为空、不参与加权（<span class='mono'>sampleCount ≤ requestCount</span>）。"
-    + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。"
-    + "分级规则（前端派生）：错误率 &gt; 10% 记为 <span class='pill error'>ERROR</span>，慢率 &gt; 15% 记为 <span class='pill slow'>SLOW</span>，否则 <span class='pill normal'>NORMAL</span>。";
+    + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。";
 
   if(!detailChart){ detailChart = echarts.init(document.getElementById("detailChart")); }
-  var labels = a.series.map(function(s){ return labelFor(lastResolution, s.t*bucketMs(lastResolution)); });
-  var p50 = a.series.map(function(s){ return s.p50==null?null:s.p50; });
-  var p95 = a.series.map(function(s){ return s.p95==null?null:s.p95; });
-  var p99 = a.series.map(function(s){ return s.p99==null?null:s.p99; });
-  var req = a.series.map(function(s){ return s.req; });
+  var labels = rows.map(function(r){ return labelFor(lastResolution, r.timeBucket*bucketMs(lastResolution)); });
+  var p50 = rows.map(function(r){ return r.p50==null?null:r.p50; });
+  var p95 = rows.map(function(r){ return r.p95==null?null:r.p95; });
+  var p99 = rows.map(function(r){ return r.p99==null?null:r.p99; });
+  var req = rows.map(function(r){ return r.requestCount||0; });
   detailChart.setOption({
     grid:{left:52,right:52,top:16,bottom:28},
-    tooltip:$.extend({},tooltipBase,{formatter:function(params){
-      var i=params[0].dataIndex; var s=a.series[i];
-      return "<b>"+esc(labels[i])+"</b><br/>请求 "+fmtInt(s.req)+"　错误 "+fmtInt(s.err)+"　慢 "+fmtInt(s.slow)
-        +"<br/>P50 "+fmtMs(s.p50)+"<br/>P95 "+fmtMs(s.p95)+"<br/>P99 "+fmtMs(s.p99)+"<br/>样本 "+fmtInt(s.sample);
-    }}),
+    tooltip:$.extend({},tooltipBase,{formatter:function(p){var i=p[0].dataIndex;var r=rows[i];
+      return "<b>"+esc(labels[i])+"</b><br/>请求 "+fmtInt(r.requestCount)+"　错误 "+fmtInt(r.errorCount)+"　慢 "+fmtInt(r.slowCount)
+        +"<br/>P50 "+fmtMs(r.p50)+"<br/>P95 "+fmtMs(r.p95)+"<br/>P99 "+fmtMs(r.p99)+"<br/>样本 "+fmtInt(r.sampleCount);}}),
     legend:{data:["请求","P50","P95","P99"],right:6,top:0,textStyle:{color:"#7d8db3",fontSize:11},icon:"roundRect"},
     xAxis:$.extend({type:"category",boundaryGap:true,data:labels},axisCommonBase),
     yAxis:[
@@ -520,10 +521,10 @@ $(function(){
   $("#ranges").on("click","span[data-r]",function(){
     currentRange = $(this).data("r");
     $("#ranges span").removeClass("on"); $(this).addClass("on");
+    invalidateAll();
     refresh();
   });
-  // DataTables 行点击 → 底部展开详情(再次点击同一行收起)
-  // 注意:委托根必须是静态存在的元素(DataTables 初始化前 <tbody> 尚不存在,绑 #epTable tbody 会落空)
+  // DataTables 行点击 → 底部展开详情(再次点击同一行收起)。委托根用静态存在的 document。
   $(document).on("click","#epTable tbody tr",function(){
     if(!epTable) return;
     var d = epTable.row(this).data();

@@ -84,6 +84,27 @@ public class TraceMetricsRollupTest {
     }
 
     @Test
+    public void mergeByEndpoint_combinesAcrossBuckets() {
+        final List<MetricsRow> rows = new ArrayList<MetricsRow>();
+        rows.add(row("GET:/a", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1));
+        rows.add(row("GET:/a", 101L, 3L, 1L, 0L, 60L, 40L, 30, -1, -1, -1, 3));
+        rows.add(row("GET:/b", 100L, 5L, 0L, 0L, 50L, 20L, 20, -1, -1, -1, 5));
+
+        final List<MetricsRow> out = TraceMetricsRollup.mergeByEndpoint(rows, 0L);
+        Assert.assertEquals(2, out.size());
+        MetricsRow a = null;
+        for (MetricsRow r : out) {
+            if ("GET:/a".equals(r.getEndpoint())) {
+                a = r;
+            }
+        }
+        Assert.assertNotNull(a);
+        Assert.assertEquals(4L, a.getRequestCount());
+        Assert.assertEquals(70L, a.getTotalLatency());
+        Assert.assertEquals(25, a.getP50());
+    }
+
+    @Test
     public void downsample_noopWhenUnderTarget() {
         final List<MetricsRow> rows = new ArrayList<MetricsRow>();
         rows.add(row("GET:/a", 0L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1));
