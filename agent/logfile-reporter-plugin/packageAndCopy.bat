@@ -35,7 +35,7 @@ rem so it works no matter which folder it is run from.
 set BATCH_DIR=%~dp0
 set REPO_AGENT=%BATCH_DIR%..
 set MODULE_DIR=%REPO_AGENT%\logfile-reporter-plugin
-set JAR_FILE=%MODULE_DIR%\target\logfile-reporter-plugin-1.0.0.jar
+set JAR_FILE=%MODULE_DIR%\target\logfile-reporter-plugin-2.0.0.jar
 
 echo [1/3] build plugin, reactor root = %REPO_AGENT%
 cd /d "%REPO_AGENT%"
@@ -50,7 +50,7 @@ if not exist "%AGENT_DIR%\plugins\" (
     echo ERROR: agent plugins dir not found: %AGENT_DIR%\plugins\
     goto :fail
 )
-copy /Y "%JAR_FILE%" "%AGENT_DIR%\plugins\logfile-reporter-plugin-1.0.0.jar" >nul
+copy /Y "%JAR_FILE%" "%AGENT_DIR%\plugins\logfile-reporter-plugin-2.0.0.jar" >nul
 if errorlevel 1 goto :fail
 
 echo [3/3] installed logfile-reporter-plugin jars:
