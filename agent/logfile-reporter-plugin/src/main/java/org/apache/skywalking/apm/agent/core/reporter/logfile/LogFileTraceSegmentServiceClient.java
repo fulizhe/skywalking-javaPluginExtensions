@@ -20,6 +20,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -113,6 +114,21 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private final AtomicLong orphanSegments = new AtomicLong(0);
 	/** 最近一个被过滤孤段的样本（{@code traceId | 根 operationName | 根 spanType}），供排查来源（如确认 gRPC）。 */
 	private volatile String lastOrphan = "";
+	/** 孤段类型上限：按根 operationName 归并，超出并入 {@link #ORPHAN_OTHER}，防止高基数列举膨胀。 */
+	private static final int MAX_ORPHAN_KINDS = 50;
+	private static final String ORPHAN_OTHER = "(other)";
+	/** 孤段类型统计：key = 根 operationName → 计数 + spanType + 最近 traceId（供 /inner/sw/trace-parity 排查来源）。 */
+	private final ConcurrentHashMap<String, OrphanKind> orphanKinds = new ConcurrentHashMap<String, OrphanKind>();
+
+	private static final class OrphanKind {
+		private final String type;
+		private final AtomicLong count = new AtomicLong(0);
+		private volatile String lastTraceId = "";
+
+		OrphanKind(final String type) {
+			this.type = type;
+		}
+	}
 	/** 对账日志限速（同类差异 30s 最多一条） */
 	private volatile long parityLastErrorLogTime = 0;
 	private static final long PARITY_INTERVAL_MS = 5_000L;
@@ -178,6 +194,23 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
         result.put("orphanSegments", orphanSegments.get());
         // 最近孤段样本（traceId | 根 op | 根 type）：用于确认来源，如 "… | grpc/xxx | Exit"
         result.put("lastOrphan", lastOrphan);
+        // 孤段类型（内存统计,按次数降序）: op / spanType / 次数 / 最近 traceId（典型例子），便于审查来源
+        final List<Map<String, Object>> orphanKindList = new ArrayList<Map<String, Object>>();
+        for (Map.Entry<String, OrphanKind> e : orphanKinds.entrySet()) {
+            final Map<String, Object> m = new HashMap<String, Object>();
+            m.put("op", e.getKey());
+            m.put("type", e.getValue().type);
+            m.put("count", e.getValue().count.get());
+            m.put("lastTraceId", e.getValue().lastTraceId);
+            orphanKindList.add(m);
+        }
+        Collections.sort(orphanKindList, new Comparator<Map<String, Object>>() {
+            @Override
+            public int compare(final Map<String, Object> a, final Map<String, Object> b) {
+                return Long.compare(((Long) b.get("count")).longValue(), ((Long) a.get("count")).longValue());
+            }
+        });
+        result.put("orphanKinds", orphanKindList);
         // 审计表：最近差异明细（来源 trace_parity_audit）+ 水位状态，供使用侧界面直接展示
         if (traceSegmentStorage != null) {
             result.put("auditRowCount", traceSegmentStorage.auditRowCount());
@@ -680,7 +713,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			final TraceSegment raw = data.get(i);
 			if (isOrphanSegment(raw, segment)) {
 				orphanSegments.incrementAndGet();
-				lastOrphan = describeOrphan(segment); // 供 /inner/sw/trace-parity 排查（如 grpc/xxx | Exit）
+				recordOrphan(segment); // 更新最近样本 + 按根 operation 归并类型(内存,仅供审查)
 				if (LOGGER.isDebugEnable()) {
 					LOGGER.debug("### [Orphan] filtered context-less segment: {}", lastOrphan);
 				}
@@ -721,7 +754,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 * 跨线程回调有 ref 保留）；其它无 active trace 的后台/定时/框架线程内触发的插件。
 	 * </p>
 	 * <p>2026-09-25 起用于 {@link #consume} 过滤；保留为独立静态方法，便于单测与后续迭代溯源。
-	 * 过滤计数见 {@code /inner/sw/trace-parity} 的 {@code orphanSegments}；最近样本见 {@code lastOrphan}。</p>
+	 * 过滤计数见 {@code /inner/sw/trace-parity} 的 {@code orphanSegments}；按来源归并的类型见 {@code orphanKinds}
+	 * （op/spanType/次数/最近 traceId），最近一个样本见 {@code lastOrphan}。</p>
 	 */
 	static boolean isOrphanSegment(final TraceSegment raw, final SegmentObject obj) {
 		if (obj == null) {
@@ -739,20 +773,39 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		return true;
 	}
 
-	/** 孤段可读样本：{@code traceId | 根 operationName | 根 spanType}（根 = parentSpanId==-1 的 span）。 */
-	private static String describeOrphan(final SegmentObject segment) {
-		String op = "";
-		String type = "";
+	/** 根 span（parentSpanId==-1）摘要：{@code [operationName, spanType]}；无根返回 {@code ["",""]}。 */
+	private static String[] rootSummary(final SegmentObject segment) {
 		final List<SpanObject> spans = segment.getSpansList();
 		for (int i = 0; i < spans.size(); i++) {
 			final SpanObject s = spans.get(i);
 			if (s.getParentSpanId() == -1) {
-				op = s.getOperationName();
-				type = String.valueOf(s.getSpanType());
-				break;
+				return new String[] { s.getOperationName(), String.valueOf(s.getSpanType()) };
 			}
 		}
-		return segment.getTraceId() + " | " + op + " | " + type;
+		return new String[] { "", "" };
+	}
+
+	/**
+	 * 记录被过滤孤段（内存，仅供审查/溯源，不落库）：
+	 * 更新最近样本 {@link #lastOrphan}，并按根 operationName 归并计数（{@link #orphanKinds}，
+	 * 上限 {@link #MAX_ORPHAN_KINDS}，超出并入 {@code (other)}）。
+	 */
+	private void recordOrphan(final SegmentObject segment) {
+		final String[] root = rootSummary(segment);
+		final String op = (root[0] == null || root[0].isEmpty()) ? "(unknown)" : root[0];
+		lastOrphan = segment.getTraceId() + " | " + op + " | " + root[1];
+		String key = op;
+		if (orphanKinds.size() >= MAX_ORPHAN_KINDS && !orphanKinds.containsKey(key)) {
+			key = ORPHAN_OTHER;
+		}
+		OrphanKind kind = orphanKinds.get(key);
+		if (kind == null) {
+			final OrphanKind created = new OrphanKind(root[1]);
+			final OrphanKind prev = orphanKinds.putIfAbsent(key, created);
+			kind = prev != null ? prev : created;
+		}
+		kind.count.incrementAndGet();
+		kind.lastTraceId = segment.getTraceId();
 	}
 
 	/**
