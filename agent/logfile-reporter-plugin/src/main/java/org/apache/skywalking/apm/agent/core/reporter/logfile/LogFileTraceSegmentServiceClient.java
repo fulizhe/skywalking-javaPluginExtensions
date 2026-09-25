@@ -339,6 +339,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			rows.add(combined.get(i).toMap());
 		}
 		result.put("resolution", resolution);
+		result.put("aggregate", Boolean.TRUE);
 		result.put("rows", rows);
 		result.put("count", rows.size());
 		result.put("truncated", truncated);

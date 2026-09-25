@@ -270,7 +270,9 @@ function refresh(){
       lastResolution = global.resolution||b.res;
       buildSeries((global.rows||[]).slice(), lastResolution);
       renderCharts();
-      tableRows = agg.rows||[];
+      // 服务端 aggregate 返回每端点一行；旧服务端(忽略 aggregate)返回逐桶行。
+      // 统一在客户端按 endpoint 归并，兼容两种形状，避免把逐桶行当成多行展示。
+      tableRows = groupRows(agg.rows||[]);
       renderTable(tableRows, agg.truncated);
       renderNav(tableRows);
       renderKpis(tableRows, agg.truncated);
@@ -386,13 +388,23 @@ function renderCharts(){
 
 function levelOf(errRate, slowRate){ if(errRate>0.1)return "error"; if(slowRate>0.15)return "slow"; return "normal"; }
 
+/* 按 endpoint 归并任意行集合（兼容服务端聚合行 / 逐桶行），产出每端点一行 */
+function groupRows(rows){
+  var map = {};
+  rows.forEach(function(r){ if(!r || r.endpoint==null) return; (map[r.endpoint] = map[r.endpoint] || []).push(r); });
+  var out = [];
+  Object.keys(map).forEach(function(ep){ var a = aggSeries(map[ep]); a.endpoint = ep; out.push(a); });
+  out.sort(function(x,y){ return y.req - x.req; });
+  return out;
+}
+
 function renderTable(rows, truncated){
   var data = rows.map(function(r){
-    var errRate = r.errorRate||0, slowRate = r.slowRate||0;
+    var errRate = r.errRate||0, slowRate = r.slowRate||0;
     var level = levelOf(errRate, slowRate);
     return {
-      endpoint: r.endpoint, req: r.requestCount||0, errRate: errRate,
-      p50: r.p50, p95: r.p95, p99: r.p99, slow: r.slowCount||0,
+      endpoint: r.endpoint, req: r.req||0, errRate: errRate,
+      p50: r.p50, p95: r.p95, p99: r.p99, slow: r.slow||0,
       level: level, spark: '<span class="muted">…</span>'
     };
   });
