@@ -39,7 +39,10 @@ set JAR_FILE=%MODULE_DIR%\target\logfile-reporter-plugin-1.0.0.jar
 
 echo [1/3] build plugin, reactor root = %REPO_AGENT%
 cd /d "%REPO_AGENT%"
-mvn clean package "-Dmaven.test.skip=true" -T 2C -pl logfile-reporter-plugin -am
+rem use "call": mvn is a batch file (mvn.cmd) and without "call"
+rem the control never returns to this script - the copy steps below
+rem would be skipped silently.
+call mvn clean package "-Dmaven.test.skip=true" -T 2C -pl logfile-reporter-plugin -am
 if errorlevel 1 goto :fail
 
 echo [2/3] copy jar to agent plugins dir
