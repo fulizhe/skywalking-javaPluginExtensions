@@ -881,6 +881,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			}
 			return combined;
 		});
+		// TODO 不会卡业务请求线程, 但会卡 DataCarrier 的 consume 线程; 当前是“消费线程同步评估”，可能造成 DataCarrier 背压，并延迟同批 Metrics 聚合；只有网络通知是异步的。
 		if (traceAlertDispatcher != null && merged != null) {
 			traceAlertDispatcher.afterTraceMerged(globalTraceid, merged);
 		}
