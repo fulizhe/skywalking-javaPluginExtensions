@@ -22,9 +22,18 @@
 *{box-sizing:border-box}
 :root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
 body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;min-height:100vh}
-.wrap{display:grid;grid-template-columns:286px 1fr;min-height:100vh}
-.rail{background:#0c1526;border-right:1px solid var(--bd);padding:18px 12px;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto}
+.wrap{--railw:286px;display:grid;grid-template-columns:var(--railw) 1fr;min-height:100vh;transition:grid-template-columns .25s ease}
+.wrap.collapsed{--railw:32px}
+.rail{background:#0c1526;border-right:1px solid var(--bd);padding:18px 12px;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;transition:padding .25s ease}
+.wrap.collapsed .rail{padding:12px 4px;overflow:hidden}
 .brand{display:flex;align-items:center;gap:9px;padding:0 8px 16px;border-bottom:1px solid var(--bd);margin-bottom:14px}
+.wrap.collapsed .brand{padding:4px 0;border-bottom:0;margin-bottom:0;justify-content:center}
+.wrap.collapsed .brand .logo,.wrap.collapsed .brand h1,.wrap.collapsed .brand p,
+.wrap.collapsed .tagline,.wrap.collapsed .diff{display:none}
+.rail-toggle{flex:none;margin-left:auto;background:transparent;border:1px solid var(--bd);color:var(--mut);border-radius:8px;width:26px;height:26px;font-size:11px;cursor:pointer;line-height:1;padding:0}
+.rail-toggle:hover{background:#1c2b4a;color:#dbeafe}
+.wrap.collapsed .rail .rail-toggle{margin:0}
+.wrap.collapsed .rail .brand{display:flex}
 .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#38bdf8,#6366f1);display:grid;place-items:center;font-weight:900;color:#04101f;font-size:18px}
 .brand h1{margin:0;font-size:16px}.brand p{margin:3px 0 0;font-size:10px;color:var(--mut);letter-spacing:.14em}
 .tagline{font-size:11px;color:var(--mut);line-height:1.65;margin:12px 8px 0}
@@ -87,13 +96,24 @@ table.dataTable tbody tr.sel td{background:rgba(56,189,248,.16)}
 .dataTables_wrapper .dataTables_paginate .paginate_button:hover{background:#16233d!important;border:1px solid var(--bd)!important;color:#dbeafe!important}
 table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTable thead .sorting_desc{filter:invert(.75) hue-rotate(180deg)}
 @media(max-width:1180px){.wrap{grid-template-columns:1fr}.rail{display:none}.grid2{grid-template-columns:1fr}}
+/* ---- 自研定位 · 对标差异弹窗 ---- */
+.modal-mask{position:fixed;inset:0;background:rgba(5,10,20,.62);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:100}
+.modal-mask.show{display:flex}
+.modal-box{background:var(--panel);border:1px solid var(--bd);border-radius:14px;padding:18px 20px;max-width:780px;width:92%;box-shadow:0 24px 70px rgba(0,0,0,.5);max-height:86vh;overflow:auto}
+.matrix{width:100%;border-collapse:collapse;font-size:12.5px}
+.matrix th,.matrix td{padding:9px 10px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:middle}
+.matrix th{color:var(--mut);font-size:11px;letter-spacing:.04em}
+.matrix .yes{color:var(--ok);font-weight:800}
+.matrix .no{color:var(--mut)}
+.matrix tr:last-child td{border-bottom:0}
 </style>
 </head>
 <body>
 <div class="wrap">
   <aside class="rail">
-    <div class="brand"><div class="logo">天</div><div><h1>天枢观测台</h1><p>TIANSHU · OAPLESS OBSERVABILITY</p></div></div>
+    <div class="brand"><div class="logo" title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天</div><div><h1 title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天枢观测台</h1><p>TIANSHU · OAPLESS OBSERVABILITY</p></div><button class="rail-toggle" id="railToggle" title="收起/展开侧栏"></button></div>
     <p class="tagline">把全链路与指标留在应用进程内 —— 不部署 OAP、不依赖外部后端，单应用即可跨重启回溯、审计与聚合。基于 <b>Trace</b> 的指标面：请求数、错误率、慢调用与 P50–P99 分位数。</p>
+    <p class="tagline" style="font-size:10.5px;display:flex;align-items:center;gap:10px;border:1px solid rgba(56,189,248,.38);border-radius:999px;padding:8px 13px;background:rgba(56,189,248,.06)"><span style="flex:none;width:20px;height:20px;border:1.5px solid var(--ac);border-radius:999px;display:grid;place-items:center;color:var(--ac);font-weight:800;font-size:11px">枢</span><span>「天枢」＝<b>北斗第一星</b>，群星所绕之枢轴 —— 观测以应用自身为枢，不假外求。</span></p>
     <div class="diff">
       <div class="row"><span class="chk">◆</span><span><b>OAP-less 自足</b>：零后端、单进程内持久化</span></div>
       <div class="row"><span class="chk">◆</span><span><b>分级持久化</b>：error 7d / slow 24h / normal 仅内存</span></div>
@@ -110,6 +130,7 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
     <div class="ep" id="dCounters">计数 · -</div>
     <div class="rail-h">页面</div>
     <div class="ep" style="cursor:pointer" onclick="location.href='index.html'">← 返回仪表盘导航</div>
+    <div class="ep" style="cursor:pointer;color:var(--ac);font-weight:700" onclick="openDiff()">◆ 自研定位 · 与对标产品差异</div>
   </aside>
   <div class="main">
     <div class="head">
@@ -154,6 +175,25 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
         <a href="/inner/sw/trace-parity">H2 影子对账</a>。
       </div>
     </section>
+  </div>
+</div>
+
+<div class="modal-mask" id="diffMask">
+  <div class="modal-box">
+    <div style="display:flex;align-items:center;margin-bottom:14px">
+      <h3 class="card-h" style="margin:0">自研定位 · 与对标产品差异</h3>
+      <button class="btn" id="diffClose" style="margin-left:auto">关闭</button>
+    </div>
+    <table class="matrix">
+      <thead><tr><th>能力</th><th>天枢（本方案）</th><th>SkyWalking</th><th>Glowroot</th></tr></thead>
+      <tbody>
+        <tr><td>部署依赖</td><td class="yes">零后端 / OAP-less</td><td class="no">OAP + 存储 + UI</td><td class="yes">单进程</td></tr>
+        <tr><td>数据形态</td><td class="yes">Trace 指标 + 分级明细</td><td class="yes">全量 APM</td><td class="no">JVM / 事务为主</td></tr>
+        <tr><td>与宿主 API 边界</td><td class="yes">仅 JDK 原生 Map</td><td class="no">gRPC 上报</td><td class="no">内嵌 UI</td></tr>
+        <tr><td>可嵌入既有 Agent</td><td class="yes">SkyWalking 插件</td><td class="no">独立系统</td><td class="no">独立 agent</td></tr>
+        <tr><td>展示层</td><td class="yes">数据 API，可对接 Grafana/IDE</td><td class="no">自带 UI</td><td class="no">自带 UI</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -245,6 +285,21 @@ function refresh(){
 
 function showError(msg){var el=document.getElementById("errBanner");el.textContent=msg;el.style.display="block";}
 function hideError(){document.getElementById("errBanner").style.display="none";}
+
+function openDiff(){document.getElementById("diffMask").classList.add("show");}
+function closeDiff(){document.getElementById("diffMask").classList.remove("show");}
+
+function railIcon(){
+  var collapsed = $(".wrap").hasClass("collapsed");
+  document.getElementById("railToggle").textContent = collapsed ? "▶" : "◀";
+}
+function toggleRail(){
+  $(".wrap").toggleClass("collapsed");
+  railIcon();
+  try { localStorage.setItem("tianshu.railCollapsed", $(".wrap").hasClass("collapsed") ? "1" : "0"); } catch(e){}
+  if(trendChart && thrChart){ trendChart.resize(); thrChart.resize(); }
+  if(detailChart){ detailChart.resize(); }
+}
 
 function renderStatus(status){
   var counters = status.counters||{};
@@ -533,6 +588,12 @@ $(function(){
     else { selectEndpoint(d.endpoint); }
   });
   $("#detailClose").on("click", hideDetail);
+  $("#railToggle").on("click", toggleRail);
+  if(localStorage.getItem("tianshu.railCollapsed") === "1"){ $(".wrap").addClass("collapsed"); }
+  railIcon();
+  $("#diffClose").on("click", closeDiff);
+  $("#diffMask").on("click", function(e){ if(e.target === this) closeDiff(); });
+  $(document).on("keydown", function(e){ if(e.key === "Escape") closeDiff(); });
   refresh();
   setInterval(refresh, 5000);
 });
