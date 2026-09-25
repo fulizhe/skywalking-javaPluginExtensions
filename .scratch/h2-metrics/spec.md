@@ -120,7 +120,7 @@ Status: ready-for-agent
 - **路线调整（取代关系）**：本 spec 取代既有 Phase 5 细化稿中"合并视图事件挂钩 + 告警包改造（evaluator 注入 / `evaluate(snapshot,bool)` / `entryStartTimeMs`）+ file/TTL"的部分；保留其分钟桶、endpoint 维度、分位数分层、facade 只出原生 `Map`、normal 计入。统计口径以"入口段"讨论稿为准；多分辨率 rollup 为本 spec 新增（对齐 SkyWalking OAP 的 L1/L2 降采样思路，参考 `docs/reference/sw-glowroot-cat-metrics-implementations.md`）。
 - **已知偏差（文档化，不修）**：v1 慢判定用默认阈值（不含差异化规则）；error 不含 http 状态码与白名单；**小时分位为分钟分位的请求数加权平均（近似）**；跨分钟边界迟到段在保留窗口外被丢弃；进程重启丢全部指标（内存模式）；分位数为估计值（采样/小样本）；endpoint 表与左栏的"范围分位"由桶分位聚合近似（与原型 A 的模拟口径一致）。
 - **降级语义**：H2 不可用时聚合仍在内存；`queryMetrics` 返回空；`statisticMetrics` 照常。
-- **参考**：`docs/todos/h2化-统一方案.md`（§4 Phase 5、§5.3、§11）、`docs/todos/h2化-phase5-metrics实现细化.md`、`docs/todos/h2化-phase5-metrics讨论.md`、`docs/todos/h2化-phase5-metrics-口径与插入点讨论.md`、`docs/reference/sw-glowroot-cat-metrics-implementations.md`；原型 `agent/demo-app/src/main/resources/static/dashboards/metrics-prototype.html`（A 方案，头部 `1h/6h/24h/7d`）。
+- **参考**：`docs/todos/h2化-统一方案.md`（§4 Phase 5、§5.3、§11）、`docs/todos/h2化-phase5-metrics实现细化.md`、`docs/todos/h2化-phase5-metrics讨论.md`、`docs/todos/[已实现]h2化-phase5-metrics-口径与插入点讨论.md`、`docs/reference/sw-glowroot-cat-metrics-implementations.md`；原型 `agent/demo-app/src/main/resources/static/dashboards/metrics-prototype.html`（A 方案，头部 `1h/6h/24h/7d`）。
 - **领域词表**：使用 `CONTEXT.md` 的 `Trace 指标`、`数据流`、`统计快照`、`宿主工具类`、`trace 内存热层`、`验证回路` 等术语。
 
 ## Comments
