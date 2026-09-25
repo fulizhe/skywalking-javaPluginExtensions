@@ -905,6 +905,15 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// 传递给监听者，实现自定义处理（如上报、落盘等）。
 		// 你可以在这里做“单条 TraceSegment 完成后的自定义处理”，比如：把它放到队列、缓存、异步处理等。
 		// 这样可以解耦采集与后续处理逻辑。
+		// ===================================================================================
+		// 单个 TraceSegment 代表一个线程上下文中连续完成的一段执行流程，内部包含多个 Span；
+		// 一个完整 Trace 可能由多个 TraceSegment 组成；这里的“段”指 单个TraceSegment，不是一个日志文件片段。
+		// 跨线程或跨进程时，新的执行上下文会产生新的段，这些段通过相同的 traceId 和 ref 关联。
+		// ===================================================================================
+		// 生命周期边界：本方法表示单个 TraceSegment 已完成，只负责通过 carrier.produce 入队；真正的批量处理
+		// 在 consume(List<TraceSegment>) 中由 DataCarrier 消费线程执行，Metrics 聚合也在该处理点进行。
+		// 这与 consume 内部可能触发的 afterTraceMerged（同一 trace 的段合并通知）不是同一个事件。
+		// ===================================================================================
 		if (LOGGER.isDebugEnable()) {
 			LOGGER.debug("Trace segment reporting, traceId: {}", traceSegment.getTraceSegmentId());
 		}
