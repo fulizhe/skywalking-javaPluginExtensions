@@ -61,7 +61,7 @@ Status: ready-for-agent
 
 ## Implementation Decisions
 
-- **挂钩点（入口段 a1）**：客户端在批量消费 `consume` 里，对每条原始 segment（`SegmentObject`）调用聚合器的一个"喂入"方法。判定为入口段的条件：段内存在 `spanType = Entry` 或 `parentSpanId = -1` 的 span；否则该段视为子段/孤段，**不计入**。
+- **挂钩点（入口段 a1）**：客户端在批量消费 `consume` 里，对每条原始 segment（`SegmentObject`）调用聚合器的一个"喂入"方法。判定为入口段的条件：段内存在 `spanType = Entry` 的 span（Entry 即根 span）；否则该段视为子段/孤段，**不计入**——**不要**放宽为"任意 `parentSpanId = -1` 的根 span"，否则会把无上下文自成一段的 DB/pool 操作（根为 `Local`/`Exit`）与跨线程异步子段（根为 `Local`）误计为事务。
 - **判定口径（v1，锁定）**：
   - `endpoint` = 入口 span 的 `operationName`；
   - `duration` = 入口 span 的 `endTime - startTime`（退化时取段内最长 span）；

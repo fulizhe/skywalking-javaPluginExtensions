@@ -213,7 +213,9 @@ public class TraceMetricsAggregator {
     }
 
     private static boolean isEntrySpan(final SpanObject span) {
-        return span != null && (SpanType.Entry.equals(span.getSpanType()) || span.getParentSpanId() == -1);
+        // a1：只认 Entry span（Entry 即根 span）。不能放宽到"parentSpanId==-1"的任意根 span，
+        // 否则会把无上下文自成一段的 DB/pool 操作（根为 Local/Exit）与跨线程异步子段（根为 Local）误计为事务。
+        return span != null && SpanType.Entry.equals(span.getSpanType());
     }
 
     private static String sanitizeEndpoint(final String operationName) {

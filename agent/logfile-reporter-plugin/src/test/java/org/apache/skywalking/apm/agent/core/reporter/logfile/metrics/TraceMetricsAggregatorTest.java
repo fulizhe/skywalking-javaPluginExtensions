@@ -47,6 +47,14 @@ public class TraceMetricsAggregatorTest {
                 .build();
     }
 
+    /** 根 span（parentSpanId=-1）但非 Entry：模拟无上下文的 DB/pool 段或跨线程异步子段。 */
+    private static SegmentObject rootSpan(final String op, final SpanType type, final long start, final long end) {
+        return SegmentObject.newBuilder().setTraceId("t").setTraceSegmentId("s").setService(SERVICE)
+                .addSpans(SpanObject.newBuilder().setSpanId(0).setParentSpanId(-1).setOperationName(op)
+                        .setStartTime(start).setEndTime(end).setSpanType(type).build())
+                .build();
+    }
+
     private static MetricsRow row(final List<MetricsRow> rows, final String endpoint) {
         for (MetricsRow r : rows) {
             if (endpoint.equals(r.getEndpoint())) {
@@ -86,6 +94,34 @@ public class TraceMetricsAggregatorTest {
         aggregator.flushClosedBuckets(start + MINUTE_MS);
 
         Assert.assertTrue("no rows for non-entry segment", sink.rows.isEmpty());
+        Assert.assertEquals(1L, counters(aggregator).get("noEntrySpan"));
+    }
+
+    @Test
+    public void rootLocalSpanSegmentIgnored() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        // 跨线程异步子段 / 无上下文操作：根 span 为 Local(parent=-1) → 不应计为事务
+        aggregator.onSegment(rootSpan("HikariCP/Connection/close", SpanType.Local, start, start + 5L));
+        aggregator.flushClosedBuckets(start + MINUTE_MS);
+
+        Assert.assertTrue("root Local 不应计入", sink.rows.isEmpty());
+        Assert.assertEquals(1L, counters(aggregator).get("noEntrySpan"));
+    }
+
+    @Test
+    public void rootExitSpanSegmentIgnored() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        // 无上下文 DB/pool 操作：根 span 为 Exit(parent=-1) → 不应计为事务
+        aggregator.onSegment(rootSpan("H2/JDBC/Connection/close", SpanType.Exit, start, start + 8L));
+        aggregator.flushClosedBuckets(start + MINUTE_MS);
+
+        Assert.assertTrue("root Exit 不应计入", sink.rows.isEmpty());
         Assert.assertEquals(1L, counters(aggregator).get("noEntrySpan"));
     }
 
