@@ -14,6 +14,16 @@
 - **Known TODOs** — 何时读：规划 demo-app 验证范围时。→ `docs/repo/index.md`
 - **Code style / 纯重构规范** — 何时读：写新 Java 代码、改既有代码、拆分大方法、对齐代码风格时。→ `docs/repo/index.md`
 
+## Task routing
+
+- **小改** — 目标明确、可回滚，且不涉及 API、数据结构、并发或跨模块行为：直接实现，运行定向测试并复核 diff。
+- **功能改动** — 行为变化或涉及多个文件：需求不清时先 grill；稳定后写 spec，多步骤再拆 tickets；分步实现并按 spec 评审。
+- **大改 / 高风险** — 跨模块、架构取舍、迁移、兼容、安全或性能风险：先用 wayfinder / grill 收敛决策，再形成 spec / tickets；分步实现、独立评审，落地后记录 ADR。
+- **按门槛触发** — grill 只用于需求或设计不清，tickets 只用于多步骤工作，ADR 只记录需要长期保留的架构决策。
+- **统一收口** — 验证通过、验收项有证据、spec / ticket 状态回写、diff 不越界；commit / push 仅在用户明确要求时执行。
+- **OMO 补短板** — 用于可并行的探索、竞争假设和独立复核；spec、领域语言与最终决策由 Matt Skills 主流程维护。
+- **Skill 演化** — 先以内联规则运行；稳定使用一段时间后，再考虑抽成 /route-work skill。
+
 ## Agent tooling quirks (OpenCode + OMO)
 
 - **工具怪癖排查** — 何时读：OpenCode/OMO 行为异常（发送失败、命令/agent 名不匹配）时。→ `docs/tutorial/index.html`
