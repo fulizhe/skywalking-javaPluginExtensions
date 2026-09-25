@@ -1,8 +1,10 @@
 # H2 化 Phase 5：metrics 统计口径与插入点（讨论记录）
 
-> **文档定位**：单体 + SW 采集背景下，"Glowroot 式统计"如何落地的**讨论记录**。与既有 `h2化-phase5-metrics讨论.md` / `h2化-phase5-metrics实现细化.md` 存在**口径分歧**（见 §7），待对齐。**未实现、未落任何代码。**
+> **文档定位**：单体 + SW 采集背景下，"Glowroot 式统计"如何落地的**讨论记录**。与既有 `h2化-phase5-metrics讨论.md` / `h2化-phase5-metrics实现细化.md` 存在**口径分歧**（见 §7），待对齐；原讨论阶段标注为“未实现”，当前落地范围见下方备注。
 >
 > **状态**：**已采纳（2026-09-24）** —— a1 + **入口段插入点** 成为 Phase 5 的实现口径（配合 H2 内存模式 + 多分辨率）。权威 spec：`.scratch/h2-metrics/spec.md`；`duration` 取入口 span（本文倾向），非 `maxDurationMs`。
+>
+> **实现备注**：仅部分实现：a1 入口段统计、入口 span duration 与 `consume` 插入点已落地；本文其余 `refs` 拼链、链级完成判定等内容未全部实现。
 >
 > **相关**：`h2化-统一方案.md`（§4 Phase 5、§5.3、§11）、`h2化-phase5-metrics讨论.md`、`h2化-phase5-metrics实现细化.md`、`docs/reference/sw-glowroot-cat-metrics-implementations.md`。
 
@@ -153,7 +155,7 @@ consume(data):
 
 > **demo 样例**：`HelloController` 原有 `/helloAsync`（Spring `@Async`）、`/helloAsync2`（`RunnableWrapper`）、`/helloAsync3`（`@TraceCrossThread` + 裸线程），**缺 Servlet 3 async**；本次补 `/helloAsyncServlet`，代表"Servlet 3 async + 跨线程续接"这条链路。
 >
-> **复现 / 调试步骤**：见 [`h2化-phase5-metrics-异步链路调试说明.md`](h2化-phase5-metrics-异步链路调试说明.md)。
+> **复现 / 调试步骤**：见 [异步链路调试说明](<[已实现]h2化-phase5-metrics-异步链路调试说明.md>)。
 
 ---
 

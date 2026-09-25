@@ -1,8 +1,10 @@
 # 异步链路调试说明（`/helloAsyncServlet`：Servlet 3 async + `@TraceCrossThread`）
 
-> **用途**：在 demo-app 上复现并**肉眼验证**"跨线程异步 ⇒ 新 segment、入口 span 不覆盖异步等待"这条结论（Phase 5 讨论的实证场景，见 `h2化-phase5-metrics-口径与插入点讨论.md` §9）。
+> **用途**：在 demo-app 上复现并**肉眼验证**"跨线程异步 ⇒ 新 segment、入口 span 不覆盖异步等待"这条结论（Phase 5 讨论的实证场景，见 `[已实现]h2化-phase5-metrics-口径与插入点讨论.md` §9）。
 > **环境**：Windows + pwsh 7；运行 JDK 8、agent 9.4.0、插件已装入 agent；**应用工作目录必须是 `agent/demo-app`**（原因见 §7）。
 > **端口**：下文以 **9601** 为例（脚本默认 9600，可任意指定）。
+>
+> **实现备注**：`/helloAsyncServlet` 调试场景已实现；本文验证流程仍为人工操作，自动回归脚本尚未固化。
 
 ---
 
