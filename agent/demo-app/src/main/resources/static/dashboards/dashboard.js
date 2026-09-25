@@ -552,8 +552,8 @@ RENDER.profile = function (results, box) {
 
 /* ---- 07 H2 影子对账 ---- */
 /* 数据来源 /inner/sw/trace-parity(宿主工具类 SWTraceParityUtils.statisticParity 经拦截器反射取数)。
-   字段:trace 计数 / H2 存储状态 / 审计表水位 / 最近差异明细(trace_parity_audit) / 孤段过滤计数与最近样本(orphanSegments/lastOrphan)。
-   与 H2 Web Console 同源。 */
+   字段:trace 计数 / H2 存储状态 / 审计表水位 / 最近差异明细(trace_parity_audit) /
+   孤段过滤计数与类型明细(orphanSegments / orphanKinds / lastOrphan)。与 H2 Web Console 同源。 */
 RENDER.parity = function (results, box) {
     var s = results[0];
     box.innerHTML = "";
@@ -579,12 +579,32 @@ RENDER.parity = function (results, box) {
     docLink.innerHTML = '不知道 H2 控制台怎么用?看 <a href="../SWTraceParityVerify.html" target="_blank">H2 影子对账操作说明 →</a>(含 JDBC URL、登录信息与现成 SQL)';
     box.appendChild(docLink);
 
-    // 最近被过滤的孤段样本(2026-09-25 起)：无 Entry 且无 ref 的段，常见于 HikariCP/JDBC、gRPC 无上下文调用
-    if (s.lastOrphan) {
+    // 孤段类型与典型例子(2026-09-25 起,内存统计仅供审查): 按根 operation 归并,含最近 traceId
+    var orphanKinds = s.orphanKinds || [];
+    if (orphanKinds.length) {
+        var okPanel = el("div", "panel");
+        okPanel.appendChild(el("h3", null, "孤段类型(被 trace 存储过滤,无 Entry 且无 ref;按次数降序)"));
+        okPanel.appendChild(el("div", "note",
+            "常见来源: HikariCP/JDBC 等连接与语句操作、gRPC 客户端无上下文调用、其它后台/定时线程。"
+            + "「最近 traceId」即该类型的典型例子,可拿去链路页下钻。"));
+        var okTable = el("table");
+        okTable.appendChild(el("thead", null,
+            "<tr><th>类型(根 operation)</th><th>spanType</th><th>次数</th><th>最近 traceId(例子)</th></tr>"));
+        var okBody = el("tbody");
+        orphanKinds.slice(0, 20).forEach(function (k) {
+            okBody.appendChild(el("tr", null,
+                "<td class='mono'>" + esc(k.op || "-") + "</td>" +
+                "<td>" + esc(k.type || "-") + "</td>" +
+                "<td>" + (k.count != null ? k.count : "-") + "</td>" +
+                "<td class='mono' title='" + esc(k.lastTraceId) + "'>" + esc(shortId(k.lastTraceId)) + "</td>"));
+        });
+        okTable.appendChild(okBody);
+        okPanel.appendChild(okTable);
+        box.appendChild(okPanel);
+    } else if (s.lastOrphan) {
         var orphanNote = el("div");
         orphanNote.style.cssText = "margin:0 0 12px;font-size:12.5px;color:#6b7280;";
-        orphanNote.innerHTML = "最近被过滤的孤段(无 Entry 且无 ref,常见 HikariCP/JDBC、gRPC 无上下文调用): "
-            + "<span class='mono'>" + esc(s.lastOrphan) + "</span>";
+        orphanNote.innerHTML = "最近被过滤的孤段(无 Entry 且无 ref): <span class='mono'>" + esc(s.lastOrphan) + "</span>";
         box.appendChild(orphanNote);
     }
 
