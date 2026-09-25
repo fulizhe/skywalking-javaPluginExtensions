@@ -21,6 +21,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import org.apache.skywalking.apm.agent.core.boot.BootService;
@@ -47,6 +48,7 @@ import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
 
 /**
  * <p>
@@ -101,6 +103,16 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private long parityCheckedCount = 0;
 	/** 累计差异总数 */
 	private long parityTotalDiffs = 0;
+	/**
+	 * 被过滤的"孤段"计数（供 {@link #getParityStatus()} 观测）。
+	 * <p>
+	 * 孤段 = **无 Entry span 且无 ref** 的 segment：无 trace 上下文时 agent 为 HikariCP/JDBC 等操作
+	 * 用新 traceId 自建的一段（根 span 为 Local/Exit）。它不属于任何真实请求。
+	 * </p>
+	 */
+	private final AtomicLong orphanSegments = new AtomicLong(0);
+	/** 最近一个被过滤孤段的样本（{@code traceId | 根 operationName | 根 spanType}），供排查来源（如确认 gRPC）。 */
+	private volatile String lastOrphan = "";
 	/** 对账日志限速（同类差异 30s 最多一条） */
 	private volatile long parityLastErrorLogTime = 0;
 	private static final long PARITY_INTERVAL_MS = 5_000L;
@@ -162,6 +174,10 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
         result.put("h2ErrorCount", traceSegmentStorage != null ? traceSegmentStorage.getErrorCount() : 0L);
         result.put("h2Size", traceSegmentStorage != null ? traceSegmentStorage.size() : 0);
         result.put("writeQueueDropped", traceSegmentStorage != null ? traceSegmentStorage.getWriteQueueDropped() : 0L);
+        // 孤段过滤计数（2026-09-25 引入）：无 Entry 且无 ref 的段被排除在 traceStore/H2 之外的数量
+        result.put("orphanSegments", orphanSegments.get());
+        // 最近孤段样本（traceId | 根 op | 根 type）：用于确认来源，如 "… | grpc/xxx | Exit"
+        result.put("lastOrphan", lastOrphan);
         // 审计表：最近差异明细（来源 trace_parity_audit）+ 水位状态，供使用侧界面直接展示
         if (traceSegmentStorage != null) {
             result.put("auditRowCount", traceSegmentStorage.auditRowCount());
@@ -643,37 +659,100 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// 300，可动态配置），超过上限之后，就不再添加 Span了；这是一个内存保护措施。
 		// 将 SegmentObject 转换为自定义的 Log 对象，并存入缓存，供外部读取
 		final List<SegmentObject> collect = data.stream().map(TraceSegment::transform).collect(Collectors.toList());
-		// final String globalTraceid = collect.get(0).getTraceId();
-		// final List<Log> logList = new ArrayList<>();
-		for (SegmentObject segment : collect) {
-			// 假设 Log 类有对应的 setter 方法，或者构造方法
-			// 1. traceId：全局唯一，标识一次完整的分布式调用。
-			// 2. traceSegmentId：局部唯一，标识某个服务/线程/进程中的一个调用片段。
-			// 3. 一个 traceId 下可以有多个 traceSegmentId，它们通过“引用关系”串联成完整的调用链。
-			Log log = SegmentLogConverter.toLog(segment);
-			// logList.add(log);
 
-			// 这里是traceId一样的放到一起
-			// 先判断当前traceId是否已存在于logfileStatMap中，如果存在则合并logList，否则直接放入
-			mergeLogIntoStatMap(log);
+		// ---- 孤段过滤（2026-09-25 引入；缘由见下，如需保留原始全量，移除此段即可，不影响其它路径）----
+		// 孤段 = **无 Entry span 且无 ref** 的 segment：无 trace 上下文时 agent 以新 traceId 自建一段，
+		//        根 span 为 Local/Exit。它不属于任何真实请求，却会白占 traceStore 的 traceId 名额
+		//        （默认 1000，FIFO 淘汰）与 H2 影子 trace_segment 行。
+		// 已知来源（持续补充）：
+		//   - JDBC/DB 池：HikariCP、H2/JDBC、MySQL 等连接的 getConnection/close、Statement/execute
+		//     —— 常见于连接池 housekeeper/eviction 线程、空闲校验（无 active trace）。
+		//   - gRPC：客户端在无上下文时发起调用（健康检查、后台 stub、channel 保活/预热）；
+		//     服务端收到的请求是 Entry（保留），跨线程续接的回调段带 ref（保留）。
+		//   - 其它后台/定时线程或框架内部线程内触发、且当时无 active trace 的插件。
+		// 保留：有 Entry（事务段）或有 ref（跨线程/跨进程子段，同 traceId 能并回父请求）的段照常处理。
+		// 依据：docs/todos/h2化-统一方案.md §2.2、docs/todos/h2化-phase5-metrics-口径与插入点讨论.md §2「孤 segment」、
+		//       docs/notes/2026-09-25-trace-metrics-stress-memory-analysis.md。
+		final List<SegmentObject> keptObjs = new ArrayList<SegmentObject>(collect.size());
+		final List<TraceSegment> keptRaw = new ArrayList<TraceSegment>(collect.size());
+		for (int i = 0; i < collect.size(); i++) {
+			final SegmentObject segment = collect.get(i);
+			final TraceSegment raw = data.get(i);
+			if (isOrphanSegment(raw, segment)) {
+				orphanSegments.incrementAndGet();
+				lastOrphan = describeOrphan(segment); // 供 /inner/sw/trace-parity 排查（如 grpc/xxx | Exit）
+				if (LOGGER.isDebugEnable()) {
+					LOGGER.debug("### [Orphan] filtered context-less segment: {}", lastOrphan);
+				}
+				continue;
+			}
+			// traceId 相同的段合并到一起：已存在则追加 logs，否则直接放入
+			mergeLogIntoStatMap(SegmentLogConverter.toLog(segment));
 
 			// Phase 5 入口段 a1：逐段喂入指标聚合器（非入口段由聚合器内部排除并计数）。
 			// 跑在 DataCarrier 消费线程上，只改内存桶、零 I/O，不为业务线程增加延迟。
 			if (metricsAggregator != null) {
 				metricsAggregator.onSegment(segment);
 			}
+			keptObjs.add(segment);
+			keptRaw.add(raw);
 		}
-		// logfileStatMap.put(globalTraceid, new LogCollection(logList).toMap());
 
 		// Phase 1 影子 accept：既有逻辑之后新增一次 H2 影子写入；旧路径零改动、零行为变化。
 		// accept 内部异常全部捕获（计数 + 限速日志），绝不外抛——"监控只能是助力，不是阻碍"。
 		if (traceSegmentStorage != null) {
-			traceSegmentStorage.accept(data);
+			traceSegmentStorage.accept(keptRaw);
 			// debug 一致性比对：批次末尾、仅 compare_debug=true、只比本批涉及的 traceIds
 			if (compareDebug) {
-				runParityCheck(collect);
+				runParityCheck(keptObjs);
 			}
 		}
+	}
+
+	/**
+	 * 孤段判定：**无 Entry span 且无 ref**。
+	 * <p>
+	 * 孤段 = 无 trace 上下文时 agent 自建的段：新 traceId、根 span 为 Local/Exit、无 ref，不属于任何真实请求。
+	 * 有 ref 的跨线程/跨进程子段（异步子段）会并回父请求，**不算**孤段。
+	 * </p>
+	 * <p>
+	 * 已知来源（持续补充）：JDBC/DB 池（HikariCP、H2/JDBC、MySQL 的 getConnection/close、Statement/execute，
+	 * 常见于连接池 housekeeper 线程）；gRPC 客户端在无上下文时发起（健康检查/后台 stub/保活；服务端 Entry 保留、
+	 * 跨线程回调有 ref 保留）；其它无 active trace 的后台/定时/框架线程内触发的插件。
+	 * </p>
+	 * <p>2026-09-25 起用于 {@link #consume} 过滤；保留为独立静态方法，便于单测与后续迭代溯源。
+	 * 过滤计数见 {@code /inner/sw/trace-parity} 的 {@code orphanSegments}；最近样本见 {@code lastOrphan}。</p>
+	 */
+	static boolean isOrphanSegment(final TraceSegment raw, final SegmentObject obj) {
+		if (obj == null) {
+			return false;
+		}
+		if (raw != null && raw.getRef() != null) {
+			return false; // 有父引用：异步/跨进程子段，同 traceId 可并回父请求
+		}
+		final List<SpanObject> spans = obj.getSpansList();
+		for (int i = 0; i < spans.size(); i++) {
+			if (SpanType.Entry.equals(spans.get(i).getSpanType())) {
+				return false; // 有 Entry：事务段
+			}
+		}
+		return true;
+	}
+
+	/** 孤段可读样本：{@code traceId | 根 operationName | 根 spanType}（根 = parentSpanId==-1 的 span）。 */
+	private static String describeOrphan(final SegmentObject segment) {
+		String op = "";
+		String type = "";
+		final List<SpanObject> spans = segment.getSpansList();
+		for (int i = 0; i < spans.size(); i++) {
+			final SpanObject s = spans.get(i);
+			if (s.getParentSpanId() == -1) {
+				op = s.getOperationName();
+				type = String.valueOf(s.getSpanType());
+				break;
+			}
+		}
+		return segment.getTraceId() + " | " + op + " | " + type;
 	}
 
 	/**
