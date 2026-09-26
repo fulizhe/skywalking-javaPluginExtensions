@@ -43,8 +43,21 @@ body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);col
 .diff .row b{color:#fff}
 .diff .row .chk{color:var(--ac);font-weight:900}
 .rail-h{font-size:10.5px;color:var(--mut);letter-spacing:.1em;font-weight:800;margin:14px 8px 7px}
-.svc{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(56,189,248,.13);color:#bfe4ff;font-size:12.5px;font-weight:700}
+.rail-h.toggle{cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;border-radius:6px;padding:2px 6px;margin:12px 4px 5px}
+.rail-h.toggle:hover{background:#16233d;color:#dbeafe}
+.rail-h .caret{flex:none;font-size:9px;line-height:1;transition:transform .15s ease;color:var(--ac)}
+.rail-h.toggle.collapsed .caret{transform:rotate(-90deg)}
+.rail-h .cnt{margin-left:auto;font-weight:700;letter-spacing:0;color:var(--mut)}
+/* endpoint 列表：内部限高 + 滚动，避免 endpoint 多时把"数据面/页面"往下挤 */
+#epNav{max-height:34vh;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#24365c transparent;padding-right:2px}
+#epNav.collapsed{display:none}
+#epNav::-webkit-scrollbar{width:8px}
+#epNav::-webkit-scrollbar-thumb{background:#24365c;border-radius:8px}
+#epNav::-webkit-scrollbar-track{background:transparent}
 .ep{padding:6px 10px 6px 22px;font-family:var(--mono);font-size:11px;color:var(--mut);border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#epNav .ep{cursor:pointer}
+#epNav .ep:hover{background:#16233d;color:#dbeafe}
+#epNav .ep.sel{background:rgba(56,189,248,.16);color:#bfe4ff}
 .main{padding:20px 22px;min-width:0}
 .head{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
 .head h2{margin:0;font-size:19px}
@@ -122,7 +135,7 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
     </div>
     <div class="rail-h">应用</div>
     <div class="svc"><span>demo-app</span><span class="pill normal">TRACE</span></div>
-    <div class="rail-h">Endpoint（按 P95）</div>
+    <div class="rail-h toggle" id="epNavToggle" title="点击折叠/展开；列表内可滚动"><span class="caret">▾</span><span>Endpoint（按 P95）</span><span class="cnt" id="epNavCount"></span></div>
     <div id="epNav"></div>
     <div class="rail-h">数据面</div>
     <div class="ep" id="dStorage">H2 内存 · -</div>
@@ -477,20 +490,33 @@ function sparkLine(rows, color){
 }
 
 function applyHighlight(){
-  if(!epTable) return;
-  $("#epTable tbody tr").removeClass("sel");
-  if(!selectedEndpoint) return;
-  epTable.rows().every(function(){
-    var d=this.data();
-    if(d && d.endpoint===selectedEndpoint){ $(this.node()).addClass("sel"); }
-  });
+  if(epTable){
+    $("#epTable tbody tr").removeClass("sel");
+    if(selectedEndpoint){
+      epTable.rows().every(function(){
+        var d=this.data();
+        if(d && d.endpoint===selectedEndpoint){ $(this.node()).addClass("sel"); }
+      });
+    }
+  }
+  applyNavHighlight();
 }
 
 function renderNav(rows){
   var top = rows.slice().sort(function(a,b){return (b.p95||0)-(a.p95||0);}).slice(0,12);
   document.getElementById("epNav").innerHTML = top.map(function(r){
-    return '<div class="ep" title="'+esc(r.endpoint)+'">'+esc(r.endpoint)+'</div>';
+    return '<div class="ep" data-ep="'+esc(r.endpoint)+'" title="'+esc(r.endpoint)+'">'+esc(r.endpoint)+'</div>';
   }).join("") || '<div class="ep">-</div>';
+  var c = document.getElementById("epNavCount");
+  if(c){ c.textContent = rows.length > top.length ? (top.length+"/"+rows.length) : String(top.length); }
+  applyNavHighlight();
+}
+
+/* 侧栏 endpoint 选中态：与表格行选择保持一致 */
+function applyNavHighlight(){
+  $("#epNav .ep").removeClass("sel");
+  if(!selectedEndpoint) return;
+  $("#epNav .ep").filter(function(){ return $(this).data("ep") === selectedEndpoint; }).addClass("sel");
 }
 
 function renderKpis(rows, truncated){
@@ -611,6 +637,25 @@ $(function(){
     else { selectEndpoint(d.endpoint); }
   });
   $("#detailClose").on("click", hideDetail);
+  // 侧栏 endpoint 区：标题点击折叠/展开（状态记忆）
+  $("#epNavToggle").on("click", function(){
+    var collapsed = $("#epNav").toggleClass("collapsed").hasClass("collapsed");
+    $(this).toggleClass("collapsed", collapsed);
+    try { localStorage.setItem("tianshu.epNavCollapsed", collapsed ? "1" : "0"); } catch(e){}
+  });
+  if(localStorage.getItem("tianshu.epNavCollapsed") === "1"){ $("#epNav").addClass("collapsed"); $("#epNavToggle").addClass("collapsed"); }
+  // 侧栏点选 endpoint：与表格行点击同语义，并滚动到详情
+  $(document).on("click", "#epNav .ep[data-ep]", function(){
+    var ep = $(this).data("ep");
+    if(!ep) return;
+    if(selectedEndpoint === ep){ hideDetail(); return; }
+    selectEndpoint(ep);
+    // 详情为懒加载渲染，稍候再滚动（可见才滚）
+    setTimeout(function(){
+      var card = document.getElementById("detailCard");
+      if(card && card.style.display !== "none"){ card.scrollIntoView({behavior:"smooth", block:"nearest"}); }
+    }, 300);
+  });
   $("#railToggle").on("click", toggleRail);
   if(localStorage.getItem("tianshu.railCollapsed") === "1"){ $(".wrap").addClass("collapsed"); }
   railIcon();
