@@ -31,4 +31,13 @@ public class SWMetricsUtils {
     public static Map<String, Object> queryMetrics(Map<String, Object> condition) {
         return Collections.emptyMap();
     }
+
+    /**
+     * 端点极端值对应的 trace 记录:每端点最大耗时那一次的 traceId 现场(供大屏把"最大耗时"指回链路)。
+     * 本期口径=最大耗时(阈值化留待下一步);内存记录、随进程、不落库。
+     * 无 agent 时返回空 Map;挂载 agent 后由 {@code MetricsExposeInterceptor} 接管。
+     */
+    public static Map<String, Object> extremeTraces() {
+        return Collections.emptyMap();
+    }
 }

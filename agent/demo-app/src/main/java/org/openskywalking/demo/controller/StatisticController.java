@@ -116,6 +116,12 @@ public class StatisticController {
         return SWMetricsUtils.queryMetrics(condition);
     }
 
+    /** 端点极端值 trace 读口:/inner/sw/metrics/extremes 返回每端点最大耗时那一次的 traceId(指标→链路追溯入口) */
+    @GetMapping("/inner/sw/metrics/extremes")
+    public Map<String, Object> metricsExtremes() {
+        return SWMetricsUtils.extremeTraces();
+    }
+
     /** 链路段读口:/statistic 返回 data(按 endTime 倒序、附可读时间与组件名),去掉 jvm/instanceProperties 两流 */
     @GetMapping("/statistic")
     public Object statistic() {

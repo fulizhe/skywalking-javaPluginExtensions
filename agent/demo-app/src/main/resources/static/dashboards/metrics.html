@@ -206,6 +206,7 @@ var lastResolution = "minute";
 var globalSeries = { p50:[], p90:[], p95:[], p99:[], req:[], err:[], slow:[], times:[], labels:[] };
 var tableRows = [];              // 当前表格的聚合行（供 KPI/导航复用）
 var selectedEndpoint = null;
+var extremeByEndpoint = {};      // endpoint -> {traceId,durationMs,error,...}（指标→链路追溯；进程内最大耗时样本）
 var seriesCache = {};            // key: range|endpoint -> 单端点逐桶 rows
 var seriesInflight = {};         // key -> [callbacks]
 var trendChart=null, thrChart=null, detailChart=null, epTable=null;
@@ -261,11 +262,13 @@ function refresh(){
     + "&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
   var aggUrl = "/inner/sw/metrics/query?aggregate=true"
     + "&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
-  Promise.all([ jget("/inner/sw/metrics"), jget(globalUrl), jget(aggUrl) ])
+  Promise.all([ jget("/inner/sw/metrics"), jget(globalUrl), jget(aggUrl), jget("/inner/sw/metrics/extremes") ])
     .then(function(res){
-      var status = res[0]||{}, global = res[1]||{}, agg = res[2]||{};
+      var status = res[0]||{}, global = res[1]||{}, agg = res[2]||{}, extremes = res[3]||{};
       if(status.enabled === false){ showError("指标聚合已关闭（plugin.logfilereporter.metrics.enabled=false）。"); }
       else { hideError(); }
+      extremeByEndpoint = {};
+      (extremes.rows||[]).forEach(function(r){ if(r && r.endpoint!=null) extremeByEndpoint[r.endpoint]=r; });
       renderStatus(status);
       lastResolution = global.resolution||b.res;
       buildSeries((global.rows||[]).slice(), lastResolution);
@@ -551,11 +554,19 @@ function renderDetail(name, rows){
   document.getElementById("detailInfo").innerHTML = cells.map(function(c){
     return '<div class="cell"><div class="l">'+esc(c[0])+'</div><div class="v">'+esc(String(c[1]))+'</div></div>';
   }).join("");
+  var ex = extremeByEndpoint[name];
+  if(ex && ex.traceId){
+    var exTitle = "进程内最大耗时样本（非当前范围精确值） · "+fmtMs(ex.durationMs)+(ex.error?" · 错误":"")+" ｜ 点击取回整条链路（若该 trace 已持久化）";
+    document.getElementById("detailInfo").insertAdjacentHTML("beforeend",
+      '<div class="cell"><div class="l">极端值 traceId</div><div class="v" style="font-size:12px;word-break:break-all">'
+      + '<a class="mono" target="_blank" title="'+esc(exTitle)+'" href="/inner/sw/trace-query?traceId='+encodeURIComponent(ex.traceId)+'">'+esc(ex.traceId)+'</a></div></div>');
+  }
   document.getElementById("detailNote").innerHTML =
     "数据说明：本行取自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的逐桶序列（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
     + "计数（请求/错误/慢）与最大耗时为<b>精确合并</b>；P50/P90/P95/P99 为各桶分位按请求数<b>加权平均</b>（≤24h 用分钟分位，7d/30d 用小时分位，小时分位本身为分钟分位的加权近似）。"
     + "样本不足的桶分位为空、不参与加权（<span class='mono'>sampleCount ≤ requestCount</span>）。"
-    + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。";
+    + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。"
+    + "「极端值 traceId」为进程内该 endpoint 最大耗时那一次的链路入口（内存记录、随进程；来源 <span class='mono'>/inner/sw/metrics/extremes</span>，点击经 <span class='mono'>/inner/sw/trace-query</span> 取回）。";
 
   if(!detailChart){ detailChart = echarts.init(document.getElementById("detailChart")); }
   var labels = rows.map(function(r){ return labelFor(lastResolution, r.timeBucket*bucketMs(lastResolution)); });
