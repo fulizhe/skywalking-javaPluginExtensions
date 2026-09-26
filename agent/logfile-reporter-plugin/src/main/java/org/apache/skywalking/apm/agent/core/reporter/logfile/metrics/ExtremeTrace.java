@@ -18,11 +18,17 @@ import java.util.Map;
  */
 public final class ExtremeTrace {
 
+    /** 触发该极端值的端点名（保留键 "*" 不参与，聚合器层已排除）。 */
     private final String endpoint;
+    /** 该次调用归属的服务名。 */
     private final String service;
+    /** 该次调用的 traceId——读口拿它回溯完整链路（闭环追踪入口）。 */
     private final String traceId;
+    /** 该次耗时的原始毫秒值（未做任何整除/归桶）。 */
     private final long durationMs;
+    /** 该次是否为错误调用（段级口径，与指标行一致）。 */
     private final boolean error;
+    /** 该次入口段开始时间（ms），供读口/大屏定位时刻。 */
     private final long startTimeMs;
 
     public ExtremeTrace(final String endpoint, final String service, final String traceId, final long durationMs,
