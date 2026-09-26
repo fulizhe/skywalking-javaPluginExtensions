@@ -2,6 +2,8 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.metrics;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +25,11 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
  * 已知偏差（v1）：端点基数超限时按"先到先归并"并入 {@link #OTHER_ENDPOINT}（非 top-N）；
  * 分位数为最近秩精确值，小时 rollup 的近似在后续阶段处理。
  * </p>
+ * <p>
+ * 追溯（Phase 5 追加）：按 endpoint 记下最极端那一次的 traceId（见 {@link #extremeTraces()}，
+ * 本期口径=最大耗时，策略见 {@link ExtremeTraceSelector}），把"指标上的极端值"指回具体链路；
+ * 内存记录、不落库，后续 error/slow 明细持久化到 H2 后即形成闭环追踪链条。
+ * </p>
  */
 public class TraceMetricsAggregator {
 
@@ -38,6 +45,8 @@ public class TraceMetricsAggregator {
     private static final int MAX_SAMPLES_PER_KEY = 5000;
     private static final int MIN_SAMPLES_FOR_TAILS = 20;
     private static final int MAX_ENDPOINTS_PER_BUCKET = 500;
+    /** 极端 trace 记录端点数上限（内存有界；与桶端点上限同量级）。 */
+    private static final int MAX_EXTREME_ENDPOINTS = 500;
     private static final long RESERVOIR_SEED = 20260924L;
 
     private final MetricsSink sink;
@@ -49,11 +58,25 @@ public class TraceMetricsAggregator {
     private final Random reservoirRandom = new Random(RESERVOIR_SEED);
     private final Counters counters = new Counters();
 
+    /**
+     * 每端点"极端值"对应的 trace 记录（Phase 5 追溯；内存、仅供读口回溯，不落库）。
+     * key = endpoint，值 = 该端点当前最极端那一次的 traceId + 现场。由 {@link #lock} 守护。
+     */
+    private final Map<String, ExtremeTrace> extremeByEndpoint = new LinkedHashMap<String, ExtremeTrace>();
+    /** 极端值判定策略（预留可配置阈值/自适应阈值的接入点）。 */
+    private final ExtremeTraceSelector extremeSelector;
+
     public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
             final long defaultSlowThresholdMs) {
+        this(sink, defaultService, defaultSlowThresholdMs, new MaxDurationExtremeTraceSelector());
+    }
+
+    public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
+            final long defaultSlowThresholdMs, final ExtremeTraceSelector extremeSelector) {
         this.sink = sink;
         this.defaultService = defaultService;
         this.defaultSlowThresholdMs = defaultSlowThresholdMs;
+        this.extremeSelector = extremeSelector != null ? extremeSelector : new MaxDurationExtremeTraceSelector();
     }
 
     /**
@@ -97,6 +120,8 @@ public class TraceMetricsAggregator {
             synchronized (lock) {
                 accumulate(bucket, endpoint, service, duration, error, slow);
                 accumulate(bucket, GLOBAL_ENDPOINT, service, duration, error, slow);
+                // 追溯：按 endpoint 记下最极端那一次的 traceId（本期=最大耗时），供读口回溯到具体链路
+                recordExtreme(endpoint, service, segment.getTraceId(), duration, error, startTime);
             }
         } catch (Exception e) {
             counters.aggregateErrors++;
@@ -172,7 +197,56 @@ public class TraceMetricsAggregator {
             result.put("counters", counters.toMap());
         }
         result.put("buckets", bucketRows);
+        result.put("extremeSelector", extremeSelector.name());
+        result.put("extremes", extremeTraces());
         return result;
+    }
+
+    /**
+     * 记录端点极端值对应的 trace（须在 {@link #lock} 内调用）。
+     * <p>全局伪端点 {@link #GLOBAL_ENDPOINT} 不单独记——它的极端来自某个具体 endpoint，避免语义混淆。
+     * 端点基数达 {@link #MAX_EXTREME_ENDPOINTS} 后不再接纳新端点（内存有界；已知偏差同桶端点上限）。</p>
+     */
+    private void recordExtreme(final String endpoint, final String service, final String traceId, final long duration,
+            final boolean error, final long startTime) {
+        if (GLOBAL_ENDPOINT.equals(endpoint)) {
+            return;
+        }
+        final ExtremeTrace current = extremeByEndpoint.get(endpoint);
+        if (!extremeSelector.shouldReplace(current, duration, error)) {
+            return;
+        }
+        if (current == null && extremeByEndpoint.size() >= MAX_EXTREME_ENDPOINTS) {
+            return;
+        }
+        extremeByEndpoint.put(endpoint, new ExtremeTrace(endpoint, service, traceId, duration, error, startTime));
+    }
+
+    /**
+     * 每端点极端值对应的 trace 记录（按耗时降序），供读口回溯到具体链路。
+     * <p>本期口径见 {@link #getExtremeSelectorName()}；进程存活期内有效（不落库），读口返回 JDK 原生 Map。</p>
+     */
+    public List<Map<String, Object>> extremeTraces() {
+        final List<ExtremeTrace> snapshot;
+        synchronized (lock) {
+            snapshot = new ArrayList<ExtremeTrace>(extremeByEndpoint.values());
+        }
+        Collections.sort(snapshot, new Comparator<ExtremeTrace>() {
+            @Override
+            public int compare(final ExtremeTrace a, final ExtremeTrace b) {
+                return Long.compare(b.getDurationMs(), a.getDurationMs());
+            }
+        });
+        final List<Map<String, Object>> out = new ArrayList<Map<String, Object>>(snapshot.size());
+        for (ExtremeTrace trace : snapshot) {
+            out.add(trace.toMap());
+        }
+        return out;
+    }
+
+    /** 当前极端值判定策略名（预留可配置阈值的标注位，如 {@code max-duration}）。 */
+    public String getExtremeSelectorName() {
+        return extremeSelector.name();
     }
 
     private void accumulate(final long bucket, final String endpoint, final String service, final long duration,

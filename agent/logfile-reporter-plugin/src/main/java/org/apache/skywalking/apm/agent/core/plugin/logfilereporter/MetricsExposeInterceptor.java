@@ -16,9 +16,9 @@ import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import cn.hutool.core.util.ReflectUtil;
 
 /**
- * Trace 指标暴露拦截器：接管 {@code SWMetricsUtils.statisticMetrics()}
- * 与 {@code SWMetricsUtils.queryMetrics(condition)}，经反射跨 ClassLoader
- * 从 {@link LogFileTraceSegmentServiceClient} 取指标数据。
+ * Trace 指标暴露拦截器：接管 {@code SWMetricsUtils.statisticMetrics()}、
+ * {@code SWMetricsUtils.queryMetrics(condition)} 与 {@code SWMetricsUtils.extremeTraces()}，
+ * 经反射跨 ClassLoader 从 {@link LogFileTraceSegmentServiceClient} 取指标数据。
  * <p>
  * 范式同 {@link TraceParityStatusExposeInterceptor}。
  * </p>
@@ -43,6 +43,8 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
                 final Map<String, Object> condition = (allArguments != null && allArguments.length > 0
                         && allArguments[0] instanceof Map) ? (Map<String, Object>) allArguments[0] : null;
                 value = ReflectUtil.invoke(client, "queryMetrics", condition);
+            } else if ("extremeTraces".equals(method.getName())) {
+                value = ReflectUtil.invoke(client, "getExtremeTraces");
             } else {
                 value = ReflectUtil.invoke(client, "getMetricsStatus");
             }
@@ -60,6 +62,13 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
             empty.put("rows", Collections.emptyList());
             empty.put("count", 0);
             empty.put("truncated", false);
+            return empty;
+        }
+        if ("extremeTraces".equals(methodName)) {
+            final Map<String, Object> empty = new HashMap<String, Object>();
+            empty.put("selector", "absent");
+            empty.put("rows", Collections.emptyList());
+            empty.put("count", 0);
             return empty;
         }
         return new HashMap<String, Object>();

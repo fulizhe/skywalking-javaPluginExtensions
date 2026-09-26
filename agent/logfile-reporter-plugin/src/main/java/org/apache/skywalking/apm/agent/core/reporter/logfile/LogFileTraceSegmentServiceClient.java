@@ -268,6 +268,26 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
+	 * 端点极端值对应的 trace 记录（供 {@code SWMetricsUtils.extremeTraces()} 经拦截器反射调用）。
+	 * <p>
+	 * 把大屏上的"最大耗时"等极端值指回具体链路：本期口径 = **每端点保留最大耗时那一条**的 traceId 现场
+	 * （见 {@link org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.ExtremeTraceSelector}，
+	 * 阈值化留待下一步）。内存记录、进程存活期内有效、不落库；后续 error/slow 明细持久化到 H2 后，
+	 * 该 traceId 即闭环追踪链条入口。返回 JDK 原生 Map，不暴露 Agent 自定义类型。
+	 * </p>
+	 */
+	public Map<String, Object> getExtremeTraces() {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		final List<Map<String, Object>> rows = metricsAggregator != null
+				? metricsAggregator.extremeTraces()
+				: Collections.<Map<String, Object>>emptyList();
+		result.put("count", rows.size());
+		result.put("selector", metricsAggregator != null ? metricsAggregator.getExtremeSelectorName() : "disabled");
+		result.put("rows", rows);
+		return result;
+	}
+
+	/**
 	 * 指标条件查询（供 {@code SWMetricsUtils.queryMetrics(condition)} 经拦截器反射调用）。
 	 * <p>
 	 * condition 支持：{@code endpoint}（含保留键 {@code "*"}，缺省不限）、{@code fromBucket} /

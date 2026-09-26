@@ -40,6 +40,23 @@ public class TraceMetricsAggregatorTest {
                 .build();
     }
 
+    private static SegmentObject entryWithTrace(final String traceId, final String endpoint, final long start,
+            final long end, final boolean error) {
+        return SegmentObject.newBuilder().setTraceId(traceId).setTraceSegmentId("s").setService(SERVICE)
+                .addSpans(SpanObject.newBuilder().setSpanId(0).setParentSpanId(-1).setOperationName(endpoint)
+                        .setStartTime(start).setEndTime(end).setSpanType(SpanType.Entry).setIsError(error).build())
+                .build();
+    }
+
+    private static Map<String, Object> extreme(final List<Map<String, Object>> rows, final String endpoint) {
+        for (Map<String, Object> r : rows) {
+            if (endpoint.equals(r.get("endpoint"))) {
+                return r;
+            }
+        }
+        return null;
+    }
+
     private static SegmentObject subSegment(final long start, final long end) {
         return SegmentObject.newBuilder().setTraceId("t").setTraceSegmentId("s").setService(SERVICE)
                 .addSpans(SpanObject.newBuilder().setSpanId(0).setParentSpanId(0).setOperationName("Local work")
@@ -261,6 +278,89 @@ public class TraceMetricsAggregatorTest {
         Assert.assertEquals(1L, row(sink.rows, TraceMetricsAggregator.OTHER_ENDPOINT).getRequestCount());
         Assert.assertEquals(501L, row(sink.rows, TraceMetricsAggregator.GLOBAL_ENDPOINT).getRequestCount());
         Assert.assertEquals(1L, counters(aggregator).get("endpointOverflow"));
+    }
+
+    @Test
+    public void extremeTraceKeepsMaxDurationPerEndpoint() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(entryWithTrace("t-slow", "GET:/x", start, start + 800L, false));
+        aggregator.onSegment(entryWithTrace("t-fast", "GET:/x", start + 1, start + 20L, false));
+        aggregator.onSegment(entryWithTrace("t-mid", "GET:/x", start + 2, start + 300L, false));
+
+        final List<Map<String, Object>> extremes = aggregator.extremeTraces();
+        Assert.assertEquals("每端点仅一条", 1, extremes.size());
+        final Map<String, Object> x = extreme(extremes, "GET:/x");
+        Assert.assertNotNull(x);
+        Assert.assertEquals("t-slow", x.get("traceId"));
+        Assert.assertEquals(800L, x.get("durationMs"));
+        Assert.assertEquals(Boolean.FALSE, x.get("error"));
+        Assert.assertEquals("max-duration", aggregator.getExtremeSelectorName());
+    }
+
+    @Test
+    public void extremeTraceSeparatedPerEndpoint() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(entryWithTrace("a1", "GET:/a", start, start + 50L, false));
+        aggregator.onSegment(entryWithTrace("b1", "GET:/b", start + 1, start + 900L, false));
+
+        final List<Map<String, Object>> extremes = aggregator.extremeTraces();
+        Assert.assertEquals(2, extremes.size());
+        Assert.assertEquals("t-slow(b) 应排首位", "b1", extremes.get(0).get("traceId"));
+        Assert.assertEquals("a1", extreme(extremes, "GET:/a").get("traceId"));
+    }
+
+    @Test
+    public void extremeTraceIgnoresNonEntrySegment() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(subSegment(start, start + 9999L));
+
+        Assert.assertTrue(aggregator.extremeTraces().isEmpty());
+    }
+
+    @Test
+    public void extremeTraceCarriesErrorFlag() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(entryWithTrace("t-err", "GET:/e", start, start + 500L, true));
+
+        Assert.assertEquals(Boolean.TRUE, extreme(aggregator.extremeTraces(), "GET:/e").get("error"));
+    }
+
+    @Test
+    public void extremeTraceEndpointsBounded() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+        for (int i = 0; i < 501; i++) {
+            aggregator.onSegment(entryWithTrace("t" + i, "GET:/ex" + i, start + i, start + i + 5L, false));
+        }
+
+        Assert.assertEquals(500, aggregator.extremeTraces().size());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void snapshotExposesExtremesAndSelector() {
+        final CollectingSink sink = new CollectingSink();
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(entryWithTrace("t1", "GET:/s", start, start + 10L, false));
+
+        final Map<String, Object> snapshot = aggregator.snapshot();
+        Assert.assertEquals("max-duration", snapshot.get("extremeSelector"));
+        Assert.assertEquals(1, ((List<Map<String, Object>>) snapshot.get("extremes")).size());
     }
 
     @SuppressWarnings("unchecked")
