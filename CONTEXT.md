@@ -44,15 +44,15 @@ _Avoid_: 规则链、匹配器工厂
 _Avoid_: LRU 缓存(历史文档旧称)、将环形队列视为语义
 
 **trace 内存热层 (trace hot memory tier)**:
-进程内按 traceId 保留近期链路的键式有界存储;按 traceId 查询优先命中它,未命中再查持久层。
+进程内按 traceId 保留近期链路的键式有界存储（`KeyedLocalStore`）。查询**以持久层（H2 mem）为准**;热层降为**过渡期交叉核对参照**（`getTraceViewFromMemory`）。
 _Avoid_: 缓存、LRU、一级存储
 
 **trace 持久层 (trace persistence tier)**:
-链路数据的本地分层存储:只包含 slow/error **明细**与 Trace 指标;normal 明细不进入该层。明细与指标**未来经 file 模式可跨进程重启保留**;**本期 Trace 指标为 H2 内存模式**（随进程存活，不落盘）。
+链路数据的本地持久化存储:**全量 trace 明细（含 normal）**与 Trace 指标。本期为 H2 **内存模式**（随进程存活、不落盘，窗口分钟~小时级，重启即失）；**未来经 file 模式可跨进程重启保留**。normal 也进入该层，以支持任意链路查询。
 _Avoid_: 落盘日志、数据库(具体技术)
 
 **链路分级 (trace level)**:
-按现有告警规则对一条链路的判定结果:error、slow、normal 三档;决定是否进入持久层(normal 不进入)。
+按现有告警规则对一条链路的判定结果:error、slow、normal 三档;用于**告警判定与 metrics 口径**,不落 H2 列——H2 查错误用 `is_error`、查慢用 `latency` 阈值。
 _Avoid_: 告警级别、日志级别
 
 **Trace 指标 (trace metrics)**:
