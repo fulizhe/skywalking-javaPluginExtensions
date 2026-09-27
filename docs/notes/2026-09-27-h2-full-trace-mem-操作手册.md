@@ -67,7 +67,7 @@ demo 端口用 `-Port`（默认 9600；**9600 常被用户占用，验证请换�
 
 ---
 
-## 3. 配置项（`plugin.logfilereporter.*`）
+## 3. 配置项（`plugin.logfilereporter.*`， From: `LogFileReporterPluginConfig.java`）
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
