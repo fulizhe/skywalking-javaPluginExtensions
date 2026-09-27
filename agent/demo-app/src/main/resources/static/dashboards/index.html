@@ -5,13 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>demo-app 仪表盘导航</title>
 <link rel="stylesheet" href="dashboard.css">
+<style>
+    .nav-endpoints { max-width: 1100px; margin: 24px auto 0; padding: 0 20px; }
+    .nav-endpoints h2 { font-size: 15px; margin: 0 0 8px; }
+    .nav-endpoints ul { margin: 0; padding-left: 18px; line-height: 1.9; font-size: 13px; }
+    .nav-endpoints code { background: #eef1f6; padding: 1px 4px; border-radius: 4px; }
+</style>
 </head>
 <body class="nav-body">
 <header class="nav-header">
     <h1>demo-app 数据流仪表盘</h1>
     <p>logfile-reporter-plugin 六类数据流(链路段 / JVM / meter / 实例属性 / 告警 / profile)的本地内存报告可视化,
     外加一项 H2 影子对账调试面(H2 影子写入状态与新内存视图的一致性比对)。
-    页面轮询与验证回路(<code>scripts/validate.ps1</code>)同一批 JSON 契约,静态资源随应用打包,无外部网络依赖。</p>
+    页面轮询与验证回路(<code>scripts/validate.ps1</code>)同一批 JSON 契约,静态资源随应用打包,无外部网络依赖。
+    09–11 为 <b>链路查询面</b>(双源对照 / 慢查询 / 可视化);页面底部另列 <b>原始 JSON 读口</b>。</p>
 </header>
 <main class="nav-grid">
     <a class="nav-card" href="dashboard.html?p=statistic">
@@ -52,9 +59,37 @@
     <a class="nav-card" href="metrics.html">
         <div class="nav-num">08</div>
         <div class="nav-title">Trace 指标</div>
-        <div class="nav-desc">真实 trace-based metrics:请求/错误率/慢调用与 P50–P99 分位,头部 1h/6h/24h/7d/30d</div>
+        <div class="nav-desc">真实 trace-based metrics:请求/错误率/慢调用与 P50–P99 分位,含 QPS;头部 1h/6h/24h/7d/30d</div>
+    </a>
+    <a class="nav-card" href="trace-query.html">
+        <div class="nav-num">09</div>
+        <div class="nav-title">双源对照 · 逐段 diff</div>
+        <div class="nav-desc">同一 traceId:H2(为准) vs 内存热层(参照)并排 + 按 traceSegmentId 对齐(both / span-diff / h2-only / mem-only)</div>
+    </a>
+    <a class="nav-card" href="trace-slow.html">
+        <div class="nav-num">10</div>
+        <div class="nav-title">慢查询</div>
+        <div class="nav-desc">按 endpoint + 耗时阈值查慢段(latency 降序),点行下钻整条链路</div>
+    </a>
+    <a class="nav-card" href="trace-view.html">
+        <div class="nav-num">11</div>
+        <div class="nav-title">链路可视化</div>
+        <div class="nav-desc">按 traceId 展示 span 时间线(通常由上面两页点行进入,带 ?traceid=)</div>
     </a>
 </main>
+<section class="nav-endpoints">
+    <h2>原始读口（JSON，点击直开）</h2>
+    <ul>
+        <li><a href="/inner/sw/trace-recent?limit=20" target="_blank">/inner/sw/trace-recent?limit=20</a> —— 最近链路 header（挑 traceId）</li>
+        <li><a href="/inner/sw/trace-query?traceId=" target="_blank">/inner/sw/trace-query?traceId=&lt;id&gt;</a> —— H2 取整条链路（为准）</li>
+        <li><a href="/inner/sw/trace-memory?traceId=" target="_blank">/inner/sw/trace-memory?traceId=&lt;id&gt;</a> —— 内存热层取整条链路（参照）</li>
+        <li><a href="/inner/sw/trace-slow?endpoint=GET%3A%2Fhello&amp;minLatencyMs=0&amp;limit=50" target="_blank">/inner/sw/trace-slow?endpoint=&amp;minLatencyMs=&amp;limit=</a> —— 慢查询行列表</li>
+        <li><a href="/inner/sw/trace-parity" target="_blank">/inner/sw/trace-parity</a> —— 影子对账 / 孤段 / H2 状态</li>
+        <li><a href="/inner/sw/metrics" target="_blank">/inner/sw/metrics</a> —— 指标实时快照（含 QPS）</li>
+        <li><a href="/inner/sw/metrics/query?endpoint=%2A&amp;limit=20" target="_blank">/inner/sw/metrics/query?endpoint=*&amp;limit=20</a> —— 指标条件查询（加 &amp;aggregate=true 出每端点一行）</li>
+        <li><a href="/inner/sw/metrics/extremes" target="_blank">/inner/sw/metrics/extremes</a> —— 每端点最大耗时那次的 traceId</li>
+    </ul>
+</section>
 <footer class="nav-footer">运行方式:<code>pwsh ./scripts/validate.ps1</code>(一键验证)或 <code>pwsh ./scripts/run-with-agent.ps1</code>(手动模式,保持运行后浏览器打开本页)</footer>
 </body>
 </html>
