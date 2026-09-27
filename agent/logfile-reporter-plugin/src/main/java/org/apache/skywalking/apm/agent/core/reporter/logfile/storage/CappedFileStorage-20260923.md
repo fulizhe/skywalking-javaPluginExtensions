@@ -4,6 +4,8 @@
 > payload 全量 JSON 存本文件（定长、环形、GZIP）。`H2.payload_id` 就是本类 `writeMessage` 返回的逻辑 id。
 >
 > 一句话：**16B 文件头（游标+尺寸） + 数据区里「8B 长度头 + GZIP 载荷」的块逻辑相连、物理取模绕圈覆盖**。
+>
+> **本文在文档网中的位置**：源码旁的实现笔记（不在 `docs/` 内）。入口登记在 `docs/reference/index.md`（"本项目落地"段）；一手外部参照 `docs/reference/glowroot-capped-database.md`；决策记录 `docs/adr/adr-03-capped-file-payload-for-trace-details.md`。改本类前建议三份一起看：**为什么拆（ADR-03）→ 别人怎么做（reference）→ 我们怎么做（本文）**。
 
 ---
 
@@ -14,6 +16,38 @@
 > https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/util/CappedDatabase.java
 >
 > 本项目内的姊妹篇：`docs/reference/glowroot-capped-database.md`（Glowroot 拆法的一手核实与"最小形态"依据）、`docs/adr/adr-03-capped-file-payload-for-trace-details.md`（本项目的决策与后果）。
+
+### 1.1 与 Glowroot 的实例数量对照（2026-09-27 源码复核补）
+
+移植时**最容易忽略的一点**：Glowroot 在**单个 JVM 里创建的不是一个环，而是一组环**。本类只对应其中一个的角色，但因为我们只有一种载荷形态，所以只用了 1 个实例。
+
+`SimpleRepoModule`（`@456b191`）构造函数中的实例化：
+
+```java
+// N 个 rollup 环
+for (int i = 0; i < storageConfig.rollupCappedDatabaseSizesMb().size(); i++) {
+    File file = new File(dataDir, "rollup-" + i + "-detail.capped.db");
+    int sizeKb = storageConfig.rollupCappedDatabaseSizesMb().get(i) * 1024;
+    rollupCappedDatabases.add(new CappedDatabase(file, sizeKb, backgroundExecutor, ticker));
+}
+// 1 个 trace 环
+traceCappedDatabase = new CappedDatabase(new File(dataDir, "trace-detail.capped.db"),
+        storageConfig.traceCappedDatabaseSizeMb() * 1024, backgroundExecutor, ticker);
+```
+
+| | Glowroot | 本类（`CappedFileStorage`） |
+|---|---|---|
+| 实例数 | **1 个 trace 环 + N 个 rollup 环** | **1 个** |
+| 默认规模 | N=4（`[500,500,500,500]`）→ **共 5 个环，各封顶 500MB** | **1 个环，封顶 128MB** |
+| 物理文件 | `trace-detail.capped.db` / `rollup-{i}-detail.capped.db` | 单个环形文件 |
+| 拆多实例动因 | ① 用途生命周期不同（trace 留 14 天 / rollup 最长 90 天）② 淘汰互不牵连 ③ 观测可归因 | — |
+| 观测 | 每实例独立 MBean（`TraceCappedDatabase` / `RollupCappedDatabase{i}`） | 无（靠压测实测标定，见容量笔记） |
+
+**为什么我们敢砍到 1 个**：本类承接的载荷只有一种形态（整段 trace JSON，gzip 后均值 `S≈662B`），**没有"胖瘦差异极大"的分类必要**；`H2TraceSegmentStorage` 也只有一张表、一种载荷。Glowroot 要同时伺候 trace 明细 + 查询文本 + 线程剖析 + 四档 rollup，形态多 → 才需要多环。
+
+> 一句话：**"存储层的复杂度 = 你必须支持多少种载荷形态。"** 哪天 trace 明细与 profile 数据都要装，`1 trace + N 分类环` 就是现成的高阶答案（同时要补回 resize / 统计 / 独立 MBean）。
+>
+> 另一处此前的笔误同步更正：Glowroot 的 H2 库文件是 **`data.mv.db`**（MVStore），不是 `data.h2.db`；文件也不是 `trace-capped.db`，而是 `trace-detail.capped.db`。
 
 ---
 

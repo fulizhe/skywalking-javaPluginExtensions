@@ -8,7 +8,12 @@
 - **Glowroot 链路存储与查询实现速览（本地 APM / 内存优先）** —— 何时读：设计"内存热层 + 本地持久化 + 内存优先查询"（与本插件同构的范式）时。→ `glowroot-trace-storage.md`
   （基准：`456b191`；已核实：采集阈值、写入路径与背压、H2 + `CappedDatabase` 存储模型、读取路径、partial trace；未核实：默认 Reaper 过期时长 / capped 默认大小等，见 §7）
 - **Glowroot CappedDatabase：H2 行 + 封顶文件存 payload** —— 何时读：评估"H2 只存索引/header、大 payload 走环形封顶文件"或磁盘硬上限方案时。→ `glowroot-capped-database.md`
-  （基准：`456b191`；已核实：文件格式、块读写、覆盖判定、压缩/fsync/resize/统计、`TraceDao` 指针语义；未核实：capped 默认大小 / 配置键与 resize 入口，见 §6）
+  （基准：`456b191`；已核实：文件格式、块读写、覆盖判定、压缩/fsync/resize/统计、`TraceDao` 指针语义、**一 JVM 多实例（1 trace + N rollup）**、`Existence` 三态；未核实：resize 触发入口，见 §6）
+
+**本项目落地（源码旁的实现笔记，非 docs/ 目录）**：
+
+- **`CappedFileStorage` 全景笔记（Glowroot `CappedDatabase` 的最小形态移植）** —— 何时读：动环形封顶文件本身（文件布局 / 块格式 / 逻辑 vs 物理地址 / 读写流程 / 过期判定 / 与 H2 的联动）时。→ `agent/logfile-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/reporter/logfile/storage/CappedFileStorage-20260923.md`
+  （含 §1.1 **与 Glowroot 的实例数量对照**：Glowroot = 1 trace 环 + N rollup 环，默认共 5 个；本项目 = 1 个。决策见 ADR-03；一手参照见上条 `glowroot-capped-database.md`）
 
 **三家 metrics 实现对照（Phase 5 选型用，一手核实）**：均"在采集流上算、存预聚合"，差别在**算的进程**与**落库时机**。
 

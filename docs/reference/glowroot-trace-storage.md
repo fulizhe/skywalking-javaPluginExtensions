@@ -80,7 +80,7 @@ H2 `trace` 表列（`store()` 里 `merge into trace (...) key (id)`）：
 
 - 环形**封顶**文件（块头 + 大块写出），LZF 压缩，**aggressive fsync**（源码注释：*"to minimize chance of invalid trace records on abrupt JVM stop"*）。
 - 重载荷（entries / queries / shared query texts / profiles）不进 H2，按 id 读写；**超出封顶大小即被覆盖淘汰**。
-- 这样 H2 只承担"索引 + header"，避免大 CLOB 撑爆 `.mv.db`（对比 SkyWalking 全塞 `data_binary`）。参考 issue #755：曾有用户 `data.h2.db` 涨到 31G。
+- 这样 H2 只承担"索引 + header"，避免大 CLOB 撑爆 `.mv.db`（对比 SkyWalking 全塞 `data_binary`）。参考 issue #755：曾有用户 H2 库文件涨到 31G。
 
 > 文件格式与算法细节（文件头、块结构、覆盖判定、fsync、resize、统计）见专文 `glowroot-capped-database.md`。
 

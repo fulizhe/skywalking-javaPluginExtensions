@@ -31,5 +31,6 @@ Phase 1（`.scratch/h2-trace-storage/spec.md`）把整段 segment JSON 存进 H2
 
 - 规格：`.scratch/h2-payload-capped-file/spec.md`
 - 一手拆法参考：`docs/reference/glowroot-capped-database.md`（§5 最小形态 + 照抄的坑）
+- 实现细节与逐段解读：`agent/logfile-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/reporter/logfile/storage/CappedFileStorage-20260923.md`（**源码旁的实现笔记**，含文件布局 / 块格式 / 逻辑 vs 物理地址 / 读写流程 / 与 Glowroot 的实例数量对照）
 - 背景设计：`docs/todos/h2化-统一方案.md` §4/§5
 - Phase 1（被本 ADR 演进）：`.scratch/h2-trace-storage/spec.md`

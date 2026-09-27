@@ -16,7 +16,8 @@
 2. **两套保留机制互补**：H2 行按**时间**删（Reaper `deleteBefore(capture_time)`）；capped 文件按**空间**自淘汰（写满覆盖最旧块）。磁盘上限 = H2 大小 + capped 固定大小，**可预测**。
 3. **`cappedId` 不是文件偏移**，而是"逻辑块起始索引"；文件头含 `currIndex` / `sizeKb` / `lastResizeBaseIndex`，物理位置按 `sizeKb` 取模，块可跨文件尾环绕。
 4. **先写 payload、后写指针**：`writeMessages` 拿到 id 后才 `merge into trace`；读到已被覆盖的 id → `Existence.EXPIRED`，只少 payload，不会脏读。
-5. 解决的核心问题是 **H2 大 CLOB 膨胀且删了不缩**（issue #755：曾出现 `data.h2.db` 涨到 31G）。
+5. 解决的核心问题是 **H2 大 CLOB 膨胀且删了不缩**（issue #755：曾出现 H2 库文件涨到 31G）。
+6. **一 JVM 多实例**：`1 个 trace 环 + N 个 rollup 环`（默认 N=4，共 5 个环，各封顶 500MB），MBean 分别暴露。详见 §3.7。
 
 ---
 
@@ -24,7 +25,7 @@
 
 把大 payload 直接塞 H2（`CLOB`/`MEDIUMTEXT`）的代价：
 
-- **文件只涨不缩**：行被删后空闲页未必归还给 OS，`data.h2.db` 会长期保持峰值体积（issue #755 即此类）。
+- **文件只涨不缩**：行被删后空闲页未必归还给 OS，H2 库文件（`data.mv.db`）会长期保持峰值体积（issue #755 即此类）。
 - **读写放大**：每次查询 header 都可能触碰含大列的页；备份/复制整个库的成本高。
 - **没有硬上限**：增长由数据量决定，边缘场景（异常大 JSON / 长 SQL / 堆栈）不可控。
 
@@ -132,8 +133,48 @@ isInTheFuture(id) = id >= currIndex                   ← 尚未写入（复制�
 ### 3.6 统计与观测
 
 - `CappedDatabaseStats`：`totalBytesBeforeCompression` / `totalBytesAfterCompression` / `totalNanos` / `writeCount`，按 type 分桶。
-- trace 侧四个 type：`trace entries` / `trace queries` / `trace shared query texts` / `trace profiles`（`TraceCappedDatabaseStats`）。
+- trace 侧四个 **type 常量**（统计口径，非实例）：`trace entries` / `trace queries` / `trace shared query texts` / `trace profiles`（`TraceCappedDatabaseStats`）。**这四类共用同一个 trace 环**（`trace-detail.capped.db`），不是四个环。
 - 通过 MBean 暴露：`org.glowroot:type=TraceCappedDatabase`、`org.glowroot:type=RollupCappedDatabase{n}`、`org.glowroot:type=H2Database`（`SimpleRepoModule`）。压缩率与写入耗时可直接观测。
+
+### 3.7 实例数量：1 + N（2026-09-27 源码复核修正）
+
+`SimpleRepoModule` 构造方法中明确创建 **1 + N** 个 `CappedDatabase`：
+
+```java
+// N 个 rollup 环
+for (int i = 0; i < storageConfig.rollupCappedDatabaseSizesMb().size(); i++) {
+    File file = new File(dataDir, "rollup-" + i + "-detail.capped.db");
+    int sizeKb = storageConfig.rollupCappedDatabaseSizesMb().get(i) * 1024;
+    rollupCappedDatabases.add(new CappedDatabase(file, sizeKb, backgroundExecutor, ticker));
+}
+// 1 个 trace 环
+traceCappedDatabase = new CappedDatabase(new File(dataDir, "trace-detail.capped.db"),
+        storageConfig.traceCappedDatabaseSizeMb() * 1024, backgroundExecutor, ticker);
+```
+
+| 实例 | 文件名 | 数量 | 用途 |
+| --- | --- | --- | --- |
+| trace 环 | `trace-detail.capped.db` | 1 | 全部 trace 载荷（4 个 type 常量共用） |
+| rollup 环 | `rollup-{i}-detail.capped.db` | N | 各 rollup 级别明细 |
+
+- `N` = `EmbeddedStorageConfig.rollupCappedDatabaseSizesMb()` 长度；**默认 4**（`DEFAULT_CAPPED_DATABASE_SIZES_MB = [500,500,500,500]`），即默认一个 JVM 里共 **5 个环**，每个封顶 **500MB**。
+- `traceCappedDatabaseSizeMb()` 默认 **500**。
+- **纠正**：H2 库文件是 **`data.mv.db`**（MVStore），不是 `data.h2.db`；Glowroot 无 `trace-capped.db`，实际名为 `trace-detail.capped.db`。
+- 拆多实例的动因：**不同用途生命周期不同**（trace 明细默认留 14 天，rollup 最长留 90 天）、**淘汰互不牵连**、**观测可归因**（压缩率/耗时按实例分桶）。
+
+### 3.8 `Existence` 三态
+
+`common/.../live/LiveTraceRepository.java` 定义：
+
+```java
+enum Existence {
+    YES, NO, EXPIRED;
+}
+```
+
+- `NO` = 指针为 NULL（从来没有过）；`EXPIRED` = 指针在但内容已被环覆盖；`YES` = 内容可读。
+- **"没有"与"过期"必须分开表达**：`EXPIRED` 时 header 仍有效，仅明细不可读（UI 降级）。
+- profile 存在性 = 主辅两个指针的合并：任一 `EXPIRED` → `EXPIRED`；否则任一 `YES` → `YES`；否则 `NO`。
 
 ---
 
@@ -186,11 +227,12 @@ isInTheFuture(id) = id >= currIndex                   ← 尚未写入（复制�
 
 ## 6. 未核实 / 边界
 
-1. capped 文件**默认大小 / 配置键名**：配置入口为 Administration → Storage 的 capped sizes（issue #1060 维护者说明）；源码里 `requestedSizeKb` 的最终来源未逐处确认。
+1. ~~capped 文件**默认大小 / 配置键名**~~ **已核实（2026-09-27）**：`EmbeddedStorageConfig` 中 `traceCappedDatabaseSizeMb()` 默认 **500**，`rollupCappedDatabaseSizesMb()` 默认 **[500,500,500,500]**（4 档 rollup 各 500MB）。
 2. `resize` 的**触发入口**（配置保存 → RepoAdmin → resize？）未逐行核实。
-3. `RollupCappedDatabase`（rollup 明细）的用途与 trace 侧的差异未展开（非 trace）。
+3. ~~`RollupCappedDatabase` 的用途差异未展开~~ **已核实（2026-09-27）**：rollup 环（`rollup-{i}-detail.capped.db`）存各 rollup 级别的明细，与 trace 环物理隔离；档位由 `rollupCappedDatabaseSizesMb()` 长度决定（默认 4 档，对应 `DEFAULT_ROLLUP_EXPIRATION_HOURS = [72h, 336h, 2160h, 2160h]`）。详见 §3.7。
 4. central（Cassandra）侧没有这个机制：trace 直接进 Cassandra（TTL 由 `USING TTL` 控制），仅在 embedded 模式使用 capped 文件。
 5. 未运行 Glowroot 实测压缩率 / 实际读写延迟。
+6. **已核实（2026-09-27）**：一 JVM 多实例 = `1 trace + N rollup`；`Existence` 三态；H2 库文件名为 `data.mv.db`。见 §3.7 / §3.8 / §0.6。
 
 ---
 
@@ -203,4 +245,6 @@ isInTheFuture(id) = id >= currIndex                   ← 尚未写入（复制�
 | 统计数据结构 | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/util/CappedDatabaseStats.java> |
 | trace 侧 type 与 MBean | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/TraceCappedDatabaseStats.java> |
 | H2 行 ↔ capped 指针（读写/Existence） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/TraceDao.java> |
-| MBean 注册（TraceCappedDatabase / H2Database） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/SimpleRepoModule.java> |
+| MBean 注册（TraceCappedDatabase / RollupCappedDatabase{n} / H2Database） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/SimpleRepoModule.java> |
+| 默认容量配置（500MB × 4 rollup） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/common2/src/main/java/org/glowroot/common2/config/EmbeddedStorageConfig.java> |
+| `Existence` 三态（YES/NO/EXPIRED） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/common/src/main/java/org/glowroot/common/live/LiveTraceRepository.java> |
