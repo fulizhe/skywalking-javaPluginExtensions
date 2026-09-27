@@ -200,9 +200,23 @@ QPS 目前**非一等字段**，只有 `requestCount`/分钟桶可反推。本�
 > curl.exe -s --noproxy "*" http://127.0.0.1:9600/inner/sw/trace-parity
 > ```
 
+## 8. `payload_id` 只增不减，会溢出吗？（结论：无实际风险）
+
+`payload_id` 不是"行号计数器"，而是**环形载荷文件的逻辑字节偏移**（`CappedFileStorage.currIndex`）：
+从文件头 16B（`currIndex` + `sizeBytes`）恢复、只增不减；`writeMessage` 返回块起始偏移，
+每次写让 `currIndex += (8B 块头 + gzip 载荷) ≈ S+8 ≈ 670 B/段`。H2 列为 `payload_id **BIGINT**`（64bit，与 Java `long` 一致）。
+
+- 溢出需写入 **2^63−1 ≈ 9.22×10^18 字节 ≈ 9.2 EB** → `9.22e18 / 670 ≈ 1.4×10^16` 段。
+- 量级：6.7 MB/s（≈1 万段/s）需 **~4.3 万年**；1 GB/s 也需 **~292 年**。
+- mem 模式进程重启即 `currIndex=0`；只有复用同一 capped 文件跨重启才累积，仍为 EB 级。
+- 真溢出（不现实）的后果：`currIndex` 转负 → `isOverwritten`（`id < currIndex - sizeBytes`）失效，
+  且读侧 `payloadId < 0` 被当"空/过期"跳过 → **静默丢 payload**（非崩溃）。
+
+**结论**：无需处理。若要防御性，可在 `writeMessage` 加天文阈值金丝雀（如 `currIndex > 2^62` 时重置环形 + 告警）。
+
 ---
 
-## 8. 与既有文档/决策的关系
+## 9. 与既有文档/决策的关系
 
 - `ADR-03` — header/索引与 payload 分离、payload 过期降级：本笔记沿用其语义，不新增机制。
 - `docs/todos/h2化-统一方案.md` §1.4 / §5 / Phase 3 — 原路线「Phase 3 切 file + 两档 TTL」；本笔记为「mem 模式是否可作形态、file 是否可延后」提供依据。
@@ -211,7 +225,7 @@ QPS 目前**非一等字段**，只有 `requestCount`/分钟桶可反推。本�
 
 ---
 
-## 9. 定案清单（2026-09-27 grilling）
+## 10. 定案清单（2026-09-27 grilling）
 
 | # | 决策 |
 |---|---|
