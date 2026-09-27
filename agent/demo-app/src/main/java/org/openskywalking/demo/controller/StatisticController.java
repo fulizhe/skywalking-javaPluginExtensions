@@ -114,7 +114,8 @@ public class StatisticController {
             @RequestParam(value = "fromBucket", required = false) Long fromBucket,
             @RequestParam(value = "toBucket", required = false) Long toBucket,
             @RequestParam(value = "resolution", required = false) String resolution,
-            @RequestParam(value = "limit", required = false) Integer limit) {
+            @RequestParam(value = "limit", required = false) Integer limit,
+            @RequestParam(value = "aggregate", required = false) Boolean aggregate) {
         Map<String, Object> condition = new HashMap<>(8);
         if (endpoint != null) {
             condition.put("endpoint", endpoint);
@@ -130,6 +131,9 @@ public class StatisticController {
         }
         if (limit != null) {
             condition.put("limit", limit);
+        }
+        if (aggregate != null) {
+            condition.put("aggregate", aggregate);
         }
         return SWMetricsUtils.queryMetrics(condition);
     }

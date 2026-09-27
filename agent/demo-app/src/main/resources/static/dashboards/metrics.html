@@ -553,10 +553,13 @@ function hideDetail(){ selectedEndpoint=null; applyHighlight(); $("#detailCard")
 function loadDetail(name){ ensureSeries(name, function(rows){ renderDetail(name, rows); }); }
 
 function aggSeries(rows){
-  var a={req:0,err:0,slow:0,qps:0,total:0,max:0,sample:0,w50:0,w90:0,w95:0,w99:0,c:0};
+  var a={req:0,err:0,slow:0,qps:0,total:0,max:0,sample:0,sec:0,w50:0,w90:0,w95:0,w99:0,c:0};
+  var fallbackSec = bucketMs(lastResolution)/1000;
   rows.forEach(function(r){
     a.req+=r.requestCount||0; a.err+=r.errorCount||0; a.slow+=r.slowCount||0;
-    a.qps+=(r.qps||0);
+    // 桶跨度秒:服务端每行 qps=requestCount/跨度秒,可由 count/qps 反推(兼容聚合行与逐桶行);缺省用当前分辨率单桶秒。
+    var c=r.requestCount||0;
+    if(r.qps>0 && c>0){ a.sec += c / r.qps; } else { a.sec += fallbackSec; }
     a.total+=r.totalLatency||0; a.max=Math.max(a.max,r.maxLatency||0); a.sample+=r.sampleCount||0;
     if(r.p50!=null){a.w50+=r.p50*r.requestCount; a.c+=r.requestCount;}
     if(r.p90!=null){a.w90+=r.p90*r.requestCount;}
@@ -566,6 +569,7 @@ function aggSeries(rows){
   a.p50=a.c?Math.round(a.w50/a.c):null; a.p90=a.c?Math.round(a.w90/a.c):null;
   a.p95=a.c?Math.round(a.w95/a.c):null; a.p99=a.c?Math.round(a.w99/a.c):null;
   a.avg=a.req?Math.round(a.total/a.req):0; a.errRate=a.req?a.err/a.req:0; a.slowRate=a.req?a.slow/a.req:0;
+  a.qps=a.sec>0?a.req/a.sec:0;   // 区间平均 QPS = 总请求 / 桶跨度秒之和
   return a;
 }
 
