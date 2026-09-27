@@ -176,6 +176,30 @@ QPS 目前**非一等字段**，只有 `requestCount`/分钟桶可反推。本�
 
 ⚠️ 分母：整分钟桶才 `/60`；不满一分钟或跨分钟要用**桶内活跃秒数**（否则低估，如上表按 `/60` 只得 ~7/s，实际 ~13/s）。
 
+### 7.3 第二轮实测：≈87k 行时的堆占用拆分（2026-09-27）
+
+用户实例（demo-app / JDK8 / H2 mem，`shadow_max_rows=100000`；`/inner/sw/trace-parity` 报 `h2Size=87,461`，`KeyedLocalStore` 顶格 **1000**）。工具：`jmap -heap` / `jmap -histo:live`（触发一次 Full GC）。
+
+| 对象 | 实测（浅和） | 备注 |
+|---|---:|---|
+| live heap（老年代，GC 后） | **124.66 MB** | `-Xmx` = 8118 MB（默认，未显式设） |
+| **H2 mem（插件）** | **30.2 MB** | `…apm.dependencies.h2.*` 全类；925,095 实例（`ValueBigint` 317k / `ValueVarchar` 198k / `DefaultRow` 100k / `SimpleRowValue` 100k / `Value[]` 103k） |
+| demo 业务 H2 | 0.06 MB | `org.h2.*`（未 shade），可忽略 |
+| **KeyedLocalStore** | 对象本身 88 B | 内容 = 1000 条 trace 的 **Map 对象图**（非 `Log` 对象） |
+| `[C` / `String` | 41.98 / 7.43 MB | 共享：H2 varchar + store 字符串 |
+
+**估算**（浅和低估；retained 需 heap dump + MAT）：
+- **H2**：浅和 30.2 MB；含其引用的 `ValueVarchar→String/char[]` 后 retained ≈ **~50 MB**——与 §7.1 校准 `R≈0.8KB/行 × 87k ≈ 70MB` 同量级（后者含 metrics 行增长，偏上）。
+- **KeyedLocalStore**：1000 条 trace 顶格，`/statistic` 全量 JSON = **6.70 M 字符** → Java retained ≈ **15–25 MB**（UTF-16 字符 ~13MB + Map/List 头）；受 `max_log_size=1000` 硬限制。
+- **其余 ~50 MB**：JVM/meter/profile 本地缓存、metrics 桶、Tomcat/框架/缓冲。
+
+> 方法学：`jmap -histo` 是**浅和**，只有 H2 能按类名精确归因；`KeyedLocalStore` 的底层 `HashMap`/`ArrayList`/`String` 全应用共享，无法按类名拆分。复测：
+> ```powershell
+> & "D:\apps\java\jdk1.8.0_92-64\bin\jmap.exe" -heap <pid>
+> & "D:\apps\java\jdk1.8.0_92-64\bin\jmap.exe" -histo:live <pid>   # 触发 Full GC
+> curl.exe -s --noproxy "*" http://127.0.0.1:9600/inner/sw/trace-parity
+> ```
+
 ---
 
 ## 8. 与既有文档/决策的关系
