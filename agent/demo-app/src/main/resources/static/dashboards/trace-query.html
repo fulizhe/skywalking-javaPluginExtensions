@@ -159,6 +159,13 @@ function loadTrace() {
 }
 
 loadRecent();
+
+/* 支持从指标详情跳转带入 traceId：?traceid=<id>（自动双源对照） */
+(function () {
+  var p = new URLSearchParams(location.search);
+  var t = p.get("traceid") || p.get("traceId");
+  if (t) { document.getElementById("traceId").value = t; loadTrace(); }
+})();
 </script>
 </body>
 </html>

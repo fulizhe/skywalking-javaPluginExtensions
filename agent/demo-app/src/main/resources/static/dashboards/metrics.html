@@ -86,6 +86,8 @@ body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);col
 a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
 .btn{background:#1c2b4a;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer}
 .btn:hover{background:#24365c}
+.detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.detail-actions a.btn{display:inline-block;text-decoration:none}
 .detail-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:10px}
 .detail-info .cell{background:#0c1526;border:1px solid var(--bd);border-radius:8px;padding:8px 10px}
 .detail-info .cell .l{font-size:11px;color:var(--mut)}
@@ -176,6 +178,7 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
         <span style="margin-left:auto"></span>
         <button class="btn" id="detailClose">收起</button>
       </div>
+      <div class="detail-actions" id="detailActions"></div>
       <div class="detail-info" id="detailInfo"></div>
       <div id="detailChart" class="chart" style="height:260px"></div>
       <div class="note" id="detailNote"></div>
@@ -603,6 +606,13 @@ function renderDetail(name, rows){
       '<div class="cell"><div class="l">极端值 traceId</div><div class="v" style="font-size:12px;word-break:break-all">'
       + '<a class="mono" target="_blank" title="'+esc(exTitle)+'" href="/inner/sw/trace-query?traceId='+encodeURIComponent(ex.traceId)+'">'+esc(ex.traceId)+'</a></div></div>');
   }
+  // 该 endpoint 的三个下钻入口：双源对照 / 慢查询 / 链路可视化
+  var exTrace = (ex && ex.traceId) ? ex.traceId : "";
+  var tqs = exTrace ? ("?traceid=" + encodeURIComponent(exTrace)) : "";
+  document.getElementById("detailActions").innerHTML =
+      '<a class="btn" target="_blank" title="打开双源对照（H2 为准 vs 内存热层）'+(exTrace?"；预填极端值 traceId":"")+'" href="trace-query.html'+tqs+'">◧ 双源对照</a>'
+    + '<a class="btn" target="_blank" title="打开慢查询并预填该 endpoint（阈值 0，可改）" href="trace-slow.html?endpoint='+encodeURIComponent(name)+'&minLatencyMs=0&limit=50">◔ 慢查询</a>'
+    + '<a class="btn" target="_blank" title="打开链路可视化'+(exTrace?"（极端值 traceId）":"（需先填入 traceId）")+'" href="trace-view.html'+tqs+'">◈ 链路可视化</a>';
   document.getElementById("detailNote").innerHTML =
     "数据说明：本行取自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的逐桶序列（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
     + "计数（请求/错误/慢）与最大耗时为<b>精确合并</b>；P50/P90/P95/P99 为各桶分位按请求数<b>加权平均</b>（≤24h 用分钟分位，7d/30d 用小时分位，小时分位本身为分钟分位的加权近似）。"

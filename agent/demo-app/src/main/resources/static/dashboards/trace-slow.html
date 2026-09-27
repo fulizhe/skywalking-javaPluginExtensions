@@ -84,6 +84,15 @@ function loadSlow() {
     })
     .catch(function (e) { document.getElementById("msg").textContent = "查询失败: " + e; });
 }
+
+/* 支持从指标详情跳转带入参数：?endpoint=<ep>&minLatencyMs=<n>&limit=<n> */
+(function () {
+  var p = new URLSearchParams(location.search);
+  if (p.get("minLatencyMs") != null) { document.getElementById("minLatency").value = p.get("minLatencyMs"); }
+  if (p.get("limit") != null) { document.getElementById("limit").value = p.get("limit"); }
+  var ep = p.get("endpoint");
+  if (ep) { document.getElementById("endpoint").value = ep; loadSlow(); }
+})();
 </script>
 </body>
 </html>
