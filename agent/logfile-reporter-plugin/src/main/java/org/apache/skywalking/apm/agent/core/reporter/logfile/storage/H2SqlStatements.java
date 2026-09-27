@@ -179,6 +179,13 @@ final class H2SqlStatements {
 
     static final String DELETE_METRICS_HOUR_BEFORE_SQL = "DELETE FROM trace_metrics_hour WHERE time_bucket < ?";
 
+    /** 范围内每个 endpoint 的"有数据桶数"（request_count>0），供活跃平均 QPS 分母。 */
+    static final String SELECT_ACTIVE_BUCKETS_MINUTE_SQL = "SELECT endpoint, COUNT(DISTINCT time_bucket) AS active "
+            + "FROM trace_metrics_minute WHERE request_count > 0 AND time_bucket BETWEEN ? AND ? GROUP BY endpoint";
+
+    static final String SELECT_ACTIVE_BUCKETS_HOUR_SQL = "SELECT endpoint, COUNT(DISTINCT time_bucket) AS active "
+            + "FROM trace_metrics_hour WHERE request_count > 0 AND time_bucket BETWEEN ? AND ? GROUP BY endpoint";
+
     static final String DELETE_ALL_METRICS_MINUTE_SQL = "DELETE FROM trace_metrics_minute";
 
     static final String DELETE_ALL_METRICS_HOUR_SQL = "DELETE FROM trace_metrics_hour";

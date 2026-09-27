@@ -583,6 +583,7 @@ function renderDetail(name, rows){
     + " ~ " + labelFor(lastResolution, rows[rows.length-1].timeBucket*bucketMs(lastResolution));
   var cells = [
     ["请求数", fmtInt(a.req)],
+    ["QPS", fmtQps(a.qps)],
     ["错误率", pct(a.errRate)+" ("+fmtInt(a.err)+")"],
     ["慢调用", fmtInt(a.slow)+" ("+pct(a.slowRate)+")"],
     ["平均耗时", fmtMs(a.avg)],

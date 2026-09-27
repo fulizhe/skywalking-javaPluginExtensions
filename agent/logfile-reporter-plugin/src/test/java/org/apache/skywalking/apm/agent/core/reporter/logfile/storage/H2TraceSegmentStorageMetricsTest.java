@@ -2,6 +2,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.storage;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.junit.After;
@@ -165,6 +166,20 @@ public class H2TraceSegmentStorageMetricsTest {
                 list(row("GET:/a", 1L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1))));
         Assert.assertTrue(storage.queryMetricRows("minute", "GET:/a", 0L, 9L, 100).isEmpty());
         Assert.assertEquals(0L, storage.getErrorCount());
+    }
+
+    @Test
+    public void activeBucketCounts_countsNonEmptyBucketsPerEndpoint() {
+        storage.storeMetricRows("minute", list(
+                row("GET:/a", 100L, 3L, 0L, 0L, 30L, 20L, 10, -1, -1, -1, 3),
+                row("GET:/a", 101L, 0L, 0L, 0L, 0L, 0L, -1, -1, -1, -1, 0),
+                row("GET:/a", 102L, 2L, 0L, 0L, 20L, 10L, 10, -1, -1, -1, 2),
+                row("GET:/b", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1)));
+
+        final Map<String, Integer> active = storage.activeBucketCounts("minute", 100L, 102L);
+        Assert.assertEquals("GET:/a 两个有数据桶（101 为空不计）", 2, active.get("GET:/a").intValue());
+        Assert.assertEquals("GET:/b 一个桶", 1, active.get("GET:/b").intValue());
+        Assert.assertNull("范围外/无数据端点不在结果内", active.get("GET:/c"));
     }
 
     private static List<MetricsRow> list(final MetricsRow... rows) {

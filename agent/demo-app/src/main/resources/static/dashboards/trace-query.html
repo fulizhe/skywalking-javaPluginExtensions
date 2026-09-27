@@ -18,6 +18,7 @@
   pre { background: #f7f7f7; border: 1px solid #ddd; padding: 10px; overflow: auto; max-height: 60vh; }
   .expired { color: #b00; font-weight: bold; }
   .ok { color: #0a7a2f; font-weight: bold; }
+  .warn { color: #b8860b; font-weight: bold; }
   .muted { color: #888; }
   .cols { display: flex; gap: 12px; flex-wrap: wrap; }
   .col { flex: 1 1 420px; min-width: 0; }
@@ -43,6 +44,7 @@
   <a id="viewLink" href="trace-view.html" target="_blank" style="margin-left:8px">可视化视图 →</a>
 </div>
 <div id="traceMsg" class="muted"></div>
+<div id="diffBox" style="margin:10px 0"></div>
 <div class="cols">
   <div class="col">
     <div class="muted">H2（为准）· logs = <span id="h2Count">-</span><span id="h2Expired"></span></div>
@@ -89,6 +91,43 @@ function loadRecent() {
     .catch(function (e) { document.getElementById("recentMsg").textContent = "加载失败: " + e; });
 }
 
+function segKey(log) { return (log && log.traceSegmentId) ? log.traceSegmentId : "(no-id)"; }
+function spanCount(log) { var s = log && log.spans; return s ? s.length : 0; }
+
+/* 按 traceSegmentId 对齐两侧段列表，逐段标注：一致 / span 数不同 / 仅 H2 / 仅内存 */
+function renderDiff(h2Logs, memLogs) {
+  var box = document.getElementById("diffBox");
+  if (!box) return;
+  var h2 = {}, mem = {};
+  h2Logs.forEach(function (l) { var k = segKey(l); (h2[k] = h2[k] || []).push(l); });
+  memLogs.forEach(function (l) { var k = segKey(l); (mem[k] = mem[k] || []).push(l); });
+  var ids = {}; Object.keys(h2).forEach(function (k) { ids[k] = 1; }); Object.keys(mem).forEach(function (k) { ids[k] = 1; });
+  var keys = Object.keys(ids).sort();
+  var both = 0, h2Only = 0, memOnly = 0, spanDiff = 0, rows = [];
+  keys.forEach(function (k) {
+    var a = h2[k] || [], b = mem[k] || [];
+    var as = a.reduce(function (s, l) { return s + spanCount(l); }, 0);
+    var bs = b.reduce(function (s, l) { return s + spanCount(l); }, 0);
+    var status;
+    if (a.length && b.length) { if (as === bs) { status = "both"; both++; } else { status = "span-diff"; spanDiff++; } }
+    else if (a.length) { status = "h2-only"; h2Only++; }
+    else { status = "mem-only"; memOnly++; }
+    rows.push({ k: k, status: status, a: a.length, b: b.length, as: as, bs: bs });
+  });
+  var cls = { "both": "ok", "span-diff": "warn", "h2-only": "expired", "mem-only": "warn" };
+  var head = "段对齐：共 " + keys.length + " 段 · 双侧一致 " + both
+    + (spanDiff ? "（其中 span 数不同 " + spanDiff + "）" : "")
+    + " · 仅 H2 " + h2Only + " · 仅内存 " + memOnly;
+  var html = '<div class="muted" style="font-size:12.5px;margin-bottom:4px">' + head + '</div>'
+    + '<table><thead><tr><th>traceSegmentId</th><th>H2 段</th><th>内存 段</th><th>H2 span</th><th>内存 span</th><th>状态</th></tr></thead><tbody>';
+  rows.forEach(function (r) {
+    html += '<tr><td class="mono">' + esc(r.k) + '</td><td>' + r.a + '</td><td>' + r.b + '</td><td>' + r.as + '</td><td>' + r.bs + '</td>'
+      + '<td class="' + cls[r.status] + '">' + r.status + '</td></tr>';
+  });
+  html += '</tbody></table>';
+  box.innerHTML = keys.length ? html : '<div class="muted">无可对齐的段</div>';
+}
+
 function loadTrace() {
   var traceId = document.getElementById("traceId").value.trim();
   if (!traceId) { document.getElementById("traceMsg").textContent = "请输入 traceId"; return; }
@@ -109,6 +148,7 @@ function loadTrace() {
       ? "<span class='ok'>一致：H2 与内存 logs 条数相同（" + h2Logs.length + "）</span>"
       : "<span class='expired'>差异：H2=" + h2Logs.length + " vs 内存=" + memLogs.length
         + "（内存热层只保最近 N 条 traceId，可能已淘汰该 trace；以 H2 为准）</span>";
+    renderDiff(h2Logs, memLogs);
     var pre = document.getElementById("traceDetail");
     pre.style.display = "block";
     pre.textContent = JSON.stringify(h2, null, 2);

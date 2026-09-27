@@ -428,12 +428,28 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			}
 		});
 		final int cap = Math.min(combined.size(), limit);
-		// QPS 分母 = 查询范围跨度秒（跨桶聚合行不能用单桶 60s）
-		final long rangeSeconds = TraceMetricsQuery.rangeSpanSeconds(fromMinute, toMinute);
+		// QPS 口径 = 活跃平均：总请求 /（有数据桶数 × 单桶秒），忽略空闲窗口（含全局保留键 "*"）
+		final long bucketSec = TraceMetricsQuery.bucketSpanSeconds(resolution);
+		final Map<String, Integer> active = new HashMap<String, Integer>();
+		if (traceSegmentStorage != null) {
+			active.putAll(traceSegmentStorage.activeBucketCounts(resolution, queryFrom, queryTo));
+		}
+		if (metricsAggregator != null && "minute".equals(resolution)) {
+			final Set<String> seen = new HashSet<String>();
+			for (MetricsRow r : metricsAggregator.memoryRows()) {
+				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute && r.getRequestCount() > 0
+						&& seen.add(r.getEndpoint() + "@" + r.getTimeBucket())) {
+					final Integer cur = active.get(r.getEndpoint());
+					active.put(r.getEndpoint(), Integer.valueOf((cur == null ? 0 : cur.intValue()) + 1));
+				}
+			}
+		}
 		for (int i = 0; i < cap; i++) {
 			final MetricsRow r = combined.get(i);
 			final Map<String, Object> map = r.toMap();
-			map.put("qps", r.getQps(rangeSeconds));
+			final Integer ab = active.get(r.getEndpoint());
+			final long activeBuckets = ab == null ? 0L : ab.longValue();
+			map.put("qps", activeBuckets > 0L ? r.getQps(activeBuckets * bucketSec) : 0d);
 			rows.add(map);
 		}
 		result.put("resolution", resolution);

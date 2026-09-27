@@ -12,6 +12,7 @@ import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -778,6 +779,33 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 }
             } catch (SQLException e) {
                 recordError("aggregateMetricRows", e);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 范围内每个 endpoint 的"有数据桶数"（{@code request_count > 0}），供**活跃平均 QPS** 分母。
+     * 返回 JDK 原生 {@code Map<endpoint, 桶数>}（含全局保留键 {@code "*"}）；异常就地捕获并返回已读到的部分。
+     */
+    public Map<String, Integer> activeBucketCounts(final String resolution, final long fromBucket, final long toBucket) {
+        final Map<String, Integer> out = new HashMap<String, Integer>();
+        if (!enabled || connection == null || toBucket < fromBucket) {
+            return out;
+        }
+        final String sql = isHourResolution(resolution)
+                ? H2SqlStatements.SELECT_ACTIVE_BUCKETS_HOUR_SQL : H2SqlStatements.SELECT_ACTIVE_BUCKETS_MINUTE_SQL;
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, fromBucket);
+                ps.setLong(2, toBucket);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        out.put(rs.getString("endpoint"), rs.getInt("active"));
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("activeBucketCounts", e);
             }
         }
         return out;
