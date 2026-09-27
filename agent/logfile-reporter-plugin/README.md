@@ -22,6 +22,9 @@ agent 侧搜集到的监控数据默认会发送到 OAP。本 plugin 将之截�
 |------|------------|--------|
 | 日志/上报相关缓存条数上限 | `skywalking.plugin.logfilereporter.max_log_size` | 1000 |
 | JVM 指标本地缓存条数上限（FIFO 淘汰） | `skywalking.plugin.jvmmetricslocal.max_metrics_data_size` | 1000 |
+| H2 全量 trace 持久层行数上限 | `skywalking.plugin.logfilereporter.h2.shadow_max_rows` | 100000 |
+| H2 环形载荷文件大小（MB） | `skywalking.plugin.logfilereporter.h2.payload_capped_size_mb` | 128 |
+| Trace 指标聚合开关 | `skywalking.plugin.logfilereporter.metrics.enabled` | true |
 | 慢/错链路告警（SPI / HTTP webhook） | 见 [README-trace-alert.md](README-trace-alert.md) | 默认关闭 |
 
 ```shell

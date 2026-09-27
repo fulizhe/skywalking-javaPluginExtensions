@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>慢查询（endpoint + 耗时阈值）</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; margin: 16px; color: #222; }
+  h1 { font-size: 18px; }
+  .row { margin: 8px 0; }
+  input { padding: 6px 8px; font-family: monospace; }
+  input.ep { width: 360px; }
+  input.num { width: 100px; }
+  button { padding: 6px 12px; cursor: pointer; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+  th { background: #f5f5f5; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #eef; }
+  .num-col { text-align: right; font-variant-numeric: tabular-nums; }
+  .expired { color: #b00; font-weight: bold; }
+  .muted { color: #888; }
+</style>
+</head>
+<body>
+<h1>慢查询（按 endpoint + 耗时阈值）</h1>
+<div class="row">
+  endpoint: <input id="endpoint" class="ep" placeholder="如 GET:/longTimeTask 或 /longTimeTask">
+  阈值(ms): <input id="minLatency" class="num" type="number" value="3000" min="0">
+  limit: <input id="limit" class="num" type="number" value="50" min="1" max="1000">
+  <button onclick="loadSlow()">查询</button>
+  <span id="msg" class="muted"></span>
+</div>
+<div class="row muted" style="font-size:12px">
+  提示：阈值可对齐告警 <code>slow_rules</code>（如某端点专用阈值）；`latency` 为段级耗时（段内 maxEnd-minStart），按降序返回。点行查看整条链路。
+</div>
+<table id="slowTable">
+  <thead>
+    <tr><th>traceId</th><th>segmentId</th><th>service</th><th>endpoint</th><th>startTime</th><th class="num-col">latency(ms)</th><th>error</th><th>payload</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<script>
+function esc(s) {
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+function fmtTime(ms) { if (!ms && ms !== 0) return "-"; return new Date(ms).toLocaleString(); }
+
+function loadSlow() {
+  var endpoint = document.getElementById("endpoint").value.trim();
+  var minLatency = document.getElementById("minLatency").value || 0;
+  var limit = document.getElementById("limit").value || 50;
+  if (!endpoint) { document.getElementById("msg").textContent = "请输入 endpoint"; return; }
+  var url = "/inner/sw/trace-slow?endpoint=" + encodeURIComponent(endpoint)
+    + "&minLatencyMs=" + encodeURIComponent(minLatency) + "&limit=" + encodeURIComponent(limit);
+  fetch(url)
+    .then(function (r) { return r.json(); })
+    .then(function (rows) {
+      rows = rows || [];
+      var tb = document.querySelector("#slowTable tbody");
+      tb.innerHTML = "";
+      document.getElementById("msg").innerHTML = "命中 <b>" + rows.length + "</b> 条"
+        + (rows.length >= limit ? "（已达 limit，可能还有更多，请调大 limit）" : "");
+      rows.forEach(function (row) {
+        var tr = document.createElement("tr");
+        tr.onclick = function () {
+          window.open("trace-view.html?traceid=" + encodeURIComponent(row.traceId), "_blank");
+        };
+        tr.innerHTML =
+          "<td>" + esc(row.traceId) + "</td>" +
+          "<td>" + esc(row.traceSegmentId) + "</td>" +
+          "<td>" + esc(row.service) + "</td>" +
+          "<td>" + esc(row.endpoint) + "</td>" +
+          "<td>" + esc(fmtTime(row.startTime)) + "</td>" +
+          "<td class='num-col'>" + esc(row.latency) + "</td>" +
+          "<td>" + (row.isError ? "<span class='expired'>Y</span>" : "N") + "</td>" +
+          "<td>" + (row.payloadExpired ? "<span class='expired'>过期</span>" : "OK") + "</td>";
+        tb.appendChild(tr);
+      });
+    })
+    .catch(function (e) { document.getElementById("msg").textContent = "查询失败: " + e; });
+}
+</script>
+</body>
+</html>

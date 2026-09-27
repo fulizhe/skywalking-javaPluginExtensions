@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.TreeMap;
 
+import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
@@ -91,18 +92,36 @@ public class TraceMetricsAggregator {
     private final Map<String, ExtremeTrace> extremeByEndpoint = new LinkedHashMap<String, ExtremeTrace>();
     /** "界值"怎么算由它说了算：现在是"取最大耗时那条"，留成接口是为了以后能加"超阈值/相对基线"策略，不用动聚合器。 */
     private final ExtremeTraceSelector extremeSelector;
+    /**
+     * 只读慢阈值解析器（可为 null）：按 operation/url 给出该请求的慢阈值，使指标慢判定复用告警 slow_rules。
+     * 解析器须只读、无副作用（不得触发规则命中计数、不得并入告警判定）。
+     */
+    private final SlowThresholdResolver slowThresholdResolver;
 
     public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
             final long defaultSlowThresholdMs) {
-        this(sink, defaultService, defaultSlowThresholdMs, new MaxDurationExtremeTraceSelector());
+        this(sink, defaultService, defaultSlowThresholdMs, new MaxDurationExtremeTraceSelector(), null);
     }
 
     public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
             final long defaultSlowThresholdMs, final ExtremeTraceSelector extremeSelector) {
+        this(sink, defaultService, defaultSlowThresholdMs, extremeSelector, null);
+    }
+
+    public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
+            final long defaultSlowThresholdMs, final SlowThresholdResolver slowThresholdResolver) {
+        this(sink, defaultService, defaultSlowThresholdMs, new MaxDurationExtremeTraceSelector(),
+                slowThresholdResolver);
+    }
+
+    public TraceMetricsAggregator(final MetricsSink sink, final String defaultService,
+            final long defaultSlowThresholdMs, final ExtremeTraceSelector extremeSelector,
+            final SlowThresholdResolver slowThresholdResolver) {
         this.sink = sink;
         this.defaultService = defaultService;
         this.defaultSlowThresholdMs = defaultSlowThresholdMs;
         this.extremeSelector = extremeSelector != null ? extremeSelector : new MaxDurationExtremeTraceSelector();
+        this.slowThresholdResolver = slowThresholdResolver;
     }
 
     /**
@@ -143,7 +162,10 @@ public class TraceMetricsAggregator {
             }
             final String endpoint = sanitizeEndpoint(entry.getOperationName());
             final String service = sanitizeService(segment.getService());
-            final boolean slow = duration >= defaultSlowThresholdMs;
+            final long slowThresholdMs = slowThresholdResolver != null
+                    ? slowThresholdResolver.thresholdMs(endpoint, tagValue(entry, "url"), defaultSlowThresholdMs)
+                    : defaultSlowThresholdMs;
+            final boolean slow = duration >= slowThresholdMs;
             // TODO 锁内每段 2 次 accumulate + 1 次 recordExtreme 共 3 组 map 操作，而同一把锁还被 memoryRows()/snapshot()/flushClosedBuckets 抢——遍历是没变，但每段的锁内成本比上次讨论时高了一档。若日后做极端值追溯，值得考虑它与聚合器是否共锁。
             synchronized (lock) {
                 accumulate(bucket, endpoint, service, duration, error, slow);
@@ -318,6 +340,20 @@ public class TraceMetricsAggregator {
         // a1：只认 Entry span（Entry 即根 span）。不能放宽到"parentSpanId==-1"的任意根 span，
         // 否则会把无上下文自成一段的 DB/pool 操作（根为 Local/Exit）与跨线程异步子段（根为 Local）误计为事务。
         return span != null && SpanType.Entry.equals(span.getSpanType());
+    }
+
+    /** 从入口 span 的 tag 中取 url（slow_rules 的 {@code url:} 规则用）；无则返回 null。 */
+    private static String tagValue(final SpanObject span, final String key) {
+        if (span == null || key == null) {
+            return null;
+        }
+        final List<KeyStringValuePair> tags = span.getTagsList();
+        for (int i = 0; i < tags.size(); i++) {
+            if (key.equals(tags.get(i).getKey())) {
+                return tags.get(i).getValue();
+            }
+        }
+        return null;
     }
 
     private static String sanitizeEndpoint(final String operationName) {

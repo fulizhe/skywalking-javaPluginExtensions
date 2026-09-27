@@ -274,7 +274,75 @@ public class H2TraceSegmentStorageTest {
         Assert.assertNotNull("payloadExpired present", recent.get(0).get("payloadExpired"));
     }
 
+    // ========== 全量持久层（normal 也入 H2；trace_level 列已删） ==========
+
+    @Test
+    public void normalAndErrorSegmentsBothPersisted() {
+        storage.storeLog(createLog("t-normal", "s1", 1000L, false));
+        storage.storeLog(createLog("t-error", "s2", 2000L, true));
+
+        final List<Map<String, Object>> recent = storage.recentTraces(10);
+        Assert.assertEquals("normal 也入 H2（全量，无收窄）", 2, recent.size());
+
+        boolean normalSeen = false;
+        boolean errorSeen = false;
+        for (Map<String, Object> r : recent) {
+            if ("t-normal".equals(r.get("traceId"))) {
+                normalSeen = true;
+                Assert.assertEquals("normal is_error=false", Boolean.FALSE, r.get("isError"));
+            }
+            if ("t-error".equals(r.get("traceId"))) {
+                errorSeen = true;
+                Assert.assertEquals("error is_error=true", Boolean.TRUE, r.get("isError"));
+            }
+        }
+        Assert.assertTrue("normal trace persisted", normalSeen);
+        Assert.assertTrue("error trace persisted", errorSeen);
+    }
+
+    // ========== 慢查询（endpoint + 阈值，行列表） ==========
+
+    @Test
+    public void querySlowTraces_filtersByEndpointAndLatencyDescending() {
+        storage.storeLog(createLog("t1", "s1", "GET:/slow", 1000L, 900L, false));
+        storage.storeLog(createLog("t2", "s2", "GET:/slow", 2000L, 5000L, true));
+        storage.storeLog(createLog("t3", "s3", "GET:/fast", 3000L, 9000L, false));
+
+        final List<Map<String, Object>> above1000 = storage.querySlowTraces("GET:/slow", 1000L, 50);
+        Assert.assertEquals("仅 GET:/slow 且 latency>=1000", 1, above1000.size());
+        Assert.assertEquals("t2", above1000.get(0).get("traceId"));
+        Assert.assertEquals(5000, ((Number) above1000.get(0).get("latency")).intValue());
+        Assert.assertEquals(Boolean.TRUE, above1000.get(0).get("isError"));
+        Assert.assertNotNull("payload 状态存在", above1000.get(0).get("payloadExpired"));
+
+        final List<Map<String, Object>> above100 = storage.querySlowTraces("GET:/slow", 100L, 50);
+        Assert.assertEquals("阈值 100 两条都命中，按 latency 降序", 2, above100.size());
+        Assert.assertEquals("t2", above100.get(0).get("traceId"));
+        Assert.assertEquals("t1", above100.get(1).get("traceId"));
+    }
+
+    @Test
+    public void querySlowTraces_blankEndpointOrZeroLimit_returnsEmpty() {
+        storage.storeLog(createLog("t1", "s1", "GET:/slow", 1000L, 900L, false));
+        Assert.assertTrue(storage.querySlowTraces("", 0L, 50).isEmpty());
+        Assert.assertTrue(storage.querySlowTraces(null, 0L, 50).isEmpty());
+        Assert.assertTrue(storage.querySlowTraces("GET:/slow", 0L, 0).isEmpty());
+    }
+
     // ========== helpers ==========
+
+    private static Log createLog(final String traceId, final String segmentId,
+            final String endpoint, final long startTime, final long latency, final boolean isError) {
+        final Log log = new Log();
+        log.setTraceId(traceId);
+        log.setTraceSegmentId(segmentId);
+        log.setService("test-service");
+        log.setServiceInstance("test-instance");
+        log.setIsSizeLimited(false);
+        log.setSpans(Collections.singletonList(
+                createSpan(0, -1, endpoint, "Entry", startTime, startTime + latency, isError)));
+        return log;
+    }
 
     private static Log createLog(final String traceId, final String segmentId,
             final long startTime, final boolean isError) {

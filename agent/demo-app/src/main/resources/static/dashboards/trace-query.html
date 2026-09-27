@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>H2 链路查询（人工验证）</title>
+<title>H2 链路查询（双源对照）</title>
 <style>
   body { font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif; margin: 16px; color: #222; }
   h1 { font-size: 18px; }
@@ -17,11 +17,14 @@
   tr:hover { background: #eef; }
   pre { background: #f7f7f7; border: 1px solid #ddd; padding: 10px; overflow: auto; max-height: 60vh; }
   .expired { color: #b00; font-weight: bold; }
+  .ok { color: #0a7a2f; font-weight: bold; }
   .muted { color: #888; }
+  .cols { display: flex; gap: 12px; flex-wrap: wrap; }
+  .col { flex: 1 1 420px; min-width: 0; }
 </style>
 </head>
 <body>
-<h1>H2 链路查询（人工验证：从 H2/环形文件取回整条链路）</h1>
+<h1>H2 链路查询 · 双源对照（H2 为准 vs 内存热层参照）</h1>
 <div class="row">
   最近 <input id="limit" type="number" value="20" min="1" max="200" style="width:80px"> 条
   <button onclick="loadRecent()">刷新列表</button>
@@ -36,11 +39,20 @@
 
 <div class="row">
   traceId: <input id="traceId" placeholder="点列表行自动填入，或手动粘贴">
-  <button onclick="loadTrace()">查询整条链路</button>
+  <button onclick="loadTrace()">双源对照</button>
   <a id="viewLink" href="trace-view.html" target="_blank" style="margin-left:8px">可视化视图 →</a>
 </div>
 <div id="traceMsg" class="muted"></div>
-<pre id="traceDetail" style="display:none"></pre>
+<div class="cols">
+  <div class="col">
+    <div class="muted">H2（为准）· logs = <span id="h2Count">-</span><span id="h2Expired"></span></div>
+    <pre id="traceDetail" style="display:none"></pre>
+  </div>
+  <div class="col">
+    <div class="muted">内存热层（参照）· logs = <span id="memCount">-</span></div>
+    <pre id="memoryDetail" style="display:none"></pre>
+  </div>
+</div>
 
 <script>
 function esc(s) {
@@ -81,17 +93,29 @@ function loadTrace() {
   var traceId = document.getElementById("traceId").value.trim();
   if (!traceId) { document.getElementById("traceMsg").textContent = "请输入 traceId"; return; }
   document.getElementById("viewLink").href = "trace-view.html?traceid=" + encodeURIComponent(traceId);
-  fetch("/inner/sw/trace-query?traceId=" + encodeURIComponent(traceId))
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      var logs = (data && data.logs) ? data.logs : [];
-      document.getElementById("traceMsg").innerHTML =
-        "logs = " + logs.length + (data && data.payloadExpired ? " <span class='expired'>（部分 payload 已过期）</span>" : "");
-      var pre = document.getElementById("traceDetail");
-      pre.style.display = "block";
-      pre.textContent = JSON.stringify(data, null, 2);
-    })
-    .catch(function (e) { document.getElementById("traceMsg").textContent = "查询失败: " + e; });
+  var q = encodeURIComponent(traceId);
+  Promise.all([
+    fetch("/inner/sw/trace-query?traceId=" + q).then(function (r) { return r.json(); }),
+    fetch("/inner/sw/trace-memory?traceId=" + q).then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var h2 = res[0] || {}, mem = res[1] || {};
+    var h2Logs = h2.logs || [], memLogs = mem.logs || [];
+    document.getElementById("h2Count").textContent = h2Logs.length;
+    document.getElementById("memCount").textContent = memLogs.length;
+    document.getElementById("h2Expired").innerHTML = h2.payloadExpired
+      ? " <span class='expired'>（部分 payload 已过期）</span>" : "";
+    var same = h2Logs.length === memLogs.length;
+    document.getElementById("traceMsg").innerHTML = same
+      ? "<span class='ok'>一致：H2 与内存 logs 条数相同（" + h2Logs.length + "）</span>"
+      : "<span class='expired'>差异：H2=" + h2Logs.length + " vs 内存=" + memLogs.length
+        + "（内存热层只保最近 N 条 traceId，可能已淘汰该 trace；以 H2 为准）</span>";
+    var pre = document.getElementById("traceDetail");
+    pre.style.display = "block";
+    pre.textContent = JSON.stringify(h2, null, 2);
+    var pre2 = document.getElementById("memoryDetail");
+    pre2.style.display = "block";
+    pre2.textContent = JSON.stringify(mem, null, 2);
+  }).catch(function (e) { document.getElementById("traceMsg").textContent = "查询失败: " + e; });
 }
 
 loadRecent();

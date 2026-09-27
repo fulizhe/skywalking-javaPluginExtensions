@@ -59,10 +59,22 @@ public class TraceParityStatusExposeInterceptor implements StaticMethodsAroundIn
                 final String traceId = (allArguments != null && allArguments.length > 0 && allArguments[0] != null)
                         ? String.valueOf(allArguments[0]) : null;
                 value = ReflectUtil.invoke(client, "getTraceView", traceId);
+            } else if ("getTraceViewFromMemory".equals(name)) {
+                final String traceId = (allArguments != null && allArguments.length > 0 && allArguments[0] != null)
+                        ? String.valueOf(allArguments[0]) : null;
+                value = ReflectUtil.invoke(client, "getTraceViewFromMemory", traceId);
             } else if ("recentTraces".equals(name)) {
                 final Integer limit = (allArguments != null && allArguments.length > 0 && allArguments[0] instanceof Integer)
                         ? (Integer) allArguments[0] : Integer.valueOf(20);
                 value = ReflectUtil.invoke(client, "getRecentTraces", limit);
+            } else if ("querySlowTraces".equals(name)) {
+                final String endpoint = (allArguments != null && allArguments.length > 0 && allArguments[0] != null)
+                        ? String.valueOf(allArguments[0]) : null;
+                final Integer minLatencyMs = (allArguments != null && allArguments.length > 1
+                        && allArguments[1] instanceof Integer) ? (Integer) allArguments[1] : Integer.valueOf(0);
+                final Integer limit = (allArguments != null && allArguments.length > 2
+                        && allArguments[2] instanceof Integer) ? (Integer) allArguments[2] : Integer.valueOf(50);
+                value = ReflectUtil.invoke(client, "getSlowTraces", endpoint, minLatencyMs, limit);
             } else {
                 value = ReflectUtil.invoke(client, "getParityStatus");
             }
@@ -74,7 +86,7 @@ public class TraceParityStatusExposeInterceptor implements StaticMethodsAroundIn
     }
 
     private static Object defaultFor(final String methodName) {
-        if ("recentTraces".equals(methodName)) {
+        if ("recentTraces".equals(methodName) || "querySlowTraces".equals(methodName)) {
             return Collections.emptyList();
         }
         return new HashMap<String, Object>();

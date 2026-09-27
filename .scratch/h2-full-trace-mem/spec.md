@@ -1,6 +1,6 @@
 # h2-full-trace-mem：全量 trace 入 H2 mem + 双源读口 + 慢查询页 + QPS + 删 trace_level + metrics 慢 A
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
@@ -165,3 +165,11 @@ Status: ready-for-agent
 - **验证回路**：`pwsh ./scripts/validate.ps1`（对外零行为变化）与 `pwsh ./scripts/validate-h2.ps1`（H2/指标专项）。demo 读口：`/inner/sw/trace-parity`、`/inner/sw/trace-query`、`/inner/sw/trace-memory`、`/inner/sw/trace-recent`、`/inner/sw/trace-slow`、`/inner/sw/metrics`、`/inner/sw/metrics/query`。
 - **环境**：agent `D:\apps\apache-skywalking-java-agent-9.4.0`；JDK8 `D:\apps\java\jdk1.8.0_92-64`；端口 9600 为用户压测占用，验证用其它端口。
 - **术语**（`CONTEXT.md`）：trace 持久层 / trace 内存热层 / 链路分级 / Trace 指标 / 宿主工具类 / 有界数据存储 / 验证回路。
+
+## Comments
+
+- 2026-09-27：实现完成（票 01–06）。
+  - **代码**：`SHADOW_MAX_ROWS` 默认 100000；`trace_segment` 删 `trace_level`（mem 启动 DROP+CREATE 干净重建）；`querySlowTraces`（`List<Map>` 行列表，endpoint+latency 降序）；`getTraceViewFromMemory` + `/inner/sw/trace-memory` + demo 双源对照；`/inner/sw/trace-slow` + `trace-slow.html`；metrics 桶行/聚合行/内存窗口注入 `qps`（分母按桶跨度，不写死 60）+ 大屏 QPS 列/卡片；只读 `SlowThresholdResolver` / `SlowRuleThresholdResolver`（包装 `RulesEngine.matchSlow`，不 `recordRuleHit`）注入聚合器做慢判定。
+  - **单测**：`mvn -o -pl logfile-reporter-plugin test` = 161/161 绿；新增 `MetricsRowTest`、`SlowRuleThresholdResolverTest`，扩聚合器（差异化慢阈值）与 storage（慢查询、normal 全量入 H2）断言。
+  - **验证回路**：`validate-h2.ps1` 扩断言（双源一致、慢查询降序命中、QPS 分母、metrics 差异化慢阈值）；`validate.ps1` 保持对外零行为变化。
+  - **文档**：统一方案 §10 勾选 Phase 2 / Phase 5 增强；插件 README 配置表补 `h2.shadow_max_rows` 等。

@@ -58,7 +58,31 @@ public class StatisticController {
     /** 按 traceId 从 H2/环形文件取回整条链路(与旧 data[traceId].logs 同契约),供人工查看 */
     @GetMapping("/inner/sw/trace-query")
     public Object traceQuery(@RequestParam("traceId") String traceId) {
-        Object result = SWTraceParityUtils.queryTrace(traceId);
+        return enrichTraceView(SWTraceParityUtils.queryTrace(traceId));
+    }
+
+    /** 从内存热层(KeyedLocalStore)按 traceId 取回整条链路,供与 H2 视图双源对照 */
+    @GetMapping("/inner/sw/trace-memory")
+    public Object traceMemory(@RequestParam("traceId") String traceId) {
+        return enrichTraceView(SWTraceParityUtils.getTraceViewFromMemory(traceId));
+    }
+
+    /** 最近 N 条 segment header(供挑选 traceId) */
+    @GetMapping("/inner/sw/trace-recent")
+    public Object traceRecent(@RequestParam(value = "limit", defaultValue = "20") int limit) {
+        return SWTraceParityUtils.recentTraces(limit);
+    }
+
+    /** 慢查询:按 endpoint + 耗时阈值返回慢段键值对行集合(供慢查询页表格与下钻) */
+    @GetMapping("/inner/sw/trace-slow")
+    public Object traceSlow(@RequestParam("endpoint") String endpoint,
+            @RequestParam(value = "minLatencyMs", defaultValue = "0") int minLatencyMs,
+            @RequestParam(value = "limit", defaultValue = "50") int limit) {
+        return SWTraceParityUtils.querySlowTraces(endpoint, minLatencyMs, limit);
+    }
+
+    /** 统一为链路视图补可读时间与组件名(spans 按 endTime 倒序);H2 与内存两侧共用 */
+    private Object enrichTraceView(Object result) {
         if (result instanceof Map) {
             loadComponentMapIfNeeded();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
@@ -75,12 +99,6 @@ public class StatisticController {
             }
         }
         return result;
-    }
-
-    /** 最近 N 条 segment header(供挑选 traceId) */
-    @GetMapping("/inner/sw/trace-recent")
-    public Object traceRecent(@RequestParam(value = "limit", defaultValue = "20") int limit) {
-        return SWTraceParityUtils.recentTraces(limit);
     }
 
     /** Trace 指标实时快照:/inner/sw/metrics 返回内存窗口分钟桶与运行计数(供大屏 KPI/当前窗口) */

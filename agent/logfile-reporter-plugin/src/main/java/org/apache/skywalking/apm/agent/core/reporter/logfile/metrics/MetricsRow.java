@@ -107,6 +107,14 @@ public class MetricsRow {
         return requestCount == 0L ? 0L : totalLatency / requestCount;
     }
 
+    /**
+     * QPS = 请求数 / 桶跨度秒。跨度由调用方按**分辨率**给出（分钟行 60、小时行 3600、
+     * 范围聚合行用查询范围跨度），因此本方法不写死 60；跨度 &le; 0 视为 0。
+     */
+    public double getQps(final long bucketSpanSeconds) {
+        return bucketSpanSeconds <= 0L ? 0d : (double) requestCount / (double) bucketSpanSeconds;
+    }
+
     /** JDK 原生 Map（供宿主工具类/大屏消费；分位缺失为 null）。 */
     public Map<String, Object> toMap() {
         final Map<String, Object> map = new LinkedHashMap<String, Object>();

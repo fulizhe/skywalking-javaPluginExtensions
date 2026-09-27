@@ -164,7 +164,7 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
       <h3 class="card-h" id="tableTitle">Endpoint 指标</h3>
       <table id="epTable" class="display" style="width:100%">
         <thead><tr>
-          <th>Endpoint</th><th>请求</th><th>错误率</th><th>P50</th><th>P95</th><th>P99</th><th>慢</th><th>趋势</th><th>分级</th>
+          <th>Endpoint</th><th>请求</th><th>QPS</th><th>错误率</th><th>P50</th><th>P95</th><th>P99</th><th>慢</th><th>趋势</th><th>分级</th>
         </tr></thead>
       </table>
       <div class="note" id="tableNote" style="display:none"></div>
@@ -223,12 +223,13 @@ var extremeByEndpoint = {};      // endpoint -> {traceId,durationMs,error,...}�
 var seriesCache = {};            // key: range|endpoint -> 单端点逐桶 rows
 var seriesInflight = {};         // key -> [callbacks]
 var trendChart=null, thrChart=null, detailChart=null, epTable=null;
-var SPARK_COL = 7;               // 趋势列在 columns 中的下标
+var SPARK_COL = 8;               // 趋势列在 columns 中的下标（新增 QPS 列后右移）
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
 function fmtInt(n){return n==null?"-":Number(n).toLocaleString("en-US");}
 function fmtMs(v){return v==null?"-":(v>=1000?(v/1000).toFixed(2)+" s":Math.round(v)+" ms");}
 function pct(v,d){return v==null?"-":(v*100).toFixed(d==null?2:d)+"%";}
+function fmtQps(v){return v==null?"-":(v>=100?Math.round(v):Number(v).toFixed(2));}
 function bucketMs(res){return res==="hour"?HOUR_MS:MINUTE_MS;}
 function hhmm(t){var d=new Date(t);return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
 function mmdd(t){var d=new Date(t);return (d.getMonth()+1)+"/"+d.getDate()+" "+hhmm(t);}
@@ -419,7 +420,7 @@ function renderTable(rows, truncated){
     var errRate = r.errRate||0, slowRate = r.slowRate||0;
     var level = levelOf(errRate, slowRate);
     return {
-      endpoint: r.endpoint, req: r.req||0, errRate: errRate,
+      endpoint: r.endpoint, req: r.req||0, qps: r.qps||0, errRate: errRate,
       p50: r.p50, p95: r.p95, p99: r.p99, slow: r.slow||0,
       level: level, spark: '<span class="muted">…</span>'
     };
@@ -438,6 +439,7 @@ function renderTable(rows, truncated){
       columns: [
         { data:"endpoint", render:function(d,t){ return t==="display" ? '<span class="mono" title="'+esc(d)+'">'+esc(d)+'</span>' : d; } },
         { data:"req", className:"num", render:function(d,t){ return t==="display" ? fmtInt(d) : d; } },
+        { data:"qps", className:"num", render:function(d,t){ return t==="display" ? fmtQps(d) : d; } },
         { data:"errRate", className:"num", render:function(d,t){ return t==="display" ? pct(d) : d; } },
         { data:"p50", className:"num", render:function(d,t){ return t==="display" ? fmtMs(d) : (d==null?0:d); } },
         { data:"p95", className:"num", render:function(d,t){ return t==="display" ? fmtMs(d) : (d==null?0:d); } },
@@ -519,12 +521,20 @@ function applyNavHighlight(){
   $("#epNav .ep").filter(function(){ return $(this).data("ep") === selectedEndpoint; }).addClass("sel");
 }
 
+function globalQps(rows){
+  var g=null;
+  rows.forEach(function(r){ if(r.endpoint==="*"){ g=r; } });
+  if(g){ return g.qps||0; }
+  var s=0; rows.forEach(function(r){ s+=r.qps||0; }); return s;
+}
+
 function renderKpis(rows, truncated){
   var req=0,err=0,slow=0;
   globalSeries.req.forEach(function(v,i){req+=v;err+=globalSeries.err[i];slow+=globalSeries.slow[i];});
   var n = globalSeries.labels.length; var i99 = n? n-1 : -1;
   var kpis = [
     ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 端点已截断":"")],
+    ["QPS", fmtQps(globalQps(rows)), rangeLabel()+" 平均"],
     ["错误率", pct(req?err/req:0), fmtInt(err)+" 次错误"],
     ["P95", i99>=0?fmtMs(globalSeries.p95[i99]):"-", "P99 "+(i99>=0?fmtMs(globalSeries.p99[i99]):"-")],
     ["慢调用", fmtInt(slow), pct(req?slow/req:0)+" 占比"],
@@ -543,9 +553,10 @@ function hideDetail(){ selectedEndpoint=null; applyHighlight(); $("#detailCard")
 function loadDetail(name){ ensureSeries(name, function(rows){ renderDetail(name, rows); }); }
 
 function aggSeries(rows){
-  var a={req:0,err:0,slow:0,total:0,max:0,sample:0,w50:0,w90:0,w95:0,w99:0,c:0};
+  var a={req:0,err:0,slow:0,qps:0,total:0,max:0,sample:0,w50:0,w90:0,w95:0,w99:0,c:0};
   rows.forEach(function(r){
     a.req+=r.requestCount||0; a.err+=r.errorCount||0; a.slow+=r.slowCount||0;
+    a.qps+=(r.qps||0);
     a.total+=r.totalLatency||0; a.max=Math.max(a.max,r.maxLatency||0); a.sample+=r.sampleCount||0;
     if(r.p50!=null){a.w50+=r.p50*r.requestCount; a.c+=r.requestCount;}
     if(r.p90!=null){a.w90+=r.p90*r.requestCount;}

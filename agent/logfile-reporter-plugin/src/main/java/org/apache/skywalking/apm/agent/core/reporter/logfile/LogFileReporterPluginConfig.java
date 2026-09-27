@@ -105,8 +105,8 @@ public class LogFileReporterPluginConfig {
                 /** 是否开启 debug 一致性比对（旧内存视图 vs H2），默认 false */
                 public static Boolean COMPARE_DEBUG = false;
 
-                /** H2 影子存储行数水位上限，默认 2000（建议 >= max_log_size） */
-                public static Integer SHADOW_MAX_ROWS = 2000;
+                /** H2 全量 trace 持久层行数水位上限，默认 100000（对应堆 ≈ 80MB；同一 mem 库，normal 也入） */
+                public static Integer SHADOW_MAX_ROWS = 100000;
 
                 /** 是否启用 H2 Web Console（默认关闭；仅测试环境开启，可执行任意 SQL） */
                 public static Boolean CONSOLE_ENABLED = false;

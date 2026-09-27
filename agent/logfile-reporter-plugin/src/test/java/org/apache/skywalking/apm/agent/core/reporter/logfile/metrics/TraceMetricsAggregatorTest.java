@@ -173,6 +173,35 @@ public class TraceMetricsAggregatorTest {
     }
 
     @Test
+    public void perEndpointSlowThresholdResolverOverridesDefault() {
+        final CollectingSink sink = new CollectingSink();
+        final SlowThresholdResolver resolver = new SlowThresholdResolver() {
+            @Override
+            public long thresholdMs(final String operation, final String url, final long defaultThresholdMs) {
+                if ("/rule8000".equals(operation)) {
+                    return 8000L;
+                }
+                if ("/rule9000".equals(operation)) {
+                    return 9000L;
+                }
+                return defaultThresholdMs;
+            }
+        };
+        final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS, resolver);
+        final long start = bucketStart(currentBucket()) + 1000L;
+
+        aggregator.onSegment(entry("/rule8000", start, start + 10000L, false));      // >=8000 → slow
+        aggregator.onSegment(entry("/rule8000", start + 1, start + 5000L, false));   // <8000 → normal（默认 3000 会误判 slow）
+        aggregator.onSegment(entry("/rule9000", start + 2, start + 5000L, false));   // <9000 → normal
+        aggregator.onSegment(entry("/norule", start + 3, start + 10000L, false));    // 回退默认 3000 → slow
+        aggregator.flushClosedBuckets(start + MINUTE_MS);
+
+        Assert.assertEquals("rule8000: 仅 10000ms 命中", 1L, row(sink.rows, "/rule8000").getSlowCount());
+        Assert.assertEquals("rule9000: 5000ms 不慢", 0L, row(sink.rows, "/rule9000").getSlowCount());
+        Assert.assertEquals("无规则端点回退默认阈值", 1L, row(sink.rows, "/norule").getSlowCount());
+    }
+
+    @Test
     public void percentilesNearestRank() {
         final CollectingSink sink = new CollectingSink();
         final TraceMetricsAggregator aggregator = new TraceMetricsAggregator(sink, SERVICE, SLOW_THRESHOLD_MS);

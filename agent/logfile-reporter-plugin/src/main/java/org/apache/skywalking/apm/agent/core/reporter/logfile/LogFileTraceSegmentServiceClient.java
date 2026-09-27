@@ -35,6 +35,7 @@ import org.apache.skywalking.apm.agent.core.logging.api.ILog;
 import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.agent.core.remote.TraceSegmentServiceClient;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.AsyncTraceAlertDispatcher;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.SlowRuleThresholdResolver;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsSink;
@@ -241,6 +242,29 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
+	 * 从内存热层（{@code KeyedLocalStore}）按 traceId 取回链路，供双源对照；与 H2 侧
+	 * {@code getTraceView} 同契约（{@code {logs:[...]}}）。读取只读快照，缺失时返回空 logs、不报错。
+	 */
+	public Map<String, Object> getTraceViewFromMemory(final String traceId) {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		if (traceStore == null || traceId == null) {
+			result.put("logs", Collections.emptyList());
+			return result;
+		}
+		final Map<String, Object> entry = traceStore.snapshot().get(traceId);
+		result.put("logs", entry != null ? entry.get("logs") : Collections.emptyList());
+		return result;
+	}
+
+	/** 按 endpoint + 阈值查慢段（供 {@code SWTraceParityUtils.querySlowTraces()} 经拦截器反射调用）。 */
+	public List<Map<String, Object>> getSlowTraces(final String endpoint, final int minLatencyMs, final int limit) {
+		if (traceSegmentStorage == null) {
+			return Collections.emptyList();
+		}
+		return traceSegmentStorage.querySlowTraces(endpoint, minLatencyMs, limit);
+	}
+
+	/**
 	 * Trace 指标实时快照（供 {@code SWMetricsUtils.statisticMetrics()} 经拦截器反射调用）。
 	 * <p>
 	 * 返回 JDK 原生 Map，不暴露 Agent 自定义类型；H2 不可用时仍返回内存累计快照（降级无损）。
@@ -404,8 +428,13 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			}
 		});
 		final int cap = Math.min(combined.size(), limit);
+		// QPS 分母 = 查询范围跨度秒（跨桶聚合行不能用单桶 60s）
+		final long rangeSeconds = TraceMetricsQuery.rangeSpanSeconds(fromMinute, toMinute);
 		for (int i = 0; i < cap; i++) {
-			rows.add(combined.get(i).toMap());
+			final MetricsRow r = combined.get(i);
+			final Map<String, Object> map = r.toMap();
+			map.put("qps", r.getQps(rangeSeconds));
+			rows.add(map);
 		}
 		result.put("resolution", resolution);
 		result.put("aggregate", Boolean.TRUE);
@@ -433,6 +462,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 					@SuppressWarnings("unchecked")
 					final Map<String, Object> row = new LinkedHashMap<String, Object>((Map<String, Object>) item);
 					row.put("bucketStart", bucketStartText("minute", asLong(row.get("timeBucket"), 0L)));
+					// QPS 分母 = 该行桶跨度秒（内存窗口为分钟桶）
+					row.put("qps", asLong(row.get("requestCount"), 0L)
+							/ (double) TraceMetricsQuery.bucketSpanSeconds("minute"));
 					out.add(row);
 				}
 			}
@@ -443,6 +475,8 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private static Map<String, Object> toBucketMap(final String resolution, final MetricsRow row) {
 		final Map<String, Object> map = row.toMap();
 		map.put("bucketStart", bucketStartText(resolution, row.getTimeBucket()));
+		// QPS 分母 = 该分辨率单桶跨度秒（分钟 60 / 小时 3600），不写死 60
+		map.put("qps", row.getQps(TraceMetricsQuery.bucketSpanSeconds(resolution)));
 		return map;
 	}
 
@@ -531,7 +565,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				}
 			}
 		};
-		this.metricsAggregator = new TraceMetricsAggregator(sink, Config.Agent.SERVICE_NAME, slowThresholdMs);
+		// metrics 慢判定复用告警 slow_rules（只读解析器：不触发规则命中计数、不改告警行为）
+		this.metricsAggregator = new TraceMetricsAggregator(sink, Config.Agent.SERVICE_NAME, slowThresholdMs,
+				SlowRuleThresholdResolver.fromConfig());
 		startMetricsFlushTimer();
 		LOGGER.info("### [Metrics] TraceMetricsAggregator initialized (service={}, slowThresholdMs={}, storageEnabled={}).",
 				Config.Agent.SERVICE_NAME, slowThresholdMs, traceSegmentStorage != null);
@@ -606,7 +642,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private void h2Config() {
 		if (LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.ENABLED) {
 			final int shadowMaxRows = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS != null
-					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS : 2000;
+					? LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.SHADOW_MAX_ROWS : 100000;
 			final boolean cappedEnabled = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_ENABLED != null
 					&& LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_ENABLED;
 			final String cappedFile = LogFileReporterPluginConfig.Plugin.LogFileReporter.H2.PAYLOAD_CAPPED_FILE != null

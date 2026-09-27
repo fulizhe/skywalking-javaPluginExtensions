@@ -2,6 +2,12 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.storage;
 
 final class H2SqlStatements {
 
+    /**
+     * mem 模式每次启动即重建：先 DROP 再 CREATE，保证删列（{@code trace_level}）即时生效、
+     * 无残留旧 schema；同 JVM 内多实例共享固定 mem 库时也保持一致结构（数据隔离由 {@code clear()} 负责）。
+     */
+    static final String DROP_SEGMENT_TABLE_SQL = "DROP TABLE IF EXISTS trace_segment";
+
     static final String CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS trace_segment ("
             + "id BIGINT AUTO_INCREMENT PRIMARY KEY, "
             + "trace_id VARCHAR(128) NOT NULL, "
@@ -13,7 +19,6 @@ final class H2SqlStatements {
             + "end_time BIGINT NOT NULL, "
             + "latency INT NOT NULL, "
             + "is_error BOOLEAN NOT NULL, "
-            + "trace_level VARCHAR(16), "
             + "payload_id BIGINT, "
             + "time_bucket BIGINT NOT NULL, "
             + "create_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
@@ -43,8 +48,8 @@ final class H2SqlStatements {
     static final String COUNT_AUDIT_SQL = "SELECT COUNT(*) FROM trace_parity_audit";
 
     static final String INSERT_SQL = "INSERT INTO trace_segment "
-            + "(trace_id, segment_id, service, service_instance, endpoint, start_time, end_time, latency, is_error, trace_level, payload_id, time_bucket) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            + "(trace_id, segment_id, service, service_instance, endpoint, start_time, end_time, latency, is_error, payload_id, time_bucket) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     static final String SELECT_ALL_SQL = "SELECT trace_id, payload_id FROM trace_segment ORDER BY start_time ASC";
 
@@ -52,6 +57,12 @@ final class H2SqlStatements {
 
     static final String SELECT_RECENT_SQL = "SELECT trace_id, segment_id, service, endpoint, start_time, latency, is_error, payload_id "
             + "FROM trace_segment ORDER BY id DESC LIMIT ?";
+
+    /**
+     * 慢查询：按 endpoint + 最小耗时阈值取段，按 latency 降序。段级 latency（段内 maxEnd-minStart）。
+     */
+    static final String SELECT_SLOW_SQL = "SELECT trace_id, segment_id, service, endpoint, start_time, latency, is_error, payload_id "
+            + "FROM trace_segment WHERE endpoint = ? AND latency >= ? ORDER BY latency DESC LIMIT ?";
 
     static final String COUNT_DISTINCT_SQL = "SELECT COUNT(DISTINCT trace_id) FROM trace_segment";
 

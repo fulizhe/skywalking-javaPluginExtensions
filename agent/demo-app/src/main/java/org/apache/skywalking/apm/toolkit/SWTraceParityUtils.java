@@ -36,4 +36,20 @@ public class SWTraceParityUtils {
     public static List<Map<String, Object>> recentTraces(int limit) {
         return Collections.emptyList();
     }
+
+    /**
+     * 从内存热层（KeyedLocalStore）按 traceId 取回整条链路（与 {@code queryTrace} 同契约），供双源对照。
+     * 无 agent 时返回空 Map;挂载 agent 后由拦截器接管。
+     */
+    public static Map<String, Object> getTraceViewFromMemory(String traceId) {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 按 endpoint + 耗时阈值查询慢段，返回键值对行集合（含 {@code latency}/{@code startTime} 等数值字段）。
+     * 无 agent 时返回空列表;挂载 agent 后由拦截器接管。
+     */
+    public static List<Map<String, Object>> querySlowTraces(String endpoint, int minLatencyMs, int limit) {
+        return Collections.emptyList();
+    }
 }

@@ -188,7 +188,7 @@ try {
         "-javaagent:$agentJar",
         "-Dskywalking.agent.keep_tracing=true",
         "-Dskywalking.plugin.logfilereporter.alert.enabled=true",
-        "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000",
+        "-Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000;operation:GET:/api/trace-alert-demo/slow=8000",
         "-Dskywalking.plugin.logfilereporter.alert.error_ignore_rules=operation:GET:/status/*=503,500,400",
         # H2 影子存储:默认已 enabled=true,显式声明便于日志可追溯
         "-Dskywalking.plugin.logfilereporter.h2.enabled=true",
@@ -327,6 +327,28 @@ try {
         try { $q = $qResp.Content | ConvertFrom-Json } catch { $q = $null }
         $logCount = if ($q -and $q.logs) { @($q.logs).Count } else { 0 }
         Assert "整条链路 logs > 0" ($logCount -gt 0) "tid=$tid logs=$logCount"
+
+        # 双源读口:内存热层按 traceId 取回,与 H2 条数对照
+        $memResp = Invoke-LocalHttp "/inner/sw/trace-memory?traceId=$tid"
+        Assert "内存侧按 traceId 查询 HTTP 200" ("$($memResp.StatusCode)" -eq "200") "status=$($memResp.StatusCode)"
+        $mem = $null; try { $mem = $memResp.Content | ConvertFrom-Json } catch { $mem = $null }
+        $memLogs = if ($mem -and $mem.logs) { @($mem.logs).Count } else { 0 }
+        Assert "双源一致(H2 logs == 内存 logs)" ($memLogs -eq $logCount) "h2=$logCount mem=$memLogs (内存热层可能已淘汰该 trace)"
+
+        # 慢查询读口:取该 trace 的 endpoint,阈值 0 → 该 endpoint 全部段,按 latency 降序
+        $ep = @($recent)[0].endpoint
+        $slowResp = Invoke-LocalHttp ("/inner/sw/trace-slow?endpoint=" + [uri]::EscapeDataString("$ep") + "&minLatencyMs=0&limit=50")
+        Assert "慢查询读口 HTTP 200" ("$($slowResp.StatusCode)" -eq "200") "status=$($slowResp.StatusCode)"
+        $slow = $null; try { $slow = $slowResp.Content | ConvertFrom-Json } catch { $slow = $null }
+        $slowCount = if ($slow) { @($slow).Count } else { 0 }
+        Assert "慢查询命中该 endpoint(阈值 0)" ($slowCount -gt 0) "endpoint=$ep count=$slowCount"
+        $slowDesc = $true; $prevLat = [long]::MaxValue
+        foreach ($s in @($slow)) {
+            $lat = [long]$s.latency
+            if ($lat -gt $prevLat) { $slowDesc = $false }
+            $prevLat = $lat
+        }
+        Assert "慢查询按 latency 降序" $slowDesc "endpoint=$ep"
     }
 
     # ---- 9c. Trace 指标(Phase 5) ----
@@ -366,6 +388,17 @@ try {
             }
         }
         Assert "口径自洽(error+slow<=request, sample<=request, p50<=p95<=p99)" $consistent $bad
+
+        # QPS 一等字段:分钟行 qps ≈ requestCount/60(分母用桶跨度)
+        $qpsOk = $true; $qpsBad = ""
+        foreach ($r in $qRows) {
+            if ($null -eq $r.qps) { $qpsOk = $false; $qpsBad = "缺 qps @$($r.timeBucket)"; continue }
+            $expectQps = [double]$r.requestCount / 60.0
+            if ([math]::Abs([double]$r.qps - $expectQps) -gt 0.001) {
+                $qpsOk = $false; $qpsBad = "qps=$($r.qps) expect=$expectQps @$($r.timeBucket)"
+            }
+        }
+        Assert "QPS=requestCount/桶跨度(分钟=60)" $qpsOk $qpsBad
     } else {
         $script:failures++
         Write-Host "[FAIL] 指标查询返回不可解析的 JSON"
@@ -393,6 +426,21 @@ try {
     $lim = $null; try { $lim = $limResp.Content | ConvertFrom-Json } catch { $lim = $null }
     $limCount = if ($lim) { @($lim.rows).Count } else { 0 }
     Assert "limit=1 截断生效" ($lim -and $limCount -le 1) "count=$limCount"
+
+    # ---- 9d. metrics 慢判定复用 slow_rules(差异化阈值,A 方案) ----
+    # /api/trace-alert-demo/slow 规则阈值=8000;本次发送 ~4000ms → 不应计 slow(默认阈值 3000 会误判)。
+    $slowRuleEp = "GET:/api/trace-alert-demo/slow"
+    $slowEpResp = Invoke-LocalHttp ("/inner/sw/metrics/query?endpoint=" + [uri]::EscapeDataString($slowRuleEp) + "&limit=1000")
+    $se = $null; try { $se = $slowEpResp.Content | ConvertFrom-Json } catch { $se = $null }
+    $seRows = if ($se -and $se.rows) { @($se.rows) } else { @() }
+    if ($seRows.Count -gt 0) {
+        $seReq = 0L; $seSlow = 0L
+        foreach ($r in $seRows) { $seReq += [long]$r.requestCount; $seSlow += [long]$r.slowCount }
+        Assert "差异化慢阈值端点已入指标(requestCount>0)" ($seReq -gt 0) "endpoint=$slowRuleEp requestCount=$seReq"
+        Assert "4000ms 命中 8000ms 规则 → 不计 slow(默认 3000 会误判)" ($seSlow -eq 0) "slowCount=$seSlow(期望 0)"
+    } else {
+        Write-Host "[WARN] 差异化慢阈值断言跳过:端点 $slowRuleEp 无指标行(可能 operationName 形态与假设不符)"
+    }
 
     # ---- 10. 结果 ----
     Write-Host ""

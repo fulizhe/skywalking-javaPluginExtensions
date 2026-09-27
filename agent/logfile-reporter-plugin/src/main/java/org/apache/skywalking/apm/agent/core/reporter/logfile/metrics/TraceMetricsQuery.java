@@ -51,4 +51,15 @@ public final class TraceMetricsQuery {
         }
         return Math.min(limit, LIMIT_MAX);
     }
+
+    /** 单桶跨度秒（{@code minute}=60、{@code hour}=3600），供 QPS 分母使用，避免写死 60。 */
+    public static long bucketSpanSeconds(final String resolution) {
+        return ("hour".equals(resolution) ? HOUR_MS : MINUTE_MS) / 1000L;
+    }
+
+    /** 范围跨度秒（按分钟桶计，含首尾）：供跨范围聚合行的 QPS 分母使用。 */
+    public static long rangeSpanSeconds(final long fromMinuteBucket, final long toMinuteBucket) {
+        final long buckets = toMinuteBucket - fromMinuteBucket + 1L;
+        return (buckets > 0L ? buckets : 0L) * (MINUTE_MS / 1000L);
+    }
 }

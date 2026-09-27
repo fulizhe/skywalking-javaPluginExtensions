@@ -106,7 +106,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     public H2TraceSegmentStorage(final boolean enabled, final int shadowMaxRows,
             final boolean cappedEnabled, final File cappedFile, final long cappedSizeBytes) {
         this.enabled = enabled;
-        this.shadowMaxRows = shadowMaxRows > 0 ? shadowMaxRows : 2000;
+        this.shadowMaxRows = shadowMaxRows > 0 ? shadowMaxRows : 100000;
         this.cappedStorage = initCappedStorage(cappedEnabled, cappedFile, cappedSizeBytes);
         this.connection = initConnection();
         if (enabled && connection != null) {
@@ -151,6 +151,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 throw new SQLException("H2 Driver.connect returned null for URL: " + JDBC_URL);
             }
             try (Statement stmt = conn.createStatement()) {
+                // mem 模式：先删再建，保证 schema 变更（删 trace_level）即时生效、无残留旧列
+                stmt.execute(H2SqlStatements.DROP_SEGMENT_TABLE_SQL);
                 stmt.execute(H2SqlStatements.CREATE_TABLE_SQL);
                 stmt.execute(H2SqlStatements.CREATE_INDEX_SQL);
                 stmt.execute(H2SqlStatements.CREATE_AUDIT_TABLE_SQL);
@@ -374,13 +376,12 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             ps.setLong(7, metrics.endTime);
             ps.setInt(8, metrics.latency);
             ps.setBoolean(9, metrics.isError);
-            ps.setString(10, null); // trace_level: Phase 1 可空
             if (payloadId >= 0) {
-                ps.setLong(11, payloadId);
+                ps.setLong(10, payloadId);
             } else {
-                ps.setNull(11, Types.BIGINT);
+                ps.setNull(10, Types.BIGINT);
             }
-            ps.setLong(12, metrics.timeBucket);
+            ps.setLong(11, metrics.timeBucket);
             ps.executeUpdate();
         }
     }
@@ -582,6 +583,37 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         row.put("payloadExpired", hasPayload && cappedStorage != null
                 && cappedStorage.isOverwritten(payloadId));
         return row;
+    }
+
+    /**
+     * 按 endpoint + 最小耗时阈值查询慢段。
+     * <p>
+     * 返回 <b>JDK 原生键值对行集合</b>（{@code List<Map<String,Object>>}，与 {@link #recentTraces} 同构）：
+     * 每行键 {@code traceId / traceSegmentId / service / endpoint / startTime / latency / isError / hasPayload / payloadExpired}
+     * （{@code startTime}、{@code latency} 为数值，可直接喂图表）。按 {@code latency} 降序、受 {@code limit} 截断。
+     * 异常就地捕获并返回已读到的部分，绝不外抛。
+     * </p>
+     */
+    public List<Map<String, Object>> querySlowTraces(final String endpoint, final long minLatencyMs, final int limit) {
+        final List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        if (connection == null || endpoint == null || endpoint.isEmpty() || limit <= 0) {
+            return out;
+        }
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.SELECT_SLOW_SQL)) {
+                ps.setString(1, endpoint);
+                ps.setLong(2, minLatencyMs);
+                ps.setInt(3, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        out.add(toRecentTraceRow(rs));
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("querySlowTraces", e);
+            }
+        }
+        return out;
     }
 
     /**

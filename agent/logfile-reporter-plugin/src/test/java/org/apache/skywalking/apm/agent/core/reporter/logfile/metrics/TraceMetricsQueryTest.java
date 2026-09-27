@@ -25,4 +25,17 @@ public class TraceMetricsQueryTest {
         Assert.assertEquals(500, TraceMetricsQuery.clampLimit(500));
         Assert.assertEquals(TraceMetricsQuery.LIMIT_MAX, TraceMetricsQuery.clampLimit(5000));
     }
+
+    @Test
+    public void bucketSpanSeconds_byResolution() {
+        Assert.assertEquals(60L, TraceMetricsQuery.bucketSpanSeconds("minute"));
+        Assert.assertEquals(3600L, TraceMetricsQuery.bucketSpanSeconds("hour"));
+    }
+
+    @Test
+    public void rangeSpanSeconds_inclusiveMinutes() {
+        Assert.assertEquals(60L, TraceMetricsQuery.rangeSpanSeconds(100L, 100L));
+        Assert.assertEquals(120L, TraceMetricsQuery.rangeSpanSeconds(100L, 101L));
+        Assert.assertEquals(0L, TraceMetricsQuery.rangeSpanSeconds(101L, 100L));
+    }
 }

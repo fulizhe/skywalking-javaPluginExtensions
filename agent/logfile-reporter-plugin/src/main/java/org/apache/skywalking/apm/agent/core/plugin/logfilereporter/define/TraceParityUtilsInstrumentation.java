@@ -22,6 +22,8 @@ public class TraceParityUtilsInstrumentation extends ClassStaticMethodsEnhancePl
     private static final String METHOD_STATISTIC = "statisticParity";
     private static final String METHOD_QUERY = "queryTrace";
     private static final String METHOD_RECENT = "recentTraces";
+    private static final String METHOD_MEMORY = "getTraceViewFromMemory";
+    private static final String METHOD_SLOW = "querySlowTraces";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.agent.core.plugin.logfilereporter.TraceParityStatusExposeInterceptor";
 
     @Override
@@ -34,7 +36,8 @@ public class TraceParityUtilsInstrumentation extends ClassStaticMethodsEnhancePl
         return new StaticMethodsInterceptPoint[] { new StaticMethodsInterceptPoint() {
             @Override
             public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                return named(METHOD_STATISTIC).or(named(METHOD_QUERY)).or(named(METHOD_RECENT));
+                return named(METHOD_STATISTIC).or(named(METHOD_QUERY)).or(named(METHOD_RECENT))
+                        .or(named(METHOD_MEMORY)).or(named(METHOD_SLOW));
             }
 
             @Override
