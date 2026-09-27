@@ -141,6 +141,43 @@ curl.exe -s --noproxy "*" http://127.0.0.1:<port>/inner/sw/trace-query?traceId=<
 
 ---
 
+## 7.1 首轮实测结果（2026-09-27）
+
+环境：demo-app（JDK 8、agent 9.4.0）、H2 mem、`shadow_max_rows=200000`、环形 128MB、**无告警**；负载 mixed ~90 req/s（含 28% 错误）。
+
+| 量 | 实测 | 依据 |
+|---|---|---|
+| **S** | **≈ 662 B/段** | `currIndex=17,488,865 B ÷ h2Size=26,419`（两次负载一致） |
+| **K** | **≈ 1** | h2Size ≈ 请求数（demo 单段/请求） |
+| **R** | **≈ 804 B/行（0.78 KB）** | 同实例两点差分：`Δheap 18.07 MB ÷ Δrows 23,587` |
+| 写队列/错误 | `writeQueueDropped=0`、`h2ErrorCount=0` | `/inner/sw/trace-parity` |
+
+**据实测重算**：
+- `N=100,000` 行 → 堆 ≈ 100k × 804B ≈ **80 MB**（+ H2 引擎开销）。
+- `F=128 MiB` → 容纳 `134.2e6 ÷ 662B ≈ 203,000` 段 **> N** → **F 有余量，选择成立**（normal 为主时 S 更低、更宽裕）。
+- "用满 128 MiB 文件"的 header 堆 ≈ `134.2e6 × (804/662) ≈ 163 MB`（较 §4 估算 ~200MB 略低）。
+
+> R 用同实例两点差分（其余缓存有界稳定），略含 metrics 行增长 → 属**偏上估计**。S 的偏高来自 28% 错误段（真实 normal 为主会更低）。
+
+### 7.2 QPS（关键指标，实测）
+
+QPS 目前**非一等字段**，只有 `requestCount`/分钟桶可反推。本轮分 endpoint（负载 31.5s、2831 请求）：
+
+| endpoint | count | QPS(count/活跃31.5s) |
+|---|---:|---:|
+| GET:/hello | 444 | ~14.1 |
+| GET:/fullSample | 414 | ~13.1 |
+| GET:/longTimeTask | 411 | ~13.0 |
+| GET:/api/trace-alert-demo/error | 405 | ~12.9 |
+| GET:/api/trace-alert-demo/http500 | 392 | ~12.4 |
+| GET:/queryDbByJdbc | 392 | ~12.4 |
+| GET:/queryDbByMybatis | 368 | ~11.7 |
+| **全局** | 2831 | **~89.9** |
+
+⚠️ 分母：整分钟桶才 `/60`；不满一分钟或跨分钟要用**桶内活跃秒数**（否则低估，如上表按 `/60` 只得 ~7/s，实际 ~13/s）。
+
+---
+
 ## 8. 与既有文档/决策的关系
 
 - `ADR-03` — header/索引与 payload 分离、payload 过期降级：本笔记沿用其语义，不新增机制。
