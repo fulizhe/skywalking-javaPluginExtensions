@@ -3,7 +3,6 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.RefType;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentReference;
@@ -11,8 +10,6 @@ import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
 import org.junit.Assert;
 import org.junit.Test;
-
-import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
 
 /**
  * {@link SegmentLogConverter} 的 refs 转换单测。
@@ -104,47 +101,5 @@ public class SegmentLogConverterTest {
         Assert.assertEquals(1, refs.size());
         Assert.assertEquals("CrossProcess", refs.get(0).get("refType"));
         Assert.assertEquals("parent-seg", refs.get(0).get("parentTraceSegmentId"));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    public void tags_keepLegacyJsonKeys_andRoundTrip() {
-        final SpanObject span = SpanObject.newBuilder()
-                .setSpanId(0)
-                .setParentSpanId(-1)
-                .setOperationName("entry-op")
-                .setSpanType(SpanType.Entry)
-                .addTags(KeyStringValuePair.newBuilder().setKey("http.status_code").setValue("503").build())
-                .build();
-        final SegmentObject segment = SegmentObject.newBuilder()
-                .setTraceId("trace-t")
-                .setTraceSegmentId("seg-t")
-                .setService("svc")
-                .setServiceInstance("inst")
-                .addSpans(span)
-                .build();
-
-        final Log log = SegmentLogConverter.toLog(segment);
-        final List<Log.Tag> tags = log.getSpans().get(0).getTagList();
-        Assert.assertEquals(1, tags.size());
-        Assert.assertEquals("http.status_code", tags.get(0).getKey());
-        Assert.assertEquals("503", tags.get(0).getValue());
-
-        // JSON 键名必须保持 tag-key / tag-value（前端与读回兼容）
-        final String json = new Gson().toJson(log.toMap());
-        Assert.assertTrue(json, json.contains("\"tag-key\":\"http.status_code\""));
-        Assert.assertTrue(json, json.contains("\"tag-value\":\"503\""));
-
-        // toMap 直传（元素为 Tag）→ fromMap 还原
-        final List<Log.Tag> direct = Log.fromMap(log.toMap()).getSpans().get(0).getTagList();
-        Assert.assertEquals(1, direct.size());
-        Assert.assertEquals("http.status_code", direct.get(0).getKey());
-
-        // JSON 解析（元素为 Map）→ fromMap 还原
-        final Map<String, Object> parsed = new Gson().fromJson(json, Map.class);
-        final List<Log.Tag> fromJson = Log.fromMap(parsed).getSpans().get(0).getTagList();
-        Assert.assertEquals(1, fromJson.size());
-        Assert.assertEquals("http.status_code", fromJson.get(0).getKey());
-        Assert.assertEquals("503", fromJson.get(0).getValue());
     }
 }

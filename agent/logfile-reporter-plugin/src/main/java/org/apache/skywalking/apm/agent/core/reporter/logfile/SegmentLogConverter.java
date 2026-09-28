@@ -63,11 +63,14 @@ public final class SegmentLogConverter {
         return spanInfo;
     }
 
-    private static List<Log.Tag> tagsToTagList(final List<KeyStringValuePair> tags) {
-        final List<Log.Tag> tagList = new ArrayList<Log.Tag>();
+    private static List<Map<String, Object>> tagsToTagList(final List<KeyStringValuePair> tags) {
+        final List<Map<String, Object>> tagList = new ArrayList<Map<String, Object>>();
         if (tags != null) {
             for (final KeyStringValuePair tag : tags) {
-                tagList.add(new Log.Tag(tag.getKey(), tag.getValue()));
+                final Map<String, Object> tagMap = new HashMap<String, Object>();
+                tagMap.put("tag-key", tag.getKey());
+                tagMap.put("tag-value", tag.getValue());
+                tagList.add(tagMap);
             }
         }
         return tagList;

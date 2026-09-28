@@ -51,13 +51,13 @@
 | --- | --- | --- | --- |
 | **P0** | 复用 INSERT `PreparedStatement`（**A，待做**）；`enforceRowCap` 由"每行 `MAX(id)`"改节流（**B，已完成 2026-09-28**） | 每段一次 SQL 解析/规划 + 一次全表查询 + `ResultSet`/`Statement` | 低 / 低 |
 | **P1** | 去 `toMap()`→GSON String→`getBytes` 三段大副本，**流式直写进 gzip**（手工 JSON writer 或 `Gson.toJson(obj, Writer)` 包 gzip 流） | 一段 payload 级的对象图 + 大 String + byte[] + BAOS 扩容拷贝 + GSON 反射 | 中高 / 中（须保住 JSON→`Map` 回读兼容） |
-| **P2** | `tagsToTagList` 去"每 tag 一个 HashMap"（**已完成 2026-09-28**）；logs 去 `stream().map().collect()`（**已完成**） | 按 tag 数线性增长的 HashMap；每段一条 stream 管道 | 低 / 低 |
+| **P2** | logs 去 `stream().map().collect()`（**保留，已完成 2026-09-28**）；`tagsToTagList` 去"每 tag 一个 HashMap"（**已回退 2026-09-28**，见 §7） | 每段一条 stream 管道 | 低 / 低 |
 | **P3** | gzip：单写线程复用 `Deflater`/buffer + level `BEST_SPEED`(1) + 小载荷阈值（<512B 裸存） | 每次新建 Deflater/BAOS 扩容；level 6 的多余压缩 | 中 / 中（`GZIPOutputStream.close()` 会 `end()` Deflater，需子类化/复用 Deflater） |
 | **P4** | 去 `TextFormat.printToString` 每条 log 一个 String | 仅 error/slow 段显著 | 中 / 中（低频，暂不动） |
 
 **备注**
 - P1 若直接从 protobuf/`Log` 手工写 JSON，可顺带吃掉 §3 的 `toLog` 对象图与 P4。
-- `PAYLOAD_CAPPED_ENABLED=false`（`LogFileReporterPluginConfig.java:117`）是**完全落盘 payload**，**不是"落盘但不压缩"**；目前**没有"裸存但保留 payload"的开关**，P3 的裸存档需要新增块标志位。
+- `PAYLOAD_CAPPED_ENABLED=true`（`LogFileReporterPluginConfig.java:118`，**默认即 true**）→ payload 落环形文件并 gzip 压缩；`false` → **完全不落 payload**（不是"落盘但不压缩"）。目前**没有"裸存但保留 payload"的开关**，P3 的裸存档需要新增块标志位。
 
 ## 5. 建议的进攻顺序
 
@@ -77,7 +77,7 @@
 
 - **2026-09-27**：讨论后**先不动**——没有证据表明 gzip 是主因；优先量化，再做 P0/P2 低风险项，P1 次之，gzip 参数化最后。
 - **2026-09-28**：落地 **P0-B**——`enforceRowCap` 按行数节流（写死每 1024 行校验一次），省掉逐行的 `MAX(id)` 查询与 `Statement`/`ResultSet` 分配；代价是表最多短暂超水位 1024 行（软上限）。选择硬编码不引入配置项，TODO 已留在 `enforceRowCap`。**P0-A（复用 INSERT `PreparedStatement`）暂缓**：其收益需实测（H2 有 per-session 编译缓存），且要额外守住"锁内使用 / `clearParameters` / 出错重建"三条纪律。
-- **2026-09-28**：落地 **P2**。①logs：`stream().map().collect()` 改手工预分配 `ArrayList` 循环（`TextFormat.printToString` 仍在，P4 另说）。②tags：不再"每 tag 一个 `HashMap`"，改用轻量 POJO `Log.Tag` + `@SerializedName("tag-key"/"tag-value")`，Gson 直接写字段（不再走 `entrySet`）；`Log.fromMap` 兼容还原"直传 Tag"与"Gson 解析出的 Map"两种来源。JSON 键名不变，新增单测锁定。经评估：自定义 2 槽 `Map` 会引入更差的瞬时 entry 分配，故不走该路。
+- **2026-09-28**：落地 **P2**。①logs：`stream().map().collect()` 改手工预分配 `ArrayList` 循环（`TextFormat.printToString` 仍在，P4 另说）——**保留**。②tags：曾改用轻量 POJO `Log.Tag` + `@SerializedName("tag-key"/"tag-value")`（Gson 直写字段、不走 `entrySet`）；**同日回退**。回退原因：`@SerializedName` 是 Gson 专属，内存热层读口 `/statistic`（Spring `@RestController`）走 **Jackson**，按 getter 名序列化成 `{key,value}`，破坏 `tag-key/tag-value` 契约（`trace-view.html` 的 Span 详情显示 `undefined: undefined`）；H2 读口走 Gson 所以表现为"H2 正常、内存异常"。结论：**对外 JSON 契约不能用序列化器专属注解承载**；tags 仍用 `List<Map>`（键名天然固定），放弃该小收益。经评估自定义 2 槽 `Map` 也会引入更差的瞬时 entry 分配，不走。
 
 ## 8. 参考
 

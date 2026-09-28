@@ -1,5 +1,7 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.alert;
 
+import java.util.Map;
+
 import org.apache.skywalking.apm.agent.core.reporter.logfile.Log;
 
 /**
@@ -18,9 +20,10 @@ final class TraceSpanUtils {
         if (span == null || key == null || span.getTagList() == null) {
             return null;
         }
-        for (Log.Tag tag : span.getTagList()) {
-            if (key.equals(tag.getKey())) {
-                return tag.getValue();
+        for (Map<String, Object> tag : span.getTagList()) {
+            if (key.equals(tag.get("tag-key"))) {
+                final Object value = tag.get("tag-value");
+                return value == null ? null : String.valueOf(value);
             }
         }
         return null;

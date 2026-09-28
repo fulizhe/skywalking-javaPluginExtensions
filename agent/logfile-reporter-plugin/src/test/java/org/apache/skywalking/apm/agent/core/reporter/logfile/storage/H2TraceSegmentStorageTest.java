@@ -372,7 +372,7 @@ public class H2TraceSegmentStorageTest {
         span.setSpanLayer("HTTP");
         span.setComponentId(1);
         span.setIsError(isError);
-        span.setTagList(new ArrayList<Log.Tag>());
+        span.setTagList(new ArrayList<Map<String, Object>>());
         span.setLogList(new ArrayList<String>());
         return span;
     }
