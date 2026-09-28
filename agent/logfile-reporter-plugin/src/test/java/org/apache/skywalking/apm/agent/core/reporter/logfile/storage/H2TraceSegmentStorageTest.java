@@ -162,21 +162,24 @@ public class H2TraceSegmentStorageTest {
         storage = new H2TraceSegmentStorage(true, 3, true, new File(cappedDir, "payload2.capped.db"), 1024L * 1024L);
         storage.clear();
 
-        // Store 5 segments with 5 different traceIds
-        storage.storeLog(createLog("t1", "s1", 1000L, false));
-        storage.storeLog(createLog("t2", "s2", 2000L, false));
-        storage.storeLog(createLog("t3", "s3", 3000L, false));
-        storage.storeLog(createLog("t4", "s4", 4000L, false));
-        storage.storeLog(createLog("t5", "s5", 5000L, false));
+        // 水位校验按行数节流（enforceRowCap 中每 1024 行一次），故需写满一个间隔才触发；
+        // 触发后仅保留最后 shadowMaxRows(=3) 行（t1022 ~ t1024）。
+        final int capCheckInterval = 1024;
+        for (int i = 1; i <= capCheckInterval; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
 
-        // After cap enforcement, only the last 3 traceIds should remain
         Assert.assertEquals("size should be capped to 3", 3, storage.size());
         final Map<String, Map<String, Object>> snapshot = storage.snapshot();
         Assert.assertFalse("t1 should be evicted", snapshot.containsKey("t1"));
-        Assert.assertFalse("t2 should be evicted", snapshot.containsKey("t2"));
-        Assert.assertTrue("t3 should remain", snapshot.containsKey("t3"));
-        Assert.assertTrue("t4 should remain", snapshot.containsKey("t4"));
-        Assert.assertTrue("t5 should remain", snapshot.containsKey("t5"));
+        Assert.assertFalse("t" + (capCheckInterval - 3) + " should be evicted",
+                snapshot.containsKey("t" + (capCheckInterval - 3)));
+        Assert.assertTrue("t" + (capCheckInterval - 2) + " should remain",
+                snapshot.containsKey("t" + (capCheckInterval - 2)));
+        Assert.assertTrue("t" + (capCheckInterval - 1) + " should remain",
+                snapshot.containsKey("t" + (capCheckInterval - 1)));
+        Assert.assertTrue("t" + capCheckInterval + " should remain",
+                snapshot.containsKey("t" + capCheckInterval));
     }
 
     // ========== disabled storage ==========

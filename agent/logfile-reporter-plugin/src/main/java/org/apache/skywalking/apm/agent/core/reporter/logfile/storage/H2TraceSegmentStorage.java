@@ -78,6 +78,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     private final BlockingQueue<TraceSegment> writeQueue;
     private volatile boolean writerRunning;
     private Thread writerThread;
+    /** 已成功写入 trace 表的行数；仅由写线程在 {@code synchronized(this)} 内自增，用于水位校验节流。 */
+    private long insertCount;
     private final AtomicLong writeQueueDropped = new AtomicLong(0);
     private final AtomicInteger inFlight = new AtomicInteger(0);
     private static final int WRITE_QUEUE_CAPACITY = 4096;
@@ -617,9 +619,19 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     }
 
     /**
-     * 行数水位上限：超过 {@link #shadowMaxRows} 后按 {@code id} 水位节流清理。
+     * 行数水位上限：每 1024 行校验一次，超过 {@link #shadowMaxRows} 后按 {@code id} 水位清理。
+     * <p>
+     * 节流后表最多短暂超过水位 1024 行（软上限，随后收敛），
+     * 换取省掉绝大多数行插入附带的 {@code MAX(id)} 查询与对象分配。
+     * </p>
      */
     private void enforceRowCap() {
+        // 写死 1024：逐行做水位校验会让每段 trace 都多一次 MAX(id) 查询（SQL 往返 + Statement/ResultSet 分配），
+        // 按行数节流后这层开销趋近于 0；代价仅是最多短暂超水位 1024 行，对影子表是可接受的软上限。
+        // TODO: 后续如仍需进一步省，可改为「计数 + drainLoop 空闲时搭便车」，或把该间隔抽成配置项。
+        if (++insertCount % 1024 != 0) {
+            return;
+        }
         enforceCap(shadowMaxRows, H2SqlStatements.MAX_ID_SQL, H2SqlStatements.DELETE_CAP_SQL, "enforceRowCap");
     }
 
