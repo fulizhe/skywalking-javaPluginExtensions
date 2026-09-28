@@ -7,7 +7,7 @@ import org.junit.Test;
 public class MetricsRowTest {
 
     private static MetricsRow row(final long requestCount) {
-        return new MetricsRow("svc", "GET:/a", 100L, requestCount, 0L, 0L, 0L, 0L, -1, -1, -1, -1, 0);
+        return new MetricsRow("GET:/a", 100L, requestCount, 0L, 0L, 0L, 0L, -1, -1, -1, -1, 0);
     }
 
     @Test

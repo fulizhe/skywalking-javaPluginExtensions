@@ -17,7 +17,7 @@ public class TraceMetricsRollupTest {
     private static MetricsRow row(final String endpoint, final long bucket, final long req,
             final long err, final long slow, final long total, final long max,
             final int p50, final int p90, final int p95, final int p99, final int sample) {
-        return new MetricsRow("svc", endpoint, bucket, req, err, slow, total, max, p50, p90, p95, p99, sample);
+        return new MetricsRow(endpoint, bucket, req, err, slow, total, max, p50, p90, p95, p99, sample);
     }
 
     @Test

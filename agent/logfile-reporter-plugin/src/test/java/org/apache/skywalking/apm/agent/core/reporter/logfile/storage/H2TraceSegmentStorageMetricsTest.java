@@ -19,8 +19,6 @@ import org.junit.Test;
  */
 public class H2TraceSegmentStorageMetricsTest {
 
-    private static final String SVC = "demo-app";
-
     private H2TraceSegmentStorage storage;
 
     @Before
@@ -39,7 +37,7 @@ public class H2TraceSegmentStorageMetricsTest {
     private static MetricsRow row(final String endpoint, final long bucket, final long request,
             final long error, final long slow, final long total, final long max,
             final int p50, final int p90, final int p95, final int p99, final int sample) {
-        return new MetricsRow(SVC, endpoint, bucket, request, error, slow, total, max, p50, p90, p95, p99, sample);
+        return new MetricsRow(endpoint, bucket, request, error, slow, total, max, p50, p90, p95, p99, sample);
     }
 
     @Test

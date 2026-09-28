@@ -91,7 +91,6 @@ public final class TraceMetricsRollup {
     }
 
     private static MetricsRow merge(final List<MetricsRow> group, final long bucket, final String endpoint) {
-        String service = null;
         long request = 0L;
         long error = 0L;
         long slow = 0L;
@@ -102,9 +101,6 @@ public final class TraceMetricsRollup {
         long c50 = 0L, c90 = 0L, c95 = 0L, c99 = 0L;
         boolean has50 = true, has90 = true, has95 = true, has99 = true;
         for (MetricsRow row : group) {
-            if (service == null) {
-                service = row.getService();
-            }
             request += row.getRequestCount();
             error += row.getErrorCount();
             slow += row.getSlowCount();
@@ -143,7 +139,7 @@ public final class TraceMetricsRollup {
         final int p90 = (has90 && c90 > 0L) ? (int) (w90 / c90) : -1;
         final int p95 = (has95 && c95 > 0L) ? (int) (w95 / c95) : -1;
         final int p99 = (has99 && c99 > 0L) ? (int) (w99 / c99) : -1;
-        return new MetricsRow(service, endpoint, bucket, request, error, slow, total, max,
+        return new MetricsRow(endpoint, bucket, request, error, slow, total, max,
                 p50, p90, p95, p99, sample);
     }
 }

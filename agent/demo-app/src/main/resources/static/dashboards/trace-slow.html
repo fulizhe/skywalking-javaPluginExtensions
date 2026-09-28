@@ -36,7 +36,7 @@
 </div>
 <table id="slowTable">
   <thead>
-    <tr><th>traceId</th><th>segmentId</th><th>service</th><th>endpoint</th><th>startTime</th><th class="num-col">latency(ms)</th><th>error</th><th>payload</th></tr>
+    <tr><th>traceId</th><th>segmentId</th><th>endpoint</th><th>startTime</th><th class="num-col">latency(ms)</th><th>error</th><th>payload</th></tr>
   </thead>
   <tbody></tbody>
 </table>
@@ -73,7 +73,6 @@ function loadSlow() {
         tr.innerHTML =
           "<td>" + esc(row.traceId) + "</td>" +
           "<td>" + esc(row.traceSegmentId) + "</td>" +
-          "<td>" + esc(row.service) + "</td>" +
           "<td>" + esc(row.endpoint) + "</td>" +
           "<td>" + esc(fmtTime(row.startTime)) + "</td>" +
           "<td class='num-col'>" + esc(row.latency) + "</td>" +

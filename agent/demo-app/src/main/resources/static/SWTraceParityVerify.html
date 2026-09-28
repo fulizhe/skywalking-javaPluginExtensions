@@ -121,7 +121,7 @@
         </div>
         <div class="sqlblock">
             <div class="sql-title">3. 最近 20 条明细(看真实链路行)</div>
-            <pre>SELECT id, trace_id, segment_id, service, endpoint, start_time, latency, is_error
+            <pre>SELECT id, trace_id, segment_id, endpoint, start_time, latency, is_error
 FROM trace_segment
 ORDER BY id DESC
 LIMIT 20;</pre>

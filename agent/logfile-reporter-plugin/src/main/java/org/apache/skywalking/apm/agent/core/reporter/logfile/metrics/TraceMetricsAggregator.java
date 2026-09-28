@@ -168,8 +168,8 @@ public class TraceMetricsAggregator {
             final boolean slow = duration >= slowThresholdMs;
             // TODO 锁内每段 2 次 accumulate + 1 次 recordExtreme 共 3 组 map 操作，而同一把锁还被 memoryRows()/snapshot()/flushClosedBuckets 抢——遍历是没变，但每段的锁内成本比上次讨论时高了一档。若日后做极端值追溯，值得考虑它与聚合器是否共锁。
             synchronized (lock) {
-                accumulate(bucket, endpoint, service, duration, error, slow);
-                accumulate(bucket, GLOBAL_ENDPOINT, service, duration, error, slow);
+                accumulate(bucket, endpoint, duration, error, slow);
+                accumulate(bucket, GLOBAL_ENDPOINT, duration, error, slow);
                 // 追溯：按 endpoint 记下最极端那一次的 traceId（本期=最大耗时），供读口回溯到具体链路
                 recordExtreme(endpoint, service, segment.getTraceId(), duration, error, startTime);
             }
@@ -299,7 +299,7 @@ public class TraceMetricsAggregator {
         return extremeSelector.name();
     }
 
-    private void accumulate(final long bucket, final String endpoint, final String service, final long duration,
+    private void accumulate(final long bucket, final String endpoint, final long duration,
             final boolean error, final boolean slow) {
         Map<String, Accumulator> byKey = buckets.get(bucket);
         if (byKey == null) {
@@ -315,7 +315,7 @@ public class TraceMetricsAggregator {
             accumulator = byKey.get(key);
         }
         if (accumulator == null) {
-            accumulator = new Accumulator(service);
+            accumulator = new Accumulator();
             byKey.put(key, accumulator);
         }
         if (accumulator.isSampleSaturated()) {
@@ -331,7 +331,7 @@ public class TraceMetricsAggregator {
 
     private MetricsRow toRow(final long bucket, final String endpoint, final Accumulator accumulator) {
         final int[] percentiles = accumulator.percentiles();
-        return new MetricsRow(accumulator.service, endpoint, bucket, accumulator.requestCount, accumulator.errorCount,
+        return new MetricsRow(endpoint, bucket, accumulator.requestCount, accumulator.errorCount,
                 accumulator.slowCount, accumulator.totalLatency, accumulator.maxLatency, percentiles[0], percentiles[1],
                 percentiles[2], percentiles[3], accumulator.sampleCount);
     }
@@ -384,8 +384,6 @@ public class TraceMetricsAggregator {
      */
     private static final class Accumulator {
 
-        /** 这个接口属于哪个服务：记账本第一条样本是哪个服务带进来的，就固定写它为那个（后面来的样本不会改名）。 */
-        private final String service;
         /** 这个接口在这一分钟总共来了多少次请求。每次都算，不做 traceId 去重，正常请求也计入。 */
         private long requestCount;
         /** 其中出错多少次：一次请求里任何一个 span 报过错，就记成"错了一次"。 */
@@ -402,10 +400,6 @@ public class TraceMetricsAggregator {
         private final long[] samples = new long[MAX_SAMPLES_PER_KEY];
         /** 池子里现在放了多少条样本（= 见过数取 5000 封顶）。既表示"水池水位"，又是算分位时要排序的有效长度。 */
         private int sampleCount;
-
-        Accumulator(final String service) {
-            this.service = service;
-        }
 
         /**
          * 吸收一次观测：各项计数自增、维护最大，再把时长投入蓄水池。

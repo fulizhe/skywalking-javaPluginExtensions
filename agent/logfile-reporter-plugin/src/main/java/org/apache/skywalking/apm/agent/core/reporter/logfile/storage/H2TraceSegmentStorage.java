@@ -370,19 +370,17 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.INSERT_SQL)) {
             ps.setString(1, log.getTraceId());
             ps.setString(2, log.getTraceSegmentId());
-            ps.setString(3, log.getService());
-            ps.setString(4, log.getServiceInstance());
-            ps.setString(5, metrics.endpoint);
-            ps.setLong(6, metrics.startTime);
-            ps.setLong(7, metrics.endTime);
-            ps.setInt(8, metrics.latency);
-            ps.setBoolean(9, metrics.isError);
+            ps.setString(3, metrics.endpoint);
+            ps.setLong(4, metrics.startTime);
+            ps.setLong(5, metrics.endTime);
+            ps.setInt(6, metrics.latency);
+            ps.setBoolean(7, metrics.isError);
             if (payloadId >= 0) {
-                ps.setLong(10, payloadId);
+                ps.setLong(8, payloadId);
             } else {
-                ps.setNull(10, Types.BIGINT);
+                ps.setNull(8, Types.BIGINT);
             }
-            ps.setLong(11, metrics.timeBucket);
+            ps.setLong(9, metrics.timeBucket);
             ps.executeUpdate();
         }
     }
@@ -572,7 +570,6 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         final Map<String, Object> row = new LinkedHashMap<String, Object>();
         row.put("traceId", rs.getString("trace_id"));
         row.put("traceSegmentId", rs.getString("segment_id"));
-        row.put("service", rs.getString("service"));
         row.put("endpoint", rs.getString("endpoint"));
         row.put("startTime", rs.getLong("start_time"));
         row.put("latency", rs.getInt("latency"));
@@ -676,19 +673,18 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         synchronized (this) {
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
                 for (MetricsRow r : rows) {
-                    ps.setString(1, r.getService());
-                    ps.setString(2, r.getEndpoint());
-                    ps.setLong(3, r.getTimeBucket());
-                    ps.setLong(4, r.getRequestCount());
-                    ps.setLong(5, r.getErrorCount());
-                    ps.setLong(6, r.getSlowCount());
-                    ps.setLong(7, r.getTotalLatency());
-                    ps.setLong(8, r.getMaxLatency());
-                    setNullableInt(ps, 9, r.getP50());
-                    setNullableInt(ps, 10, r.getP90());
-                    setNullableInt(ps, 11, r.getP95());
-                    setNullableInt(ps, 12, r.getP99());
-                    ps.setInt(13, r.getSampleCount());
+                    ps.setString(1, r.getEndpoint());
+                    ps.setLong(2, r.getTimeBucket());
+                    ps.setLong(3, r.getRequestCount());
+                    ps.setLong(4, r.getErrorCount());
+                    ps.setLong(5, r.getSlowCount());
+                    ps.setLong(6, r.getTotalLatency());
+                    ps.setLong(7, r.getMaxLatency());
+                    setNullableInt(ps, 8, r.getP50());
+                    setNullableInt(ps, 9, r.getP90());
+                    setNullableInt(ps, 10, r.getP95());
+                    setNullableInt(ps, 11, r.getP99());
+                    ps.setInt(12, r.getSampleCount());
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -812,7 +808,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     }
 
     private MetricsRow toMetricsRow(final ResultSet rs) throws SQLException {
-        return new MetricsRow(rs.getString("service"), rs.getString("endpoint"), rs.getLong("time_bucket"),
+        return new MetricsRow(rs.getString("endpoint"), rs.getLong("time_bucket"),
                 rs.getLong("request_count"), rs.getLong("error_count"), rs.getLong("slow_count"),
                 rs.getLong("total_latency"), rs.getLong("max_latency"),
                 nullableInt(rs, "p50"), nullableInt(rs, "p90"), nullableInt(rs, "p95"), nullableInt(rs, "p99"),

@@ -150,11 +150,12 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
   <div class="main">
     <div class="head">
       <h2 id="title">Trace 指标</h2>
-      <span class="meta"><span class="dot"></span>实时 · 轮询 5s</span>
+      <span class="meta" id="pollStatus"><span class="dot"></span>实时 · 轮询 5s</span>
       <span class="seg" id="ranges">
         <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
       </span>
       <span class="meta" id="updatedAt">-</span>
+      <button class="btn" id="pollToggle" title="暂停 / 继续 5s 自动刷新">⏸ 停止轮询</button>
     </div>
     <div class="err-banner" id="errBanner"></div>
     <div class="kpi-row" id="kpis"></div>
@@ -227,6 +228,7 @@ var seriesCache = {};            // key: range|endpoint -> 单端点逐桶 rows
 var seriesInflight = {};         // key -> [callbacks]
 var trendChart=null, thrChart=null, detailChart=null, epTable=null;
 var SPARK_COL = 8;               // 趋势列在 columns 中的下标（新增 QPS 列后右移）
+var refreshTimer = null;         // 5s 轮询定时器（可经「停止轮询」暂停）
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
 function fmtInt(n){return n==null?"-":Number(n).toLocaleString("en-US");}
@@ -688,8 +690,18 @@ $(function(){
   $("#diffClose").on("click", closeDiff);
   $("#diffMask").on("click", function(e){ if(e.target === this) closeDiff(); });
   $(document).on("keydown", function(e){ if(e.key === "Escape") closeDiff(); });
+  // 5s 轮询开关：暂停后不再请求读口，按钮与状态同步切换
+  function setPolling(on){
+    if(refreshTimer){ clearInterval(refreshTimer); refreshTimer = null; }
+    if(on){ refreshTimer = setInterval(refresh, 5000); }
+    document.getElementById("pollToggle").textContent = on ? "⏸ 停止轮询" : "▶ 开始轮询";
+    document.getElementById("pollStatus").innerHTML = on
+      ? '<span class="dot"></span>实时 · 轮询 5s'
+      : '<span class="dot" style="background:var(--warn)"></span>已暂停';
+  }
+  $("#pollToggle").on("click", function(){ var on = !refreshTimer; if(on){ refresh(); } setPolling(on); });
   refresh();
-  setInterval(refresh, 5000);
+  setPolling(true);
 });
 </script>
 </body>
