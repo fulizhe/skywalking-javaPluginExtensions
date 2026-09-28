@@ -49,6 +49,9 @@ public final class SegmentLogConverter {
         spanInfo.setSpanLayer(span.getSpanLayer().toString());
         spanInfo.setComponentId(span.getComponentId());
         spanInfo.setIsError(span.getIsError());
+        // 手工预分配循环取代 getLogsList().stream().map(TextFormat::printToString).collect(toList())：
+        // 省掉每 span 一套 stream 管道（Stream/中间节点/Collector 闭包）与 collect 触发的 ArrayList 扩容；
+        // 产物不变（顺序、元素与 List<String> 类型一致）。TextFormat 转换仍在（见优化清单 P4）。
         final List<org.apache.skywalking.apm.network.language.agent.v3.Log> logs = span.getLogsList();
         final List<String> logList = new ArrayList<String>(logs.size());
         for (final org.apache.skywalking.apm.network.language.agent.v3.Log entry : logs) {
