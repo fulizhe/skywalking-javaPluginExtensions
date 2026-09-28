@@ -30,6 +30,7 @@ import org.apache.skywalking.apm.commons.datacarrier.consumer.IConsumer;
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SegmentReference;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 
 /**
@@ -246,6 +247,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		spanInfo.setLogList(span.getLogsList().stream().map(TextFormat::printToString).collect(Collectors.toList()));
 		// 处理tag集合，假设tag为键值对结构
 		spanInfo.setTagList(tagsToTagList(span.getTagsList()));
+		spanInfo.setRefs(refsToRefList(span.getRefsList()));
 		return spanInfo;
 	}
 
@@ -261,6 +263,26 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			}
 		}
 		return tagList;
+	}
+
+	/** refs 转为 List<Map<String, Object>>，便于单测与复用。 */
+	private List<Map<String, Object>> refsToRefList(List<SegmentReference> refs) {
+		List<Map<String, Object>> refList = new ArrayList<>();
+		if (refs != null) {
+			for (SegmentReference ref : refs) {
+				Map<String, Object> refMap = new HashMap<>();
+				refMap.put("refType", ref.getRefType().name());
+				refMap.put("traceId", ref.getTraceId());
+				refMap.put("parentTraceSegmentId", ref.getParentTraceSegmentId());
+				refMap.put("parentSpanId", ref.getParentSpanId());
+				refMap.put("parentService", ref.getParentService());
+				refMap.put("parentServiceInstance", ref.getParentServiceInstance());
+				refMap.put("parentEndpoint", ref.getParentEndpoint());
+				refMap.put("networkAddressUsedAtPeer", ref.getNetworkAddressUsedAtPeer());
+				refList.add(refMap);
+			}
+		}
+		return refList;
 	}
 
 	/**

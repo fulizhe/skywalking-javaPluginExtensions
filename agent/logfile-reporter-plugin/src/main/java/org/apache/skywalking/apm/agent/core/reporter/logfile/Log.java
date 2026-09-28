@@ -114,6 +114,7 @@ public class Log {
                 spanMap.put("logsCount", span.getLogsCount());
                 spanMap.put("logsList", span.getLogList());
                 spanMap.put("tagList", span.getTagList());
+                spanMap.put("refs", span.getRefs());
                 spanMaps.add(spanMap);
             }
         }
@@ -149,6 +150,7 @@ public class Log {
         private boolean isError;
         private List<Map<String, Object>> tagList;
         private List<String> logList;
+        private List<Map<String, Object>> refs;
 
         // Getter方法
         public int getSpanId() {
@@ -186,6 +188,9 @@ public class Log {
 		}
 		public List<String> getLogList() {
 			return logList;
+		}
+		public List<Map<String, Object>> getRefs() {
+			return refs;
 		}  		
 
         // Setter方法
@@ -221,6 +226,9 @@ public class Log {
 		}  
 		public void setLogList(List<String> collect) {
 			this.logList=collect;
+		}
+		public void setRefs(List<Map<String, Object>> refs) {
+			this.refs = refs;
 		}
 
         @SuppressWarnings("unchecked")
@@ -259,6 +267,10 @@ public class Log {
             final Object tagList = map.get("tagList");
             if (tagList instanceof List) {
                 spanInfo.setTagList((List<Map<String, Object>>) tagList);
+            }
+            final Object refs = map.get("refs");
+            if (refs instanceof List) {
+                spanInfo.setRefs((List<Map<String, Object>>) refs);
             }
             final Object logList = map.get("logsList");
             if (logList instanceof List) {
