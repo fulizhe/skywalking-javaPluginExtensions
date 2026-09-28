@@ -1,8 +1,11 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import org.apache.skywalking.apm.dependencies.com.google.gson.annotations.SerializedName;
 
 /**
  * 存储Trace Segment及其Span信息的日志对象
@@ -148,7 +151,7 @@ public class Log {
         private String spanLayer;
         private int componentId;
         private boolean isError;
-        private List<Map<String, Object>> tagList;
+        private List<Tag> tagList;
         private List<String> logList;
         private List<Map<String, Object>> refs;
 
@@ -183,7 +186,7 @@ public class Log {
         public int getLogsCount() {
         	return Objects.isNull(this.logList) ? 0 : this.logList.size();        	
         }
-		public List<Map<String, Object>> getTagList() {
+		public List<Tag> getTagList() {
 			return tagList;
 		}
 		public List<String> getLogList() {
@@ -221,7 +224,7 @@ public class Log {
         public void setIsError(boolean isError) {
             this.isError = isError;
         }
-		public void setTagList(List<Map<String, Object>> tagList) {
+		public void setTagList(List<Tag> tagList) {
 			this.tagList = tagList;
 		}  
 		public void setLogList(List<String> collect) {
@@ -266,7 +269,7 @@ public class Log {
             }
             final Object tagList = map.get("tagList");
             if (tagList instanceof List) {
-                spanInfo.setTagList((List<Map<String, Object>>) tagList);
+                spanInfo.setTagList(toTagList((List<Object>) tagList));
             }
             final Object refs = map.get("refs");
             if (refs instanceof List) {
@@ -283,6 +286,24 @@ public class Log {
             return value == null ? null : String.valueOf(value);
         }
 
+        /**
+         * 把 {@code tagList} 原始元素（可能是 {@link Tag}，或 Gson 解析出的 {@code Map}）统一为 {@link Tag} 列表，
+         * 兼容 {@link #toMap()} 直传与 JSON 解析两条来源。
+         */
+        @SuppressWarnings("unchecked")
+        private static List<Tag> toTagList(final List<Object> raw) {
+            final List<Tag> tags = new ArrayList<Tag>(raw.size());
+            for (final Object item : raw) {
+                if (item instanceof Tag) {
+                    tags.add((Tag) item);
+                } else if (item instanceof Map) {
+                    final Map<String, Object> map = (Map<String, Object>) item;
+                    tags.add(new Tag(asString(map.get("tag-key")), asString(map.get("tag-value"))));
+                }
+            }
+            return tags;
+        }
+
         @Override
         public String toString() {
             return "SpanInfo{" +
@@ -290,13 +311,51 @@ public class Log {
                     ", operationName='" + operationName + '\'' +
                     ", startTime=" + startTime +
                     ", endTime=" + endTime +
-                    ", spanType=" + spanType +
-                    ", spanLayer=" + spanLayer +
+                    ", spanType='" + spanType + '\'' +
+                    ", spanLayer='" + spanLayer + '\'' +
                     ", componentId=" + componentId +
                     ", isError=" + isError +
                     '}';
         }
 
 
+    }
+
+    /**
+     * 单个 tag 的轻量载体，取代"每 tag 一个 HashMap"（HashMap 自带 16 槽表 + Node）。
+     * <p>
+     * 字段名用 {@link SerializedName} 保持 JSON 键不变（{@code tag-key}/{@code tag-value}），
+     * Gson 直接写字段，不再经过 Map 的 entrySet；{@code Log.fromMap} 会兼容还原 Gson 解析出的 Map。
+     * </p>
+     */
+    public static class Tag {
+        @SerializedName("tag-key")
+        private String key;
+        @SerializedName("tag-value")
+        private String value;
+
+        public Tag() {
+        }
+
+        public Tag(final String key, final String value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(final String key) {
+            this.key = key;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(final String value) {
+            this.value = value;
+        }
     }
 }

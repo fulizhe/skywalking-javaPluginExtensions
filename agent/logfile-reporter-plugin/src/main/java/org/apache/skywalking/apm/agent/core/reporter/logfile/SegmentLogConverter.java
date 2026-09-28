@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
@@ -50,20 +49,22 @@ public final class SegmentLogConverter {
         spanInfo.setSpanLayer(span.getSpanLayer().toString());
         spanInfo.setComponentId(span.getComponentId());
         spanInfo.setIsError(span.getIsError());
-        spanInfo.setLogList(span.getLogsList().stream().map(TextFormat::printToString).collect(Collectors.toList()));
+        final List<org.apache.skywalking.apm.network.language.agent.v3.Log> logs = span.getLogsList();
+        final List<String> logList = new ArrayList<String>(logs.size());
+        for (final org.apache.skywalking.apm.network.language.agent.v3.Log entry : logs) {
+            logList.add(TextFormat.printToString(entry));
+        }
+        spanInfo.setLogList(logList);
         spanInfo.setTagList(tagsToTagList(span.getTagsList()));
         spanInfo.setRefs(refsToRefList(span.getRefsList()));
         return spanInfo;
     }
 
-    private static List<Map<String, Object>> tagsToTagList(final List<KeyStringValuePair> tags) {
-        final List<Map<String, Object>> tagList = new ArrayList<Map<String, Object>>();
+    private static List<Log.Tag> tagsToTagList(final List<KeyStringValuePair> tags) {
+        final List<Log.Tag> tagList = new ArrayList<Log.Tag>();
         if (tags != null) {
             for (final KeyStringValuePair tag : tags) {
-                final Map<String, Object> tagMap = new HashMap<String, Object>();
-                tagMap.put("tag-key", tag.getKey());
-                tagMap.put("tag-value", tag.getValue());
-                tagList.add(tagMap);
+                tagList.add(new Log.Tag(tag.getKey(), tag.getValue()));
             }
         }
         return tagList;

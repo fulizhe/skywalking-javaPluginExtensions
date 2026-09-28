@@ -196,12 +196,9 @@ public class TraceEvaluatorTest {
         return span;
     }
 
-    private List<Map<String, Object>> tag(final String key, final String value) {
-        final Map<String, Object> tag = new HashMap<String, Object>();
-        tag.put("tag-key", key);
-        tag.put("tag-value", value);
-        final List<Map<String, Object>> tags = new ArrayList<Map<String, Object>>();
-        tags.add(tag);
+    private List<Log.Tag> tag(final String key, final String value) {
+        final List<Log.Tag> tags = new ArrayList<Log.Tag>();
+        tags.add(new Log.Tag(key, value));
         return tags;
     }
 }
