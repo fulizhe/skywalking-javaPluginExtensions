@@ -1,0 +1,6 @@
+.git
+.codegraph
+.omo
+.scratch
+**/target
+**/*.log

@@ -1,0 +1,77 @@
+# 持续压测编排:demo-app(带 agent 常驻) + stress(无限循环压测)。
+#
+# 用法(在 agent/demo-app 下):
+#   docker compose up --build -d
+#   docker compose logs -f stress        # 每 10s 一行 [progress]:吞吐 + plugin 计数 + heap
+#   docker compose down                  # 停止并删除容器(volume 保留)
+#
+# 观测点:stress 日志里 plugin= 段(rowsUpserted/lateDropped/sampleOverflow/
+# endpointOverflow/persistErrors/aggregateErrors)是否异常增长、heap= 是否持续攀升;
+# demo-app 侧另见 docker compose logs -f demo-app 与 /opt/skywalking-agent/logs/。
+name: demo-app-stability
+
+services:
+  demo-app:
+    build:
+      context: ../..
+      dockerfile: agent/demo-app/Dockerfile
+    image: demo-app-agent:9.4.0
+    restart: unless-stopped
+    ports:
+      - "9600:9600"
+    environment:
+      WebPort: "9600"
+    # 默认纯指标实例(alert off)。要连告警一起压,在 -D...h2.enabled 之后追加:
+    #   - -Dskywalking.plugin.logfilereporter.alert.enabled=true
+    #   - -Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000
+    command:
+      - java
+      - -Xms512m
+      - -Xmx512m
+      - -javaagent:/opt/skywalking-agent/skywalking-agent.jar
+      - -Dskywalking.agent.keep_tracing=true
+      - -Dskywalking.plugin.logfilereporter.h2.enabled=true
+      - -Dskywalking.plugin.logfilereporter.metrics.enabled=true
+      - -jar
+      - /opt/demo-app/target/demo-app-1.0.0.jar
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9600/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  stress:
+    image: demo-app-agent:9.4.0
+    restart: unless-stopped
+    depends_on:
+      demo-app:
+        condition: service_healthy
+    volumes:
+      - m2-cache:/root/.m2
+      # 与镜像构建时同一份 mirror 配置,复用 /root/.m2 预热缓存,避免首跑重复下载
+      - ../settings.xml:/opt/demo-app/settings.xml:ro
+    command:
+      - mvn
+      - -s
+      - /opt/demo-app/settings.xml
+      - -f
+      - /opt/demo-app/pom.xml
+      - test
+      - -Dtest=HttpLoadTest
+      - -Dloadtest=true
+      - -Dloadtest.baseUrl=http://demo-app:9600
+      - -Dloadtest.durationSec=-1
+      - -Dloadtest.threads=16
+      - -Dloadtest.progressSec=10
+      - -Dloadtest.paths=/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  m2-cache:
