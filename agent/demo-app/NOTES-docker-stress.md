@@ -84,3 +84,17 @@ docker compose down
 6. **资源上限**：demo-app `-Xms512m -Xmx512m` + `mem_limit: 1g`，用固定堆更容易看出内存趋势。
 7. **H2 需要显式开启**：`-Dskywalking.plugin.logfilereporter.h2.enabled=true`，
    否则 `status/storage` 相关读口可能为空。
+8. **H2 Web Console 远程访问受 Host 白名单限制**：compose 已开插件内置控制台
+   （`h2.console_enabled=true`，端口 8092）。本地 `http://127.0.0.1:8092` 正常，
+   但用宿主 IP（如 `http://172.16.1.108:8092`）会返回 `HTTP 404` + 响应体
+   `Host 172.16.1.108 not found`。原因是 H2 2.1.212 的 `WebThread.checkHost` 只放行
+   server 自身地址、`localhost`/`127.0.0.1` 与 `webExternalNames` 列表；插件传的
+   `-webAllowOthers` 只管 socket 层是否接受非本机连接，并**不**解除该 Host 校验
+   （容器内自身地址是容器 IP，故宿主 IP 不在白名单）。
+   - **临时绕过（无需重建）**：SSH 本地端口转发
+     `ssh -L 8092:127.0.0.1:8092 root@172.16.1.108`，浏览器访问
+     `http://localhost:8092`（Host 为 localhost，放行）；命令行验证可用
+     `curl -H 'Host: localhost' http://172.16.1.108:8092`（应 200）。
+   - **根治**：给控制台传 `-webExternalNames=<host>[,<host>...]`。当前插件
+     `startConsole` 写死参数、未暴露该项，需新增配置（如
+     `h2.console_external_names`）后重建镜像。
