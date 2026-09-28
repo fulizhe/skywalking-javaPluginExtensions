@@ -19,6 +19,11 @@ services:
     restart: unless-stopped
     ports:
       - "9600:9600"
+      # 额外的 H2 Web Console(插件内置,见下方 h2.console_enabled):
+      # 直接浏览插件 H2 影子库 sw_trace_segment,与 /inner/sw/trace-* JSON 读口、
+      # 内存热层对照排查。登录 JDBC URL: jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1
+      # 用户 sa / 空密码。
+      - "8092:8092"
     environment:
       WebPort: "9600"
     # 默认纯指标实例(alert off)。要连告警一起压,在 -D...h2.enabled 之后追加:
@@ -31,6 +36,9 @@ services:
       - -javaagent:/opt/skywalking-agent/skywalking-agent.jar
       - -Dskywalking.agent.keep_tracing=true
       - -Dskywalking.plugin.logfilereporter.h2.enabled=true
+      # 额外的 H2 Web Console(默认关闭):http://127.0.0.1:8092 浏览 sw_trace_segment
+      - -Dskywalking.plugin.logfilereporter.h2.console_enabled=true
+      - -Dskywalking.plugin.logfilereporter.h2.console_port=8092
       - -Dskywalking.plugin.logfilereporter.metrics.enabled=true
       - -jar
       - /opt/demo-app/target/demo-app-1.0.0.jar
