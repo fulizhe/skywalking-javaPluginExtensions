@@ -182,6 +182,13 @@ final class H2SqlStatements {
     static final String SELECT_ACTIVE_BUCKETS_HOUR_SQL = "SELECT endpoint, COUNT(DISTINCT time_bucket) AS active "
             + "FROM trace_metrics_hour WHERE request_count > 0 AND time_bucket BETWEEN ? AND ? GROUP BY endpoint";
 
+    /** 范围内 H2 已落库的桶集合：供聚合读口剔除内存中与已翻转账重叠的桶，避免重复计数。 */
+    static final String SELECT_METRICS_MINUTE_BUCKETS_SQL =
+            "SELECT DISTINCT time_bucket FROM trace_metrics_minute WHERE time_bucket BETWEEN ? AND ?";
+
+    static final String SELECT_METRICS_HOUR_BUCKETS_SQL =
+            "SELECT DISTINCT time_bucket FROM trace_metrics_hour WHERE time_bucket BETWEEN ? AND ?";
+
     static final String DELETE_ALL_METRICS_MINUTE_SQL = "DELETE FROM trace_metrics_minute";
 
     static final String DELETE_ALL_METRICS_HOUR_SQL = "DELETE FROM trace_metrics_hour";

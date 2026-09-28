@@ -412,10 +412,15 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 				? new ArrayList<MetricsRow>(traceSegmentStorage.aggregateMetricRows(resolution, queryFrom, queryTo, limit))
 				: new ArrayList<MetricsRow>();
 		final boolean truncated = agg.size() >= limit;
-		// 并入内存实时窗口（分钟分辨率），让当前未翻转的桶也计入表格
+		// H2 已落库的桶：内存窗口会保留近几分钟（含已翻转账），并入时须剔除，否则与 SQL SUM 重复计数。
+		final Set<Long> h2Buckets = ("minute".equals(resolution) && metricsAggregator != null && traceSegmentStorage != null)
+				? traceSegmentStorage.distinctMetricBuckets("minute", queryFrom, queryTo)
+				: Collections.<Long>emptySet();
+		// 并入内存实时窗口（分钟分辨率）：只补 H2 尚无的桶（即当前未翻转的那一分钟）
 		if (metricsAggregator != null && "minute".equals(resolution)) {
 			for (MetricsRow r : metricsAggregator.memoryRows()) {
-				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute) {
+				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute
+						&& !h2Buckets.contains(Long.valueOf(r.getTimeBucket()))) {
 					agg.add(r);
 				}
 			}
@@ -438,6 +443,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			final Set<String> seen = new HashSet<String>();
 			for (MetricsRow r : metricsAggregator.memoryRows()) {
 				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute && r.getRequestCount() > 0
+						&& !h2Buckets.contains(Long.valueOf(r.getTimeBucket()))
 						&& seen.add(r.getEndpoint() + "@" + r.getTimeBucket())) {
 					final Integer cur = active.get(r.getEndpoint());
 					active.put(r.getEndpoint(), Integer.valueOf((cur == null ? 0 : cur.intValue()) + 1));

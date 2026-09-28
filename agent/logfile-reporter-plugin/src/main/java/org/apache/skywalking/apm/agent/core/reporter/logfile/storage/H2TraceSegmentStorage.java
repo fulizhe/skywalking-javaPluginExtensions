@@ -13,10 +13,12 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -802,6 +804,33 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 }
             } catch (SQLException e) {
                 recordError("activeBucketCounts", e);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 范围内 H2 已落库的桶集合（供聚合读口剔除内存中与已翻转账重叠的桶，避免重复计数）。
+     * 返回 JDK 原生 {@code Set<Long>}；异常就地捕获并返回已读到的部分。
+     */
+    public Set<Long> distinctMetricBuckets(final String resolution, final long fromBucket, final long toBucket) {
+        final Set<Long> out = new HashSet<Long>();
+        if (!enabled || connection == null || toBucket < fromBucket) {
+            return out;
+        }
+        final String sql = isHourResolution(resolution)
+                ? H2SqlStatements.SELECT_METRICS_HOUR_BUCKETS_SQL : H2SqlStatements.SELECT_METRICS_MINUTE_BUCKETS_SQL;
+        synchronized (this) {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, fromBucket);
+                ps.setLong(2, toBucket);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        out.add(Long.valueOf(rs.getLong(1)));
+                    }
+                }
+            } catch (SQLException e) {
+                recordError("distinctMetricBuckets", e);
             }
         }
         return out;

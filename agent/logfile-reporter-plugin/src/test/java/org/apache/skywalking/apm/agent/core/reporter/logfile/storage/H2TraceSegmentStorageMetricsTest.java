@@ -3,6 +3,7 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.storage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.junit.After;
@@ -178,6 +179,20 @@ public class H2TraceSegmentStorageMetricsTest {
         Assert.assertEquals("GET:/a 两个有数据桶（101 为空不计）", 2, active.get("GET:/a").intValue());
         Assert.assertEquals("GET:/b 一个桶", 1, active.get("GET:/b").intValue());
         Assert.assertNull("范围外/无数据端点不在结果内", active.get("GET:/c"));
+    }
+
+    @Test
+    public void distinctMetricBuckets_listsBucketsInRange() {
+        storage.storeMetricRows("minute", list(
+                row("GET:/a", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1),
+                row("GET:/b", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1),
+                row("GET:/a", 101L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1)));
+
+        final Set<Long> buckets = storage.distinctMetricBuckets("minute", 100L, 101L);
+        Assert.assertEquals("去重后两个桶", 2, buckets.size());
+        Assert.assertTrue(buckets.contains(Long.valueOf(100L)));
+        Assert.assertTrue(buckets.contains(Long.valueOf(101L)));
+        Assert.assertTrue("范围外不含桶", storage.distinctMetricBuckets("minute", 200L, 300L).isEmpty());
     }
 
     private static List<MetricsRow> list(final MetricsRow... rows) {
