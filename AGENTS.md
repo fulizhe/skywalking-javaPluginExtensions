@@ -3,6 +3,12 @@
 - **Linux / WSL** — shell 用 `bash`（UTF-8，中文无乱码问题）。`pwsh` 不保证可用，不要默认调用。
 - **Windows 宿主 shell** — 运行命令用 `pwsh`（PowerShell 7）：UTF-8 end-to-end，中文脚本输出可干净往返。默认 Windows PowerShell 5.1 控制台按 GBK 解码，会乱码 UTF-8 文本 — 运行脚本与长验证请用 `pwsh -NoProfile -File <script>` / `Start-Process pwsh.exe`，不要用 5.1 shell。
 
+## 版本线（version lines）
+
+- **`master` = 2.0.0 开发线** —— 功能与 AI 开发在此进行。
+- **`release/1.0.0` = 1.0.0 冻结线** —— 只收 bugfix / 必要诊断小改，不加功能；每轮打 `1.0.0-maintN` tag。
+- 维护细则（tag 不移动、bugfix 走 cherry-pick 不 merge、版本号策略）→ `docs/repo/version-lines.md`
+
 ## Agent skills
 
 - **Issue tracker** — 何时读：spec/issue 存放、publish/fetch ticket、wayfinding 操作。→ `docs/agents/index.md`
