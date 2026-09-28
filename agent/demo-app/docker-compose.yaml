@@ -73,7 +73,6 @@ services:
       - -Dloadtest.durationSec=-1
       - -Dloadtest.threads=16
       - -Dloadtest.progressSec=10
-      - -Dloadtest.paths=/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
     mem_limit: 1g
     logging:
       driver: json-file
