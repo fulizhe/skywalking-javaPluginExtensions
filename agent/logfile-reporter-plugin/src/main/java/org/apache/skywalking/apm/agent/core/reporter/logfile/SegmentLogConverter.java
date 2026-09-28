@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.apache.skywalking.apm.dependencies.com.google.protobuf.TextFormat;
 import org.apache.skywalking.apm.network.common.v3.KeyStringValuePair;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SegmentReference;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 
 /**
@@ -51,6 +52,7 @@ public final class SegmentLogConverter {
         spanInfo.setIsError(span.getIsError());
         spanInfo.setLogList(span.getLogsList().stream().map(TextFormat::printToString).collect(Collectors.toList()));
         spanInfo.setTagList(tagsToTagList(span.getTagsList()));
+        spanInfo.setRefs(refsToRefList(span.getRefsList()));
         return spanInfo;
     }
 
@@ -65,5 +67,31 @@ public final class SegmentLogConverter {
             }
         }
         return tagList;
+    }
+
+    /**
+     * refs 转为 List&lt;Map&gt;，便于序列化与单测复用。
+     * <p>
+     * segment 级 ref 在 {@code TraceSegment.transform()} 里被显式跳过（{@code // Don't serialize TraceSegmentReference}），
+     * 因此上报的 {@link SegmentObject} 里只有 span 级 refs，字段口径与 1.0.0 的 {@code refsToRefList} 对齐。
+     * </p>
+     */
+    private static List<Map<String, Object>> refsToRefList(final List<SegmentReference> refs) {
+        final List<Map<String, Object>> refList = new ArrayList<Map<String, Object>>();
+        if (refs != null) {
+            for (final SegmentReference ref : refs) {
+                final Map<String, Object> refMap = new HashMap<String, Object>();
+                refMap.put("refType", ref.getRefType().name());
+                refMap.put("traceId", ref.getTraceId());
+                refMap.put("parentTraceSegmentId", ref.getParentTraceSegmentId());
+                refMap.put("parentSpanId", ref.getParentSpanId());
+                refMap.put("parentService", ref.getParentService());
+                refMap.put("parentServiceInstance", ref.getParentServiceInstance());
+                refMap.put("parentEndpoint", ref.getParentEndpoint());
+                refMap.put("networkAddressUsedAtPeer", ref.getNetworkAddressUsedAtPeer());
+                refList.add(refMap);
+            }
+        }
+        return refList;
     }
 }
