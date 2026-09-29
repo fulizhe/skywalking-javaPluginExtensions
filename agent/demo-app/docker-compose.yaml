@@ -56,6 +56,12 @@ services:
     depends_on:
       demo-app:
         condition: service_healthy
+    # 压测容器历史上因 "maven JVM + surefire fork 都无堆上限(JDK8 不识别 cgroup)" 而
+    # 被 cgroup OOM 周期杀掉、restart 循环(实测 RestartCount 数百)。这里显式封顶两处堆:
+    #   MAVEN_OPTS 限 maven 自身;-DargLine 限 surefire fork(= HttpLoadTest 那个 JVM)。
+    # 并留足 mem_limit,使无限压测(durationSec=-1)不再因内存被杀。
+    environment:
+      MAVEN_OPTS: "-Xmx256m"
     volumes:
       - m2-cache:/root/.m2
       # 与镜像构建时同一份 mirror 配置,复用 /root/.m2 预热缓存,避免首跑重复下载
@@ -73,7 +79,8 @@ services:
       - -Dloadtest.durationSec=-1
       - -Dloadtest.threads=16
       - -Dloadtest.progressSec=10
-    mem_limit: 1g
+      - -DargLine=-Xmx512m
+    mem_limit: 2g
     logging:
       driver: json-file
       options:
