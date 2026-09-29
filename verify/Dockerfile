@@ -15,8 +15,8 @@ COPY --from=jdk17 /opt/java/openjdk /opt/jdk17
 # SkyWalking Java Agent 发行包(与插件锁定一致;口径同 agent/demo-app/Dockerfile)。
 ARG SKYWALKING_AGENT_VERSION=9.4.0
 ADD https://archive.apache.org/dist/skywalking/java-agent/${SKYWALKING_AGENT_VERSION}/apache-skywalking-java-agent-${SKYWALKING_AGENT_VERSION}.tgz /tmp/skywalking-agent.tgz
+# tar 顶层目录即 skywalking-agent/(发行包内命名),直接解到 /opt 即可,勿再改名。
 RUN tar -xzf /tmp/skywalking-agent.tgz -C /opt \
- && mv /opt/apache-skywalking-java-agent-${SKYWALKING_AGENT_VERSION} /opt/skywalking-agent \
  && rm /tmp/skywalking-agent.tgz \
  && apt-get update \
  && apt-get install -y --no-install-recommends curl jq ca-certificates \

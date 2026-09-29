@@ -36,6 +36,7 @@
 - **demo-app 编译/打包通过**（含新端点）：`mvn -f agent/demo-app/pom.xml clean package -DskipTests` → exit 0。
 - **bash 语法**：`bash -n` 对 `verify/*.sh` 与两个 `checks.sh` 全部通过；`scenario.conf` source 正确。
 - **jq 断言离线校验**：用契约样例 JSON 跑通 `checks.sh` 全部正向断言（含 override `http.request.params` tag 断言）；`support-version.list` 读取正常。
+- **两轴代码评审（Standards + Spec）**：发现并已修正 2 处会在明天跑挂的缺陷，见 §11。
 
 ## 4. 未验证（本次未跑成，明天换机器跑）
 
@@ -82,6 +83,7 @@ bash verify/run.sh
 3. **override tag 断言**：场景停用官方 `apm-httpClient-4.x-plugin`（避免重复增强），由 override 插件自建 Exit span（已读码确认）。
    断言 `/statistic` 里 Exit span 的 `tagList[]` 含 `tag-key=http.request.params` 且值含 `verify-body`。
    若未出现：看 override 插件 `HttpClientParamCollector` 与 `-Dskywalking.plugin.overridehttpclient.collect_http_params=true` 是否生效。
+   （开关断言已改读 `/httpclient/collect/statistic` 的 `raw.overrideCollectHttpParams`，**不是** demo 的 `enabled`，见 §11。）
 4. **logfile 场景时序**：`checks.sh` 里的 `sleep` 沿用 `validate.ps1` 口径，慢机器上若偶发失败可适当放宽。
 5. **版本矩阵**：`--matrix` 会按 `support-version.list` 逐版本重建 demo-app（`-Dhttpclient.version=<v>` 覆盖 Spring Boot 管理版本）。
 
@@ -108,3 +110,17 @@ bash verify/run.sh
   （借上游 `skywalking-mock-collector`），价值最高。
 - **override-hutool 场景**：demo-app 暂无 hutool 读口桩/控制器，需先补读口。
 - pwsh 脚本保留为次选；如需彻底移除另开 task。
+
+## 11. code-review 修正（2026-09-29 追加）
+
+对本次 diff 做 Standards/Spec 两轴复查，发现并修正 2 处**会导致明天首次运行失败**的缺陷（第二个 commit）：
+
+1. **`verify/Dockerfile` 构建必失败**：发行包 `.tgz` 顶层目录是 `skywalking-agent/`（已 `tar -tzf` 实探确认），
+   原写法 `mv /opt/apache-skywalking-java-agent-9.4.0 …` 的源目录不存在。已删除该 `mv`，解包到 `/opt` 即得 `/opt/skywalking-agent`
+   （与既有 `agent/demo-app/Dockerfile` 口径一致）。
+2. **override 场景开关断言取错字段**：demo 控制器的 `enabled` 只认 `effectiveCollectHttpParams`——这是插件**从不返回**的键，
+   故恒为 `false`，断言必失败。已改为断言插件真实字段 `.raw.overrideCollectHttpParams`（改读 `/httpclient/collect/statistic`）。
+   离线样例复检 `switch on/off` 两态通过。
+
+> 备注：demo 控制器 `extractEnabled` 找 `effectiveCollectHttpParams` 与插件实际键不符，属既有读口瑕疵（本次不动 demo 行为，
+> 仅让场景断言真实信号）；如要修正该读口，另开 task。
