@@ -149,6 +149,10 @@ final class H2SqlStatements {
     /**
      * 按 endpoint 聚合的列（每端点一行，用于表格）：计数/总耗时/最大耗时精确求和取最大；
      * 分位按 request_count 加权平均（与 rollup 的近似口径一致）；{@code time_bucket} 常量 0 占位。
+     * <p>
+     * 另出"最差分钟"口径：{@code worst_pXX} = 各桶该分位的 {@code MAX}（NULL 忽略）；
+     * {@code bucket_count} = 有数据（{@code request_count>0}）的桶数。
+     * </p>
      */
     private static final String METRICS_AGG_COLUMNS =
             "endpoint, 0 AS time_bucket, "
@@ -161,7 +165,9 @@ final class H2SqlStatements {
                     + "CAST(ROUND(SUM(p90 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p90 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p90, "
                     + "CAST(ROUND(SUM(p95 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p95 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p95, "
                     + "CAST(ROUND(SUM(p99 * request_count) * 1.0 / NULLIF(SUM(CASE WHEN p99 IS NULL THEN 0 ELSE request_count END), 0)) AS INT) AS p99, "
-                    + "SUM(sample_count) AS sample_count";
+                    + "SUM(sample_count) AS sample_count, "
+                    + "MAX(p50) AS worst_p50, MAX(p90) AS worst_p90, MAX(p95) AS worst_p95, MAX(p99) AS worst_p99, "
+                    + "SUM(CASE WHEN request_count > 0 THEN 1 ELSE 0 END) AS bucket_count";
 
     static final String SELECT_METRICS_MINUTE_AGG_SQL = "SELECT " + METRICS_AGG_COLUMNS
             + " FROM trace_metrics_minute WHERE time_bucket BETWEEN ? AND ? "

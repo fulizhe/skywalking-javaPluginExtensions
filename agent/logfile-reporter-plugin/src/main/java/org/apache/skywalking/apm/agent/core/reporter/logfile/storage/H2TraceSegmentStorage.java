@@ -784,7 +784,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 ps.setInt(3, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
-                        out.add(toMetricsRow(rs));
+                        out.add(toAggMetricsRow(rs));
                     }
                 }
             } catch (SQLException e) {
@@ -854,6 +854,18 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 rs.getLong("total_latency"), rs.getLong("max_latency"),
                 nullableInt(rs, "p50"), nullableInt(rs, "p90"), nullableInt(rs, "p95"), nullableInt(rs, "p99"),
                 rs.getInt("sample_count"));
+    }
+
+    /** 聚合行映射：在基础列之外，额外读"最差分钟"列（{@code worst_pXX}）与有数据桶数（{@code bucket_count}）。 */
+    private MetricsRow toAggMetricsRow(final ResultSet rs) throws SQLException {
+        return new MetricsRow(rs.getString("endpoint"), rs.getLong("time_bucket"),
+                rs.getLong("request_count"), rs.getLong("error_count"), rs.getLong("slow_count"),
+                rs.getLong("total_latency"), rs.getLong("max_latency"),
+                nullableInt(rs, "p50"), nullableInt(rs, "p90"), nullableInt(rs, "p95"), nullableInt(rs, "p99"),
+                rs.getInt("sample_count"),
+                nullableInt(rs, "worst_p50"), nullableInt(rs, "worst_p90"),
+                nullableInt(rs, "worst_p95"), nullableInt(rs, "worst_p99"),
+                rs.getInt("bucket_count"));
     }
 
     private static int nullableInt(final ResultSet rs, final String column) throws SQLException {

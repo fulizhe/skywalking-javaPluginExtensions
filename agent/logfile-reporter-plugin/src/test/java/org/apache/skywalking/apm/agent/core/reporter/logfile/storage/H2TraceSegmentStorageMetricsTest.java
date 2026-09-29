@@ -195,6 +195,29 @@ public class H2TraceSegmentStorageMetricsTest {
         Assert.assertTrue("范围外不含桶", storage.distinctMetricBuckets("minute", 200L, 300L).isEmpty());
     }
 
+    @Test
+    public void aggregateByEndpoint_carriesWorstPercentilesAndBucketCount() {
+        storage.storeMetricRows("minute", list(
+                row("GET:/a", 100L, 2L, 0L, 0L, 20L, 20L, 10, -1, -1, 100, 2),
+                row("GET:/a", 101L, 2L, 0L, 0L, 20L, 20L, 30, -1, -1, 300, 2),
+                row("GET:/a", 102L, 2L, 0L, 0L, 20L, 20L, 20, -1, -1, 200, 2),
+                row("GET:/b", 100L, 1L, 0L, 0L, 10L, 10L, 20, -1, -1, 50, 1)));
+
+        final List<MetricsRow> agg = storage.aggregateMetricRows("minute", 0L, 1000L, 100);
+        MetricsRow a = null;
+        for (MetricsRow r : agg) {
+            if ("GET:/a".equals(r.getEndpoint())) {
+                a = r;
+            }
+        }
+        Assert.assertNotNull(a);
+        Assert.assertEquals("加权平均 P99 口径不变：(100+300+200)*2/6", 200, a.getP99());
+        Assert.assertEquals("最差分钟 P99 = 各桶 P99 的最大值", 300, a.getWorstP99());
+        Assert.assertEquals("最差 P50 = max(10,30,20)", 30, a.getWorstP50());
+        Assert.assertEquals("P90 全缺失 → -1", -1, a.getWorstP90());
+        Assert.assertEquals("有数据桶数 = 3", 3, a.getBucketCount());
+    }
+
     private static List<MetricsRow> list(final MetricsRow... rows) {
         final List<MetricsRow> out = new ArrayList<MetricsRow>();
         for (MetricsRow r : rows) {

@@ -421,7 +421,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			for (MetricsRow r : metricsAggregator.memoryRows()) {
 				if (r.getTimeBucket() >= fromMinute && r.getTimeBucket() <= toMinute
 						&& !h2Buckets.contains(Long.valueOf(r.getTimeBucket()))) {
-					agg.add(r);
+					agg.add(r.selfAsWorst());
 				}
 			}
 		}

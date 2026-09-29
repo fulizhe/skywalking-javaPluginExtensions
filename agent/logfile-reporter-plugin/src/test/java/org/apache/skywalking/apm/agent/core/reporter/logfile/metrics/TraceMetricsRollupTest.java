@@ -105,6 +105,35 @@ public class TraceMetricsRollupTest {
     }
 
     @Test
+    public void mergeByEndpoint_carriesWorstPercentilesAndBucketCount() {
+        final List<MetricsRow> rows = new ArrayList<MetricsRow>();
+        // 聚合读口行：带 worst_* 与 bucket_count
+        rows.add(new MetricsRow("GET:/a", 0L, 10L, 1L, 0L, 100L, 50L, 20, 30, 40, 100, 10, 20, 30, 40, 100, 3));
+        rows.add(new MetricsRow("GET:/a", 0L, 5L, 0L, 0L, 50L, 60L, 25, 35, 45, 200, 5, 25, 35, 45, 200, 2));
+        // 普通桶行：未带 worst / bucketCount —— 不应污染
+        rows.add(row("GET:/b", 100L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, 50, 1));
+
+        final List<MetricsRow> out = TraceMetricsRollup.mergeByEndpoint(rows, 0L);
+        MetricsRow a = null, b = null;
+        for (MetricsRow r : out) {
+            if ("GET:/a".equals(r.getEndpoint())) {
+                a = r;
+            }
+            if ("GET:/b".equals(r.getEndpoint())) {
+                b = r;
+            }
+        }
+        Assert.assertNotNull(a);
+        Assert.assertNotNull(b);
+        Assert.assertEquals("worst P99 = max(100,200)", 200, a.getWorstP99());
+        Assert.assertEquals("worst P95 = max(40,45)", 45, a.getWorstP95());
+        Assert.assertEquals("bucketCount 相加 3+2", 5, a.getBucketCount());
+        Assert.assertEquals("加权平均 P99 = (100*10+200*5)/15", 133, a.getP99());
+        Assert.assertEquals("普通行不带 worst → -1", -1, b.getWorstP99());
+        Assert.assertEquals("普通行不带 bucketCount → -1", -1, b.getBucketCount());
+    }
+
+    @Test
     public void downsample_noopWhenUnderTarget() {
         final List<MetricsRow> rows = new ArrayList<MetricsRow>();
         rows.add(row("GET:/a", 0L, 1L, 0L, 0L, 10L, 10L, 10, -1, -1, -1, 1));

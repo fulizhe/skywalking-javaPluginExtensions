@@ -90,6 +90,11 @@ public final class TraceMetricsRollup {
         return byEndpoint;
     }
 
+    /** 合并"最差分钟"字段：仅当候选已算（{@code >=0}）且更大时采用，否则保持当前。 */
+    private static int maxIfPresent(final int current, final int candidate) {
+        return candidate >= 0 && candidate > current ? candidate : current;
+    }
+
     private static MetricsRow merge(final List<MetricsRow> group, final long bucket, final String endpoint) {
         long request = 0L;
         long error = 0L;
@@ -100,6 +105,9 @@ public final class TraceMetricsRollup {
         long w50 = 0L, w90 = 0L, w95 = 0L, w99 = 0L;
         long c50 = 0L, c90 = 0L, c95 = 0L, c99 = 0L;
         boolean has50 = true, has90 = true, has95 = true, has99 = true;
+        // "最差分钟"口径：仅从带该字段的行（聚合读口行）取最大/累加；普通桶行未带则保持 -1。
+        int worst50 = -1, worst90 = -1, worst95 = -1, worst99 = -1;
+        int bucketCnt = -1;
         for (MetricsRow row : group) {
             request += row.getRequestCount();
             error += row.getErrorCount();
@@ -109,6 +117,13 @@ public final class TraceMetricsRollup {
                 max = row.getMaxLatency();
             }
             sample += row.getSampleCount();
+            worst50 = maxIfPresent(worst50, row.getWorstP50());
+            worst90 = maxIfPresent(worst90, row.getWorstP90());
+            worst95 = maxIfPresent(worst95, row.getWorstP95());
+            worst99 = maxIfPresent(worst99, row.getWorstP99());
+            if (row.getBucketCount() >= 0) {
+                bucketCnt = (bucketCnt < 0 ? 0 : bucketCnt) + row.getBucketCount();
+            }
             final long weight = row.getRequestCount();
             if (row.getP50() >= 0) {
                 w50 += (long) row.getP50() * weight;
@@ -140,6 +155,6 @@ public final class TraceMetricsRollup {
         final int p95 = (has95 && c95 > 0L) ? (int) (w95 / c95) : -1;
         final int p99 = (has99 && c99 > 0L) ? (int) (w99 / c99) : -1;
         return new MetricsRow(endpoint, bucket, request, error, slow, total, max,
-                p50, p90, p95, p99, sample);
+                p50, p90, p95, p99, sample, worst50, worst90, worst95, worst99, bucketCnt);
     }
 }
