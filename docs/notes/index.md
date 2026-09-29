@@ -8,3 +8,4 @@
  - **2026-09-25：持续压测下的插件内存分析——1G→3.4G 是健康的高水位** —— 何时读：压测/长跑后判断 JVM 内存是否泄漏、或需要调堆参数时。→ `2026-09-25-trace-metrics-stress-memory-analysis.md`
   - **2026-09-26：端点极端值 → traceId 追溯（Phase 5 追加第一步）** —— 何时读：改动 Trace 指标聚合、`/inner/sw/metrics*` 读口、或推进 error/slow 明细持久化闭环时。→ `2026-09-26-endpoint-extreme-trace-recording.md`
   - **2026-09-27：h2-full-trace-mem 操作手册（全量 trace / 双源对照 / 慢查询 / QPS / 慢判定复用）** —— 何时读：忘了这些功能在哪看、怎么开、怎么验证，或要重建/重启 demo 观察效果时。→ `2026-09-27-h2-full-trace-mem-操作手册.md`
+- **2026-09-29：跨 ClassLoader 传自定义类为何不 CNFE——炸的是语义，不是链接** —— 何时读：改动"要被宿主持有的数据结构"（如用 POJO 替代 Map）、或排查宿主读口 JSON 契约键名时。→ `2026-09-29-cross-classloader-tag-json-semantics.md`
