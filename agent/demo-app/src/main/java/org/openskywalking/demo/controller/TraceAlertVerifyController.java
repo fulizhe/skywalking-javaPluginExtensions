@@ -19,19 +19,26 @@ package org.openskywalking.demo.controller;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.http.NameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.util.EntityUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -112,6 +119,40 @@ public class TraceAlertVerifyController {
                         ? "默认配置下应触发 ERROR(http.status_code >= 500);Webhook alertTypes 应含 ERROR"
                         : "默认配置下不应因 http.status_code 触发 ERROR(< 500);若仍收到 ERROR 告警请检查 span.isError 或其它规则");
         return result;
+    }
+
+    /** 经 Apache HttpClient 向应用自身 POST 表单体:供 override-httpclient 插件采集 body(span tag http.request.params)验证 */
+    @GetMapping("/api/trace-alert-demo/httpclient-post")
+    public Map<String, Object> httpClientPost(@RequestParam(defaultValue = "verify-body") String value) throws IOException {
+        String targetUrl = "http://127.0.0.1:" + System.getenv().getOrDefault("WebPort", "9600") + "/api/trace-alert-demo/echo";
+        HttpPost post = new HttpPost(targetUrl);
+        List<NameValuePair> form = new ArrayList<>();
+        form.add(new BasicNameValuePair("value", value));
+        post.setEntity(new UrlEncodedFormEntity(form, StandardCharsets.UTF_8));
+        int httpStatus;
+        String bodySnippet;
+        try (CloseableHttpResponse response = skyWalkingDemoHttpClient.execute(post)) {
+            httpStatus = response.getStatusLine().getStatusCode();
+            if (response.getEntity() == null) {
+                bodySnippet = "";
+            } else {
+                String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                bodySnippet = body.length() > 200 ? body.substring(0, 200) + "..." : body;
+            }
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("client", "apache-httpclient");
+        result.put("targetUrl", targetUrl);
+        result.put("httpStatus", httpStatus);
+        result.put("bodySnippet", bodySnippet);
+        result.put("verificationHint", "override 插件应把表单体采为出口 span tag http.request.params=form=value=<value>");
+        return result;
+    }
+
+    /** httpclient-post 的回环 echo 目标 */
+    @PostMapping("/api/trace-alert-demo/echo")
+    public String echo(@RequestParam Map<String, String> form) {
+        return "echo:" + form;
     }
 
     /** 慢请求:可指定休眠毫秒数(默认超过默认阈值 3000) */

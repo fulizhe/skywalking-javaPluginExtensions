@@ -1,0 +1,23 @@
+# verify 场景验证回路:一个一次性容器完成"构建插件 + 构建 demo-app + 装配 agent + 启动 + 断言"。
+# 由 verify/run.sh 调用(它会先 build 一次镜像,再对每个场景/版本 run)。
+#
+# 场景与版本经环境变量注入;仓库以 rw bind-mount 到 /src(maven 产物落回宿主 target/)。
+name: skywalking-verify
+
+services:
+  verify:
+    build:
+      context: ..
+      dockerfile: verify/Dockerfile
+    image: skywalking-plugin-verify:9.4.0
+    working_dir: /src
+    volumes:
+      - ..:/src
+      # 依赖缓存:首次下载(经 agent/settings.xml 的 aliyun 镜像),后续复用
+      - verify-m2:/root/.m2
+    environment:
+      SCENARIO: ${SCENARIO:-logfile-reporter}
+      HTTPCLIENT_VERSION: ${HTTPCLIENT_VERSION:-}
+
+volumes:
+  verify-m2:

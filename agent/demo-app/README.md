@@ -84,6 +84,9 @@ pwsh ./scripts/start-demo.ps1
 
 ## 验证回路
 
+> **主路径(容器化 bash)**:`bash verify/run.sh` —— Linux/Docker + bash 场景回路,在任意环境(含 CI)一条命令完成"构建插件 → 构建 demo → 装配 agent → 启动 → 断言 → 报告"。见仓库根 [`verify/README.md`](../../verify/README.md)。
+> 下面的 `scripts/*.ps1` 是**次选**(本地 Windows 调试/快速排查),与 verify 断言同一批 HTTP 契约。
+
 `validate.ps1` 即 demo-app 的验收测试,断言范围(与 spec User Stories 对应):
 
 - **A. trace 缓存合并**:同一 traceId 下入口+出口多 segment 合并在一个条目,span 字段齐全;

@@ -1,0 +1,29 @@
+name: Verify scenarios (Docker + bash)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'verify/**'
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/demo-app/**'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'verify/**'
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/demo-app/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run logfile-reporter scenario (containerized bash loop)
+        run: bash verify/run.sh --scenario logfile-reporter

@@ -1,0 +1,4 @@
+# override-httpclient 场景支持的 Apache HttpClient 4.x 版本(demo-app 依赖版本矩阵)。
+# 每行一个版本,由 verify/run.sh --matrix 读取并逐版本构建 demo-app。
+4.5.13
+4.5.14

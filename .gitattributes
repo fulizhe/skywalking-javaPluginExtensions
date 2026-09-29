@@ -1,0 +1,9 @@
+# 验证回路以 Linux/Docker + bash 为第一路径:shell 脚本与 sourced 配置必须保持 LF。
+# Windows(core.autocrlf=true)checkout 若转成 CRLF,会导致容器内 `bash: bad interpreter: /bin/bash^M`
+# 或脚本解析错误,故显式钉住 eol=lf。
+*.sh                                text eol=lf
+verify/Dockerfile                   text eol=lf
+verify/docker-compose.yaml          text eol=lf
+verify/scenarios/**/scenario.conf   text eol=lf
+verify/scenarios/**/support-version.list text eol=lf
+.gitattributes                      text eol=lf
