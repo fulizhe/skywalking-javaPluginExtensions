@@ -20,10 +20,10 @@ public class KeyedLocalStoreTest {
 	@Test
 	public void putReturnsPreviousAndEvictsFifoWhenFull() {
 		final KeyedLocalStore<String, String> store = new KeyedLocalStore<String, String>(2);
-		assertNull(store.put("a", "1"));
-		assertNull(store.put("b", "2"));
-		assertEquals("1", store.put("a", "1-updated"));
-		store.put("c", "3");
+		assertNull(store.putForTest("a", "1"));
+		assertNull(store.putForTest("b", "2"));
+		assertEquals("1", store.putForTest("a", "1-updated"));
+		store.putForTest("c", "3");
 		assertEquals(2, store.size());
 		assertEquals(Arrays.<String>asList("b", "c"), new ArrayList<String>(store.snapshot().keySet()));
 	}
@@ -40,8 +40,8 @@ public class KeyedLocalStoreTest {
 	@Test
 	public void mergeWithNewKeyAtCapacityEvictsOldest() {
 		final KeyedLocalStore<String, String> store = new KeyedLocalStore<String, String>(2);
-		store.put("a", "1");
-		store.put("b", "2");
+		store.putForTest("a", "1");
+		store.putForTest("b", "2");
 		assertEquals("3", store.merge("c", "3", (x, y) -> y));
 		assertEquals(Arrays.<String>asList("b", "c"), new ArrayList<String>(store.snapshot().keySet()));
 	}
@@ -49,7 +49,7 @@ public class KeyedLocalStoreTest {
 	@Test
 	public void mergeRemovesKeyWhenRemapperReturnsNull() {
 		final KeyedLocalStore<String, String> store = new KeyedLocalStore<String, String>(4);
-		store.put("k", "v1");
+		store.putForTest("k", "v1");
 		assertNull(store.merge("k", "v2", (a, b) -> null));
 		assertEquals(0, store.size());
 		assertTrue(store.snapshot().isEmpty());
@@ -58,10 +58,10 @@ public class KeyedLocalStoreTest {
 	@Test
 	public void snapshotIsIndependentContainer() {
 		final KeyedLocalStore<String, String> store = new KeyedLocalStore<String, String>(4);
-		store.put("a", "1");
+		store.putForTest("a", "1");
 		final Map<String, String> snapshot = store.snapshot();
 		assertEquals("1", snapshot.get("a"));
-		store.put("b", "2");
+		store.putForTest("b", "2");
 		snapshot.put("a", "9");
 		assertEquals(1, snapshot.size());
 		assertEquals(2, store.size());
@@ -94,7 +94,7 @@ public class KeyedLocalStoreTest {
 					}
 					for (int i = 0; i < perThread; i++) {
 						final String key = "k-" + (base * perThread + i) % 16;
-						store.put(key, "v");
+						store.putForTest(key, "v");
 						store.merge(key, "v", (a, b) -> a + "+" + b);
 					}
 				});

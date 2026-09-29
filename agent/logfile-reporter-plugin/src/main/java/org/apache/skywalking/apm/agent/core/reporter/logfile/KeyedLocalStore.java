@@ -21,7 +21,6 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 final class KeyedLocalStore<K, V> {
 
-	private final int maxSize;
 	private final LinkedHashMap<K, V> entries;
 	private final ReentrantLock lock = new ReentrantLock();
 
@@ -29,7 +28,7 @@ final class KeyedLocalStore<K, V> {
 		if (maxSize <= 0) {
 			throw new IllegalArgumentException("Max size must be positive");
 		}
-		this.maxSize = maxSize;
+
 		this.entries = new LinkedHashMap<K, V>(16, 0.75f, false) {
 			private static final long serialVersionUID = 1L;
 
@@ -42,8 +41,11 @@ final class KeyedLocalStore<K, V> {
 
 	/**
 	 * 写入 key，返回该 key 上一次的值或 {@code null}；新 key 超过容量时淘汰最旧插入项。
+	 * <p>
+	 * 仅供测试使用（生产路径统一走 {@link #merge}）；命名沿用仓库 {@code ...ForTest} 约定。
+	 * </p>
 	 */
-	V put(final K key, final V value) {
+	V putForTest(final K key, final V value) {
 		Objects.requireNonNull(key, "key");
 		lock.lock();
 		try {
