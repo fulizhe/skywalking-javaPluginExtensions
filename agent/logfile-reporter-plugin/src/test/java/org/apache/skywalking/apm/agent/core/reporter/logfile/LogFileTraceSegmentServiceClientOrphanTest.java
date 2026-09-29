@@ -59,6 +59,21 @@ public class LogFileTraceSegmentServiceClientOrphanTest {
                 LogFileTraceSegmentServiceClient.isOrphanSegment(rawWithRef(), obj(SpanType.Local)));
     }
 
+    /**
+     * 真实请求形态（不该误伤）：Entry 根段 + 其跨线程异步派发子段。
+     * <p>
+     * 样本 gisserver trace {@code …86.17906693971691047}：A = Entry（GET 地形瓦片），
+     * B = Local {@code UndertowDispatch}（ref → A）。正常请求两段都应保留。
+     * </p>
+     */
+    @Test
+    public void realRequestEntryWithAsyncDispatch_kept() {
+        Assert.assertFalse("Entry 根段不该被误判为孤段",
+                LogFileTraceSegmentServiceClient.isOrphanSegment(rawNoRef(), obj(SpanType.Entry)));
+        Assert.assertFalse("Entry 派生的跨线程异步子段（有 ref）不该被误判为孤段",
+                LogFileTraceSegmentServiceClient.isOrphanSegment(rawWithRef(), obj(SpanType.Local)));
+    }
+
     @Test
     public void nullObject_notOrphan() {
         Assert.assertFalse("null segment 不判为孤段",
