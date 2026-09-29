@@ -171,6 +171,14 @@ agent/demo-app/
     └── start-demo.ps1         # 纯应用启动(无 agent)
 ```
 
+## 指标分位口径
+
+三种口径并列,勿混用:
+
+- **加权平均分位** —— `dashboards/metrics.html`;小时 rollup 与聚合表格对每桶分位按 `request_count` 加权平均(近似,v1 已知偏差)。
+- **最差分钟分位** —— `dashboards/metrics-troubleshoot.html`;范围内各桶同一分位取**最大值**,用于排障("最坏的那一分钟有多坏")。不掩盖尖峰,但受断流/小样本桶放大,须与桶数、中位分钟并看。
+- **池化真值** —— 合并全部样本后重算分位;当前表结构不可得(需直方图/schema,见 spec out-of-scope)。
+
 ## 相关工单
 
 见 `.scratch/demo-app/issues/`:`01` 骨架、`02` agent 装配、`03` 统计读口、`04` 告警表面、`05` 验证回路、`06` 仪表盘、`07` 导览首页与 README、`08` setup 脚本、`09` 旧项目清理(待办)。

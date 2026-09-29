@@ -442,6 +442,51 @@ try {
         Write-Host "[WARN] 差异化慢阈值断言跳过:端点 $slowRuleEp 无指标行(可能 operationName 形态与假设不符)"
     }
 
+    # ---- 9e. 聚合读口「最差分钟」字段(③ 口径) ----
+    Write-Host ""
+    Write-Host "---- 聚合读口最差分钟字段 /inner/sw/metrics/query?aggregate=true ----"
+    $aggResp = Invoke-LocalHttp "/inner/sw/metrics/query?aggregate=true&limit=1000"
+    Assert "聚合读口 HTTP 200" ("$($aggResp.StatusCode)" -eq "200") "status=$($aggResp.StatusCode)"
+    $agg = $null; try { $agg = $aggResp.Content | ConvertFrom-Json } catch { $agg = $null }
+    if ($agg) {
+        $gAgg = $null
+        foreach ($r in @($agg.rows)) { if ("$($r.endpoint)" -eq "*") { $gAgg = $r } }
+        Assert "聚合行含全局 * 行" ($null -ne $gAgg) "未找到 endpoint=*"
+        if ($gAgg) {
+            $names = @($gAgg.PSObject.Properties.Name)
+            $hasAll = ($names -contains 'worstP50') -and ($names -contains 'worstP90') -and ($names -contains 'worstP95') -and ($names -contains 'worstP99') -and ($names -contains 'bucketCount')
+            Assert "聚合行含 worstP50/90/95/99 + bucketCount 字段" $hasAll "keys=$($names -join ',')"
+            Assert "聚合行 bucketCount > 0" ($null -ne $gAgg.bucketCount -and [long]$gAgg.bucketCount -gt 0) "bucketCount=$($gAgg.bucketCount)"
+            Assert "worstP99 >= 加权 p99（最差不小于平均）" ($null -ne $gAgg.worstP99 -and [long]$gAgg.worstP99 -ge [long]$gAgg.p99) "worstP99=$($gAgg.worstP99) p99=$($gAgg.p99)"
+
+            $gb = Invoke-LocalHttp "/inner/sw/metrics/query?endpoint=%2A&limit=1000"
+            $gbj = $null; try { $gbj = $gb.Content | ConvertFrom-Json } catch { $gbj = $null }
+            $maxBucketP99 = 0L
+            if ($gbj) {
+                foreach ($r in @($gbj.rows)) {
+                    if ($null -ne $r.p99 -and [long]$r.p99 -gt $maxBucketP99) { $maxBucketP99 = [long]$r.p99 }
+                }
+            }
+            Assert "worstP99 >= 各桶 p99 的最大值（降采样下用 ≥ 更稳）" ([long]$gAgg.worstP99 -ge $maxBucketP99) "worstP99=$($gAgg.worstP99) maxBucketP99=$maxBucketP99"
+        }
+        # 按端点：取请求数最高的非 * 行，断言最差与加权自洽、桶数 > 0
+        $epRows = @($agg.rows | Where-Object { "$($_.endpoint)" -ne "*" } | Sort-Object { -[long]$_.requestCount })
+        if ($epRows.Count -gt 0 -and $null -ne $epRows[0].worstP99) {
+            $e = $epRows[0]
+            Assert "端点 $($e.endpoint) worstP99 >= 其加权 p99" ([long]$e.worstP99 -ge [long]$e.p99) "ep=$($e.endpoint) worstP99=$($e.worstP99) p99=$($e.p99)"
+            Assert "端点 $($e.endpoint) bucketCount > 0" ([long]$e.bucketCount -gt 0) "ep=$($e.endpoint) bucketCount=$($e.bucketCount)"
+        } else {
+            Write-Host "[WARN] 无按端点聚合行可断言（范围内可能仅 * 行）"
+        }
+    } else {
+        $script:failures++
+        Write-Host "[FAIL] 聚合读口返回不可解析的 JSON"
+    }
+
+    # ---- 9f. 排障页可访问 ----
+    $trbl = Invoke-LocalHttp "/dashboards/metrics-troubleshoot.html"
+    Assert "排障页 HTTP 200" ("$($trbl.StatusCode)" -eq "200") "status=$($trbl.StatusCode)"
+
     # ---- 10. 结果 ----
     Write-Host ""
     if ($script:failures -eq 0) {

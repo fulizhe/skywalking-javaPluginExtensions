@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<!--
+  指标排障页（③「最差分钟」口径）——数据来自真实读口：
+    GET /inner/sw/metrics/query?endpoint=*&...        全局逐桶序列（画每桶 P99 分布）
+    GET /inner/sw/metrics/query?aggregate=true&...    每端点一行：加权平均分位 + worstP50/90/95/99 + bucketCount
+    GET /inner/sw/metrics/query?endpoint=<ep>&...     单端点逐桶序列（下钻）
+  口径说明（与 metrics.html 不同，勿混用）：
+    - 本页分位 = 范围内「最差分钟分位」= 各桶对应分位的最大值（aggregate 行的 worstP*）。
+    - metrics.html 的分位 = 各桶分位按 request_count 加权平均（近似）。
+    - 断流/小样本桶会放大最差值，故同时给出「中位分钟」与「有数据桶数」。
+  依赖（本地打包，无外部网络）: ../lib/jquery.min.js · ../lib/echarts.min.js
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>指标排障 · 最差分钟分位</title>
+<script src="../lib/jquery.min.js"></script>
+<script src="../lib/echarts.min.js"></script>
+<style>
+*{box-sizing:border-box}
+:root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;min-height:100vh}
+.wrap{max-width:1240px;margin:0 auto;padding:20px 22px 60px}
+h1{font-size:18px;margin:0 0 4px}
+h2{font-size:13px;margin:20px 0 8px;color:#c7cff0;letter-spacing:.02em}
+.sub{color:var(--mut);font-size:12px;margin:2px 0}
+.note{background:#2a2114;border:1px solid #6b5320;color:#f6d78a;border-radius:8px;padding:8px 12px;font-size:12.5px;margin:10px 0}
+.why{margin:12px 0 0;border:1px solid var(--bd);border-radius:10px;background:#0c1526;overflow:hidden}
+.why>summary{cursor:pointer;padding:10px 14px;font-size:13px;color:#bfe3ff;list-style:none;user-select:none}
+.why>summary::-webkit-details-marker{display:none}
+.why>summary::before{content:"▸ ";color:var(--mut)}
+.why[open]>summary::before{content:"▾ "}
+.why>summary:hover{background:#101c33}
+.why-body{padding:2px 16px 14px;font-size:13px;line-height:1.7;color:#cfd8e8;border-top:1px solid var(--bd)}
+.why-body p{margin:8px 0}
+.why-body ul{margin:6px 0;padding-left:20px}
+.why-body li{margin:3px 0}
+.why-body b{color:#e8eefb}
+.why-body .mut{color:var(--mut)}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{font:inherit;cursor:pointer;background:#16233d;color:var(--tx);border:1px solid var(--bd);border-radius:8px;padding:6px 12px}
+button:hover{background:#1c2b4a}
+button.on{background:#1d3a5c;border-color:#2b5b8a;color:#bfe3ff}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.kpi{background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:10px 12px}
+.kpi .l{font-size:11px;color:var(--mut)}
+.kpi .v{font-size:19px;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:11px;color:var(--mut);margin-top:2px}
+.kpi.w{--accent:var(--warn)} .kpi.cur{--accent:var(--err)}
+.kpi.w .v{color:var(--warn)} .kpi.cur .v{color:var(--err)}
+.chartbox{background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--bd);padding:7px 9px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--mut);font-size:11px;font-weight:600;cursor:pointer;user-select:none}
+tbody tr:hover{background:#16233d;cursor:pointer}
+tbody tr.sel{background:#1d3a5c}
+.bad{color:var(--warn);font-weight:600}
+.mut{color:var(--mut)}
+.mono{font-family:var(--mono)}
+.links a{color:var(--ac);margin-right:12px;text-decoration:none;font-size:12.5px}
+.links a:hover{text-decoration:underline}
+#err{display:none;background:#3a1520;border:1px solid #7a2436;color:#f6b3c0;border-radius:8px;padding:8px 12px;margin:10px 0;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>指标排障 · 最差分钟分位 <span class="mut" style="font-size:12px">（③ 口径，独立于 metrics.html）</span></h1>
+  <p class="sub">回答"这个范围内最坏的那一分钟有多坏、哪个端点最坏"。分位=范围内各桶分位的最大值（最差），而非加权平均。</p>
+
+  <details class="why">
+    <summary>本页存在的意义（为什么需要"最差分钟"口径）</summary>
+    <div class="why-body">
+      <p><b>先给结论：</b>单分钟的 p50/p99 并不"失真"，只是"抽样近似"——而且样本几乎代表了全部请求；真正会引入系统性偏差的是"跨桶合并 / rollup"那条路，不是 5000 这个采样上限本身。</p>
+      <p><b>为什么单分钟分位基本可信：</b></p>
+      <ul>
+        <li>请求数 / 错误数 / 慢数 / 平均耗时 / 最大耗时：<b>精确</b>——每个请求都无条件累加，不经过抽样。</li>
+        <li>p50 / p90 / p95 / p99：来自<b>等概率蓄水池</b>（前 5000 条先塞满，之后按概率随机替换），一分钟内每条请求入池机会相同；N≈7000 时保留 5000 ≈ 71%，是<b>无偏近似</b>，误差很小。</li>
+        <li><span class="mono">sampleCount</span> 恒为 5000 只是"触顶"，<span class="mono">sampleOverflow</span> 只是溢出体检计数——都不代表分位算错。</li>
+      </ul>
+      <p><b>真正的系统性偏差在合并：</b>小时 rollup、按端点聚合、以及查询降采样时，代码对每桶的 p50..p99 做 <b>requestCount 加权平均</b>（<span class="mono">TraceMetricsRollup.merge</span> / 前端 <span class="mono">aggSeries</span>）。分位数不可相加——加权平均会把局部尖峰"平均掉"，系统性低估尾部。</p>
+      <p><b>本页做什么：</b>不去伪造"池化真值"（那需要直方图 + schema，属另一条线），而是用现有逐桶分位给出"最差分钟"口径：范围内各桶<b>取最大</b>，直接回答"最坏的那一分钟有多坏、哪个端点最坏"；并同时给出中位分钟与桶数，避免被断流 / 小样本桶放大误导。与 <span class="mono">metrics.html</span>（加权平均口径）并排对比。</p>
+      <p class="mut">三种口径：加权平均（metrics.html） / 最差分钟（本页） / 池化真值（未来方案，需直方图）。</p>
+    </div>
+  </details>
+
+  <div class="row" style="margin-top:10px">
+    <span class="mut" style="font-size:12px">范围</span>
+    <button class="rng" data-r="1h">近 1h</button>
+    <button class="rng" data-r="6h">近 6h</button>
+    <button class="rng on" data-r="24h">近 24h</button>
+    <button class="rng" data-r="7d">近 7d</button>
+    <button class="rng" data-r="30d">近 30d</button>
+    <span style="margin-left:auto"></span>
+    <button id="pause">停止轮询</button>
+    <span class="mut" id="updated" style="font-size:12px"></span>
+  </div>
+  <div id="err"></div>
+
+  <h2 id="globalTitle">全局 · 当前加权平均 vs 最差分钟</h2>
+  <div class="kpis" id="kpis"></div>
+  <div class="chartbox"><div id="globalChart" style="height:260px"></div></div>
+  <p class="note" id="globalNote">
+    本页分位 = 范围内「最差分钟分位」（各桶取最大），与 metrics.html 的「加权平均」口径不同。
+    断流/小样本桶会放大最差值，请对照「中位分钟」与「有数据桶数」判断。
+  </p>
+
+  <h2 id="tableTitle">端点 · 按最差 P99 降序</h2>
+  <div class="card" style="padding:4px 8px">
+    <table id="epTable">
+      <thead><tr>
+        <th data-k="endpoint">端点</th>
+        <th data-k="worstP99">最差 P99</th>
+        <th data-k="worstP95">最差 P95</th>
+        <th data-k="worstP50">最差 P50</th>
+        <th data-k="p99">加权 P99</th>
+        <th data-k="p95">加权 P95</th>
+        <th data-k="requestCount">请求数</th>
+        <th data-k="errorRate">错误率</th>
+        <th data-k="bucketCount">桶数</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="detail" style="display:none">
+    <h2 id="detailTitle">端点下钻</h2>
+    <div class="kpis" id="detailKpis"></div>
+    <div class="chartbox"><div id="detailChart" style="height:220px"></div></div>
+    <p class="links" style="margin-top:8px" id="detailLinks"></p>
+    <p class="note">下钻分位同样为「范围内最差」（各桶取最大）；中位分钟在前端由逐桶序列现算。</p>
+  </div>
+
+  <p class="sub" style="margin-top:22px">读口：<span class="mono">/inner/sw/metrics/query</span>（aggregate 行含 <span class="mono">worstP50/90/95/99</span> 与 <span class="mono">bucketCount</span>）。数据来源为 H2 内存模式的 Trace 指标。</p>
+</div>
+
+<script>
+"use strict";
+var RANGES = { "1h":60, "6h":360, "24h":1440, "7d":10080, "30d":43200 };
+var MINUTE_MS = 60000, HOUR_MS = 3600000;
+var currentRange = "24h";
+var polling = true, timer = null, lastResolution = "minute";
+var sortKey = "worstP99", sortDesc = true;
+var selectedEndpoint = null, seriesCache = {};
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+function fmtMs(v){return v==null?"–":(v>=1000?(v/1000).toFixed(2)+" s":Math.round(v)+" ms");}
+function fmtInt(n){return n==null?"–":Number(n).toLocaleString("en-US");}
+function pct(v,d){return v==null?"–":(v*100).toFixed(d==null?1:d)+"%";}
+function bucketMs(res){return res==="hour"?HOUR_MS:MINUTE_MS;}
+function hhmm(t){var d=new Date(t);return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);}
+function mmdd(t){var d=new Date(t);return (d.getMonth()+1)+"/"+d.getDate()+" "+hhmm(t);}
+function labelFor(res,t){return res==="hour"?mmdd(t):hhmm(t);}
+function rangeLabel(){return {"1h":"近 1h","6h":"近 6h","24h":"近 24h","7d":"近 7d","30d":"近 30d"}[currentRange];}
+function computeBuckets(){var to=Math.floor(Date.now()/MINUTE_MS);var from=to-(RANGES[currentRange]-1);return {from:from,to:to,res:(to-from)<=1440?"minute":"hour"};}
+function jget(url){return new Promise(function(res,rej){$.ajax({url:url,dataType:"json",cache:false}).done(res).fail(function(x,s){rej(new Error((s||"error")+" "+url));});});}
+function nearestRank(sortedAsc,p){var n=sortedAsc.length;if(!n)return null;var r=Math.ceil(p/100*n);if(r<1)r=1;if(r>n)r=n;return sortedAsc[r-1];}
+function showErr(m){$("#err").text(m).show();} function hideErr(){$("#err").hide();}
+
+function refresh(){
+  var b=computeBuckets();
+  var globalUrl="/inner/sw/metrics/query?endpoint="+encodeURIComponent("*")+"&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  var aggUrl="/inner/sw/metrics/query?aggregate=true&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  Promise.all([jget(globalUrl),jget(aggUrl)]).then(function(res){
+    hideErr();
+    var global=res[0]||{}, agg=res[1]||{};
+    lastResolution=global.resolution||b.res;
+    var rows=(global.rows||[]).slice();
+    var combined=(agg.rows||[]);
+    renderGlobal(rows, combined);
+    renderTable(combined);
+    if(selectedEndpoint){ loadDetail(selectedEndpoint, true); }
+    var d=new Date(); $("#updated").text("更新 "+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2));
+  }).catch(function(e){ showErr("读口失败："+e.message); });
+}
+
+function globalRow(rows){for(var i=0;i<rows.length;i++){if(rows[i].endpoint==="*")return rows[i];}return null;}
+function aggGlobal(combined){for(var i=0;i<combined.length;i++){if(combined[i].endpoint==="*")return combined[i];}return null;}
+
+function renderGlobal(rows, combined){
+  var g=aggGlobal(combined)||{};
+  var unit=lastResolution==="hour"?"最差小时":"最差分钟";
+  $("#globalTitle").text("全局 · 当前加权平均 vs "+unit);
+  var p99s=rows.map(function(r){return r.p99==null?null:r.p99;}).filter(function(v){return v!=null;}).sort(function(a,b){return a-b;});
+  var median=p99s.length?nearestRank(p99s,50):null;
+  var distMin=p99s.length?p99s[0]:null, distMax=p99s.length?p99s[p99s.length-1]:null;
+  var kpi=[
+    ["当前 · 加权平均 P99", fmtMs(g.p99), "metrics.html 口径（近似）","cur"],
+    [unit+" P99", fmtMs(g.worstP99), "各桶 P99 的最大值","w"],
+    ["中位分钟 P99", fmtMs(median), "各桶 P99 的中位数",""],
+    ["有数据桶数", fmtInt(g.bucketCount), "最差所依据的桶数",""],
+    ["每桶 P99 分布", (distMin==null?"–":fmtMs(distMin)+" ~ "+fmtMs(distMax)), "范围内从最好到最坏",""],
+    ["P95（最差 / 加权）", fmtMs(g.worstP95)+" / "+fmtMs(g.p95), "", ""]
+  ];
+  $("#kpis").html(kpi.map(function(k){return '<div class="kpi '+k[3]+'"><div class="l">'+esc(k[0])+'</div><div class="v">'+esc(k[1])+'</div><div class="s">'+esc(k[2])+'</div></div>';}).join(""));
+
+  var labels=rows.map(function(r){return labelFor(lastResolution,r.timeBucket*bucketMs(lastResolution));});
+  var series=rows.map(function(r){return r.p99==null?null:r.p99;});
+  var markData=[];
+  if(g.p99!=null) markData.push({yAxis:g.p99,lineStyle:{color:"#fb7185"},label:{formatter:"当前 "+fmtMs(g.p99),color:"#fb7185",position:"insideEndTop"}});
+  if(g.worstP99!=null) markData.push({yAxis:g.worstP99,lineStyle:{color:"#fbbf24"},label:{formatter:unit+" "+fmtMs(g.worstP99),color:"#fbbf24",position:"insideEndTop"}});
+  chart(document.getElementById("globalChart"), labels, series, "每桶 P99", markData);
+}
+
+function renderTable(combined){
+  var list=combined.filter(function(r){return r.endpoint!=="*";});
+  list.sort(function(a,b){
+    var x=a[sortKey],y=b[sortKey];
+    if(typeof x==="string"||typeof y==="string"){x=String(x||"");y=String(y||"");var c=x<y?-1:(x>y?1:0);return sortDesc?-c:c;}
+    x=(x==null?-1:x);y=(y==null?-1:y);return sortDesc?(y-x):(x-y);
+  });
+  var maxWorst=-1; list.forEach(function(r){if(r.worstP99>maxWorst)maxWorst=r.worstP99;});
+  var html=list.map(function(r){
+    var cls=(r.endpoint===selectedEndpoint?"sel":"");
+    var hot=(maxWorst>0&&r.worstP99===maxWorst)?"bad":"";
+    return '<tr class="'+cls+'" data-ep="'+esc(r.endpoint)+'">'
+      + '<td class="mono">'+esc(r.endpoint)+'</td>'
+      + '<td class="'+hot+'">'+fmtMs(r.worstP99)+'</td>'
+      + '<td>'+fmtMs(r.worstP95)+'</td>'
+      + '<td>'+fmtMs(r.worstP50)+'</td>'
+      + '<td class="mut">'+fmtMs(r.p99)+'</td>'
+      + '<td class="mut">'+fmtMs(r.p95)+'</td>'
+      + '<td>'+fmtInt(r.requestCount)+'</td>'
+      + '<td>'+pct(r.errorRate)+'</td>'
+      + '<td class="mut">'+fmtInt(r.bucketCount)+'</td>'
+      + '</tr>';
+  }).join("");
+  $("#epTable tbody").html(html || '<tr><td colspan="9" class="mut">暂无数据</td></tr>');
+  $("#epTable tbody tr").off("click").on("click",function(){ selectEndpoint($(this).data("ep")); });
+  var unit=lastResolution==="hour"?"最差小时 P99":"最差分钟 P99";
+  $("#tableTitle").text("端点 · 按"+unit+"降序（"+rangeLabel()+"）");
+}
+
+function selectEndpoint(ep){ selectedEndpoint=ep; $("#epTable tbody tr").removeClass("sel").filter(function(){return $(this).data("ep")===ep;}).addClass("sel"); loadDetail(ep,false); }
+
+function loadDetail(ep, refreshOnly){
+  var b=computeBuckets();
+  var key=currentRange+"|"+ep;
+  var done=function(rows){
+    var p99s=rows.map(function(r){return r.p99==null?null:r.p99;}).filter(function(v){return v!=null;}).sort(function(a,b){return a-b;});
+    var sum=0,cnt=0; rows.forEach(function(r){if(r.requestCount){sum+=r.requestCount;cnt++;}});
+    var worst=p99s.length?p99s[p99s.length-1]:null;
+    var median=p99s.length?nearestRank(p99s,50):null;
+    $("#detail").show();
+    var unit=lastResolution==="hour"?"最差小时":"最差分钟";
+    $("#detailTitle").text("端点下钻 · "+ep+"（"+rangeLabel()+"）");
+    var dk=[
+      [unit+" P99", fmtMs(worst), ""],
+      ["中位分钟 P99", fmtMs(median), ""],
+      ["有数据桶数", fmtInt(rows.length), ""],
+      ["请求数", fmtInt(sum), ""]
+    ];
+    $("#detailKpis").html(dk.map(function(k){return '<div class="kpi"><div class="l">'+esc(k[0])+'</div><div class="v">'+esc(k[1])+'</div></div>';}).join(""));
+    var labels=rows.map(function(r){return labelFor(lastResolution,r.timeBucket*bucketMs(lastResolution));});
+    var series=rows.map(function(r){return r.p99==null?null:r.p99;});
+    var markData=[]; if(worst!=null) markData.push({yAxis:worst,lineStyle:{color:"#fbbf24"},label:{formatter:unit+" "+fmtMs(worst),color:"#fbbf24"}});
+    chart(document.getElementById("detailChart"), labels, series, "每桶 P99", markData);
+    var enc=encodeURIComponent(ep);
+    $("#detailLinks").html(
+      '<a href="trace-slow.html?endpoint='+enc+'&minLatencyMs=0&limit=50" target="_blank">◔ 慢查询</a>'
+      + '<a href="trace-query.html" target="_blank">◧ 双源对照</a>'
+      + '<a href="trace-view.html" target="_blank">◈ 链路可视化</a>'
+    );
+  };
+  if(!refreshOnly && seriesCache[key]){ done(seriesCache[key]); return; }
+  var url="/inner/sw/metrics/query?endpoint="+encodeURIComponent(ep)+"&fromBucket="+b.from+"&toBucket="+b.to+"&resolution="+b.res+"&limit=1000";
+  jget(url).then(function(res){ var rows=(res&&res.rows)||[]; seriesCache[key]=rows; done(rows); }).catch(function(){ done([]); });
+}
+
+function chart(el, labels, data, seriesName, markData){
+  var c=echarts.getInstanceByDom(el)||echarts.init(el);
+  c.setOption({
+    backgroundColor:"transparent",
+    grid:{left:56,right:16,top:24,bottom:28},
+    tooltip:{trigger:"axis",backgroundColor:"rgba(12,21,38,.95)",borderColor:"#1d2a49",textStyle:{color:"#dde6f5"}},
+    xAxis:{type:"category",data:labels,axisLine:{lineStyle:{color:"#1d2a49"}},axisLabel:{color:"#7d8db3",fontSize:10}},
+    yAxis:{type:"value",axisLine:{lineStyle:{color:"#1d2a49"}},axisLabel:{color:"#7d8db3",fontSize:10,formatter:function(v){return v>=1000?(v/1000)+"s":v+"ms";}},splitLine:{lineStyle:{color:"#141f38"}}},
+    series:[{type:"line",name:seriesName,data:data,showSymbol:false,lineStyle:{color:"#38bdf8"},areaStyle:{color:"rgba(56,189,248,.10)"},
+      markLine:{silent:true,symbol:"none",data:markData||[]}}]
+  }, true);
+}
+
+function setRange(r){ currentRange=r; seriesCache={}; selectedEndpoint=null; $("#detail").hide(); $(".rng").removeClass("on").filter(function(){return $(this).data("r")===r;}).addClass("on"); refresh(); }
+function schedule(){ if(timer)clearInterval(timer); timer=setInterval(function(){ if(polling) refresh(); }, 5000); }
+
+$(function(){
+  $(".rng").on("click",function(){ setRange($(this).data("r")); });
+  $("#pause").on("click",function(){ polling=!polling; $(this).text(polling?"停止轮询":"继续轮询").toggleClass("on",!polling); });
+  $("#epTable thead th").on("click",function(){ var k=$(this).data("k"); if(!k)return; if(sortKey===k){sortDesc=!sortDesc;}else{sortKey=k;sortDesc=true;} refresh(); });
+  refresh(); schedule();
+});
+</script>
+</body>
+</html>
