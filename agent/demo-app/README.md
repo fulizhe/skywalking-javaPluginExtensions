@@ -11,6 +11,10 @@
 - **能力导览**:本 README + 导览首页(`/`,即 `src/main/resources/static/index.html`),讲清插件是什么、logfile 命名来历、怎么跑。
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
+>
+> **要在专用 Linux 服务器上做 compose 全面验证与压测**,看
+> [`README-remote-verify.md`](README-remote-verify.md) —— 三个 profile 怎么选、压测怎么配、
+> 坑集中列在一处(别边跑边踩)。
 
 ## 初学者演示(迁移自旧 demo 工程)
 
