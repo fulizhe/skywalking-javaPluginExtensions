@@ -1,7 +1,16 @@
-# 持续压测编排:demo-app(带 agent 常驻) + stress(无限循环压测)。
+# 本地浏览 / 持续压测编排:demo-app(带 agent 常驻)+ stress(无限循环压测,可选)。
 #
-# 用法(在 agent/demo-app 下):
-#   docker compose up --build -d
+# 【只想在浏览器里看插件效果】——不需要压测,stress 收在 profile 里,默认不起:
+#   docker compose up --build -d demo-app
+#   浏览器打开 http://127.0.0.1:9600/                     (能力导览首页)
+#              http://127.0.0.1:9600/dashboards/index.html (各仪表盘;注意必须带 index.html)
+#   docker compose down
+#
+# ⚠ 仪表盘入口是 /dashboards/index.html,不是 /dashboards/——后者 404,
+#   而 404 会被插件判为错误并真的发一条 ERROR 告警,凭空多出一条假事件。
+#
+# 【要压测观测插件长跑稳定性】——显式带上 stress profile:
+#   docker compose --profile stress up --build -d
 #   docker compose logs -f stress        # 每 10s 一行 [progress]:吞吐 + plugin 计数 + heap
 #   docker compose down                  # 停止并删除容器(volume 保留)
 #
@@ -26,9 +35,9 @@ services:
       - "8092:8092"
     environment:
       WebPort: "9600"
-    # 默认纯指标实例(alert off)。要连告警一起压,在 -D...h2.enabled 之后追加:
-    #   - -Dskywalking.plugin.logfilereporter.alert.enabled=true
-    #   - -Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/status/*=8000;operation:GET:/api/order/*=8000
+    # 默认开 Trace 告警:告警是本插件最直观的可见效果(慢/错请求 → webhook 回打本机 →
+    # 仪表盘"Trace 告警"面板出现事件),默认关会让首次访问的人误以为功能坏了。
+    # 纯指标长跑时删掉下面两行 alert 参数即可(见 NOTES-docker-stress.md)。
     command:
       - java
       - -Xms512m
@@ -40,6 +49,8 @@ services:
       - -Dskywalking.plugin.logfilereporter.h2.console_enabled=true
       - -Dskywalking.plugin.logfilereporter.h2.console_port=8092
       - -Dskywalking.plugin.logfilereporter.metrics.enabled=true
+      - -Dskywalking.plugin.logfilereporter.alert.enabled=true
+      - -Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/api/order/*=8000
       - -jar
       - /opt/demo-app/target/demo-app-1.0.0.jar
     mem_limit: 1g
@@ -51,6 +62,10 @@ services:
       start_period: 90s
 
   stress:
+    # 收在可选 profile 里:默认 `docker compose up` 不启动它。
+    # 原先 stress 与 demo-app 一起默认起,首次只想看效果的人会被无限压测的
+    # 日志与内存占用淹没,且它只压正常端点(纯指标),并不演示告警。
+    profiles: ["stress"]
     image: demo-app-agent:9.4.0
     restart: unless-stopped
     depends_on:
@@ -79,6 +94,13 @@ services:
       - -Dloadtest.durationSec=-1
       - -Dloadtest.threads=16
       - -Dloadtest.progressSec=10
+      # 只压正常端点(排除 /error、/http500):本 profile 的目的是"纯指标稳定性观测",
+      # 而 demo-app 侧现已默认开 Trace 告警。若沿用 HttpLoadTest 的默认路径集,
+      # 错误请求会触发插件**同步 webhook 回打自身**形成放大回路,恰好污染这里要看的
+      # persistErrors/aggregateErrors 计数与 heap 趋势。
+      # 要压"指标+告警耦合",把本行换成含错误端点的路径集即可(如在末尾追加
+      # ,/api/trace-alert-demo/error,/api/trace-alert-demo/http500)。
+      - -Dloadtest.paths=/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
       - -DargLine=-Xmx512m
     mem_limit: 2g
     logging:

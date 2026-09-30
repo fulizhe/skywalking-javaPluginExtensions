@@ -67,6 +67,10 @@ def render_remote_compose(src: str, dst: str) -> None:
         doc = yaml.safe_load(f)
     doc["services"]["demo-app"].pop("build", None)
     stress = doc["services"]["stress"]
+    # 本地编排把 stress 收进 `profiles: ["stress"]`(只想浏览效果时不启动压测)。
+    # 但远端部署本身就是压测部署,且远端只用 `docker compose up -d`(不带 --profile),
+    # 若沿用该字段会静默起不到 stress、日志也无从 tail。故在此显式摘掉。
+    stress.pop("profiles", None)
     stress["volumes"] = [
         (v.replace("../settings.xml", "./settings.xml") if isinstance(v, str) else v)
         for v in stress.get("volumes", [])

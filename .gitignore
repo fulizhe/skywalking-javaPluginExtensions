@@ -54,3 +54,7 @@ dependency-reduced-pom.xml
 
 trace-payload.capped.db
 .openchamber/
+
+# Python(agent/demo-app/deploy/deploy_remote.py)
+__pycache__/
+*.py[cod]
