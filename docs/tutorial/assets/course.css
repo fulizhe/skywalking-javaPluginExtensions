@@ -1,0 +1,282 @@
+/* course.css — 教学空间共享样式表（canonical）。
+   任何 lessons/ 与 reference/ 文档都链接它，保证所有课程观感统一。
+   风格：Tufte 式 — 衬线正文、窄栏、留白多、克制用色、打印友好。
+
+   历史沿革：
+     - 本文件由 omo.css 升格而来（OMO 课程最先需要它）。
+     - omo.css 现为 `@import url("course.css")` 的薄壳，以保持旧课程链接不失效且不重复维护。
+     - 新增组件：.tree / .compare / .path / .up / .matrix / .opt（配合 quiz.js）。
+     - 新增组件：.hub-grid + .outline —— 入口页左侧大纲目录树（可复用，勿内联）。 */
+
+:root {
+  --ink: #1a1a1a;
+  --ink-soft: #3b3b3b;
+  --ink-faint: #6b6b6b;
+  --accent: #8c1a1a;        /* 深红点缀 */
+  --accent-soft: #efe6e6;
+  --rule: #d9d0c7;          /* 暖灰分隔线 */
+  --bg: #fdfcf9;
+  --code-bg: #f2efe9;
+  --ok: #2e6b3a;
+  --ok-soft: #eaf2ea;
+  --err: #a3651d;
+  --err-soft: #fbf0e2;
+  --maxw: 44rem;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 18px; }
+
+body {
+  margin: 0 auto;
+  max-width: var(--maxw);
+  padding: 3.5rem 1.5rem 5rem;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Charter, "Bitstream Charter", Georgia, "Songti SC", "Noto Serif SC", serif;
+  line-height: 1.65;
+  font-feature-settings: "liga" 1, "kern" 1;
+}
+
+h1, h2, h3, h4 {
+  font-family: inherit;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+h1 { font-size: 1.9rem; margin: 0 0 0.4rem; }
+h2 { font-size: 1.4rem; margin: 2.6rem 0 0.7rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.15rem; margin: 1.8rem 0 0.5rem; color: var(--ink-soft); }
+
+p, li { color: var(--ink-soft); }
+p { margin: 0 0 1rem; }
+li { margin-bottom: 0.45rem; }
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(140,26,26,.25); }
+a:hover { border-bottom-color: var(--accent); }
+
+.lede { font-size: 1.1rem; color: var(--ink); font-style: italic; }
+
+.subtitle { color: var(--ink-faint); font-style: italic; margin-bottom: 2rem; }
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: .88em;
+  background: var(--code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  color: #a0251f;
+  white-space: nowrap;
+}
+
+pre {
+  background: var(--code-bg);
+  border-left: 3px solid var(--accent-soft);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  border-radius: 6px;
+  margin: 1.2rem 0;
+}
+pre code { background: none; padding: 0; color: var(--ink-soft); font-size: 0.85rem; white-space: pre; }
+
+/* 卡片：重点框 */
+.callout {
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  padding: 1rem 1.3rem;
+  margin: 1.5rem 0;
+  border-radius: 0 6px 6px 0;
+}
+.callout strong { color: var(--accent); }
+.callout > :last-child { margin-bottom: 0; }
+
+.callout.tip { background: var(--ok-soft); border-left-color: var(--ok); }
+.callout.tip strong { color: var(--ok); }
+
+.callout.warn { background: var(--err-soft); border-left-color: var(--err); }
+.callout.warn strong { color: var(--err); }
+
+/* 表格 */
+table { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: 0.92rem; }
+th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { color: var(--ink); font-weight: 700; border-bottom: 2px solid var(--ink-faint); }
+td code { white-space: nowrap; }
+table.compare th:first-child, table.compare td:first-child { white-space: nowrap; font-weight: 700; color: var(--ink); }
+
+/* 目录树 */
+.tree {
+  font-family: "SFMono-Regular", Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  background: var(--code-bg);
+  border-left: 3px solid var(--accent-soft);
+  padding: 0.9rem 1.1rem;
+  border-radius: 6px;
+  margin: 1.2rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--ink-soft);
+}
+
+/* 文件路径 */
+.path {
+  font-family: "SFMono-Regular", Consolas, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.85em;
+  color: var(--ink-soft);
+  background: none;
+  padding: 0;
+  border-bottom: 1px dotted var(--ink-faint);
+  white-space: normal;
+}
+
+/* 行内标签 */
+.tag {
+  display: inline-block; font-size: 0.7rem; padding: 0.1em 0.5em;
+  border-radius: 10px; vertical-align: middle; letter-spacing: 0.04em;
+}
+.tag.know { background: var(--ok-soft); color: var(--ok); }
+.tag.err  { background: var(--err-soft); color: var(--err); }
+.tag.key  { background: var(--accent-soft); color: var(--accent); }
+
+/* 教学专用：检索练习（配合 assets/quiz.js） */
+.quiz {
+  border: 1px solid var(--rule); border-radius: 8px;
+  padding: 1.3rem; margin: 1.5rem 0; background: #fff;
+}
+.quiz > .q {
+  font-weight: 700; color: var(--ink); margin: 0 0 0.9rem;
+}
+.quiz fieldset { border: 0; padding: 0; margin: 0; }
+.quiz .opt {
+  display: block; padding: 0.5rem 0.7rem; margin-bottom: 0.35rem;
+  border: 1px solid var(--rule); border-radius: 6px; cursor: pointer;
+  color: var(--ink-soft); transition: background .12s, border-color .12s;
+}
+.quiz .opt:hover { background: #faf7f2; }
+.quiz .opt input { margin-right: 0.5rem; }
+.quiz .opt.right { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); font-weight: 700; }
+.quiz .opt.wrong { background: var(--err-soft); border-color: var(--err); }
+.quiz .verdict { margin-top: 0.9rem; font-size: 0.9rem; }
+.quiz .verdict .mark { font-weight: 700; }
+.quiz .verdict.ok  { color: var(--ok); }
+.quiz .verdict.no  { color: var(--err); }
+.quiz .why { color: var(--ink-soft); margin-top: 0.5rem; }
+.quiz .reset {
+  margin-top: 0.8rem; font-size: 0.78rem; color: var(--ink-faint);
+  background: none; border: 0; border-bottom: 1px dotted var(--ink-faint);
+  cursor: pointer; padding: 0;
+}
+.quiz[data-answered="1"] .opt { cursor: default; }
+
+/* 无 JS 时的兜底：details 折叠答案 */
+details.answer { margin-top: 0.9rem; }
+details.answer summary { cursor: pointer; font-size: 0.85rem; color: var(--ink-faint); }
+
+/* 上下页导航 */
+.up {
+  display: inline-block; font-size: 0.85rem; margin-top: 1rem;
+  color: var(--ink-faint); text-decoration: none; border-bottom: 1px dotted var(--ink-faint);
+}
+.up:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── 入口页布局：左侧大纲目录树 + 右侧正文 ──────────────────────────
+   用法：<body class="hub"> > .hub-grid > nav.outline + main
+   约定见 AGENTS.md「教学空间页面格式」。窄屏自动降级为单栏。 */
+
+body.hub { max-width: 70rem; }
+
+.hub-grid {
+  display: grid;
+  grid-template-columns: 15.5rem minmax(0, 1fr);
+  gap: 3rem;
+  align-items: start;
+}
+
+.outline {
+  position: sticky;
+  top: 1.5rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding-right: 0.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+}
+
+.outline-title {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--ink-faint); font-weight: 700; margin: 0 0 0.7rem;
+  padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule);
+}
+
+/* 树：嵌套 ul 用左边框当主干线，li::before 当横向枝丫 */
+.outline ul { list-style: none; margin: 0; padding: 0 0 0 0.8rem; border-left: 1px solid var(--rule); }
+.outline > ul { padding-left: 0; border-left: 0; }
+.outline li { position: relative; margin: 0 0 0.25rem; }
+.outline li::before {
+  content: ""; position: absolute; left: -0.8rem; top: 0.82em;
+  width: 0.55rem; border-top: 1px solid var(--rule);
+}
+.outline > ul > li { margin-bottom: 0.9rem; }
+.outline > ul > li::before { display: none; }
+
+.outline a { color: var(--ink-soft); border-bottom: 1px solid transparent; display: inline-block; }
+.outline a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* 分支名（一条课程线） */
+.outline .branch {
+  font-weight: 700; color: var(--ink); font-size: 0.85rem;
+  letter-spacing: -0.005em;
+}
+.outline .branch .kind {
+  display: block; font-weight: 400; font-size: 0.72rem;
+  color: var(--ink-faint); letter-spacing: 0.02em; margin-top: 0.1rem;
+}
+
+/* 分组标题（LESSONS / REFERENCE / 档案） */
+.outline .group {
+  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-faint); font-weight: 700; margin: 0.8rem 0 0.3rem;
+}
+
+/* 当前页 */
+.outline .cur { color: var(--accent); font-weight: 700; }
+.outline .cur::after { content: " ← 当前页"; font-weight: 400; font-size: 0.72rem; color: var(--ink-faint); }
+
+/* 尚未产出的条目 */
+.outline .todo { color: var(--ink-faint); font-style: italic; }
+
+.outline-foot {
+  margin: 1.2rem 0 0; padding-top: 0.7rem; border-top: 1px solid var(--rule);
+  font-size: 0.72rem; color: var(--ink-faint);
+}
+
+@media (max-width: 62rem) {
+  .hub-grid { grid-template-columns: 1fr; gap: 2rem; }
+  .outline { position: static; max-height: none; overflow: visible; }
+  body.hub { max-width: 44rem; }
+}
+
+@media print {
+  .outline { display: none; }
+  .hub-grid { display: block; }
+}
+
+.foot {
+  margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  font-size: 0.85rem; color: var(--ink-faint);
+}
+.foot code { font-size: 0.95em; }
+
+.meta { font-size: 0.82rem; color: var(--ink-faint); margin-bottom: 2.5rem; }
+
+@media print {
+  body { max-width: 100%; padding: 0; }
+  pre, code, .tree { background: #eee; }
+  pre, .tree { white-space: pre-wrap; word-break: break-word; }
+  a { color: var(--accent); }
+  .quiz .opt { break-inside: avoid; }
+  h2 { break-after: avoid; }
+}
