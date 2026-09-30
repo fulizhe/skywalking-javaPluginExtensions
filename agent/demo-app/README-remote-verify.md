@@ -45,7 +45,7 @@ graph LR
 | 项 | 要求 | 检查 |
 | --- | --- | --- |
 | Docker | Linux 引擎 + compose **v2**(`docker compose`,不是 `docker-compose`) | `docker compose version` |
-| 端口 | `9600`(应用)、`8092`(H2 控制台)空闲;用 deps 时再占 `6379` / `3306` / `9092` | `ss -lntp \| grep -E '9600\|8092'` |
+| 端口 | `9600`(应用)、`8092`(H2 控制台)空闲;用 deps 时再占 `16379` / `13306` / `19092`(宿主映射;**容器内**仍是 6379/3306/9092) | `ss -lntp \| grep -E '9600\|8092'` |
 | 内存 | 全部起齐约 **2.5g**(demo-app 1g + stress 2g + redis 256m + mysql 512m + kafka 768m) | `free -g` |
 | 磁盘 | 首次构建镜像 + maven 缓存,预留 **10g+** | `df -h` |
 | 网络 | 能拉 `maven:3.8.6-eclipse-temurin-8`、`eclipse-temurin:8-jre-alpine` 等基础镜像;agent 发行包走 `archive.apache.org` | 见 §7 坑 1 |
@@ -191,6 +191,8 @@ bash verify/run.sh --matrix          # 附带各场景的依赖版本矩阵
 | 7 | 重新部署后指标归零 | H2 影子库与边聚合都是 `jdbc:h2:mem:` 纯内存,**进程退出即丢**;`docker load` 同 tag 新镜像会让容器重建 | 只想改压测路径就别重建 demo-app 容器;接受归零就重新造数 |
 | 8 | `depends_on` 报"服务未定义" | 跨 profile 的 `depends_on` 在 compose v2 里会报错 | 本编排**故意不给** demo-app 加 deps 依赖,靠服务名解析失败来表达"中间件不在场" |
 | 9 | 9600 端口被占 | 之前有实例没退干净 | `docker compose down` / `ss -lntp \| grep 9600`;应用默认端口是 `9601`,compose 用 `WebPort=9600` 显式指定 |
+| 9b | `Bind for 0.0.0.0:6379/3306 failed: port is already allocated` | 宿主上这些端口被**别的栈**占着(很常见:本机的 RuoYi 之类自带 redis/mysql) | 本编排已把宿主映射改成 `16379` / `13306` / `19092`(容器内不变)。真要占用标准端口就把映射改回去,并先停掉占用方 |
+| 9c | 拉镜像报 `proxyconnect tcp: dial tcp 127.0.0.1:7897: connection refused` | Docker Desktop 的 daemon 跑在虚拟机里,它连的 `127.0.0.1:7897` 是**虚拟机内**的 127.0.0.1,不是你宿主机上那个代理 | Docker Desktop → Settings → Resources → Proxies:**Manual 留空**(不走代理,直连镜像源);或把代理主机写成 `host.docker.internal`。**Apply & Restart** 后重试。宿主侧 `Test-NetConnection 127.0.0.1 -Port 7897` 通不代表 daemon 能连上 |
 | 10 | H2 控制台用宿主 IP 访问返回 404 | H2 2.1.212 的 `WebThread.checkHost` 只放行 server 自身地址与 `localhost`/`127.0.0.1` | 用 `http://127.0.0.1:8092`;远程访问走 SSH 端口转发 `ssh -L 8092:127.0.0.1:8092 user@host` |
 
 ---

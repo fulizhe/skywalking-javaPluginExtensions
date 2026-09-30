@@ -93,14 +93,19 @@ services:
   # ---- deps profile:依赖拓扑演示用的三层中间件(默认不起,见文件头) ----
 
   redis:
-    # Cache 层:jedis 3.8.x → agent jedis-2.x-3.x 插件;组件名 Redis(组件库已收录)
+    # Cache 层:jedis 3.8.x → agent jedis-2.x-3.x 插件;组件名 Jedis(组件库已收录)
     profiles: ["deps"]
-    image: redis:7-alpine
+    # 用 redis:7 而不是 7-alpine:alpine 变体在部分镜像源/代理下更容易拉失败,
+    # 而演示对镜像体积不敏感(差 30MB)。
+    image: redis:7
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      # 映射到宿主机只为现场用 redis-cli 看;demo-app 容器内走服务名 redis:6379
-      - "6379:6379"
+      # 映射到宿主机只为现场用 redis-cli 看 / 给**本机**跑的应用用;
+      # compose 内的 demo-app 容器走服务名 redis:6379(与映射无关)。
+      # 宿主端口选 16379:本机常被其它栈(如 RuoYi 的 redis)占着 6379。
+      # 本机跑应用时对应 DEPS_REDIS_PORT=16379(见 deps.ps1 -Status 的提示)。
+      - "16379:6379"
     mem_limit: 256m
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -119,7 +124,8 @@ services:
       MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
       MYSQL_DATABASE: demo
     ports:
-      - "3306:3306"
+      # 同样避开宿主 3306(常被 RuoYi 的 mysql 占用);本机跑应用用 DEPS_MYSQL_URL 里的 13306
+      - "13306:3306"
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
@@ -144,7 +150,8 @@ services:
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
       ALLOW_PLAINTEXT_LISTENER: "yes"
     ports:
-      - "9092:9092"
+      # 同理避开宿主 9092;本机跑应用用 DEPS_KAFKA_BOOTSTRAP=localhost:19092
+      - "19092:9092"
     mem_limit: 768m
     healthcheck:
       test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]

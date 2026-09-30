@@ -47,9 +47,14 @@ $base = $BaseUrl.TrimEnd('/')
 
 # deps profile 的三件套:服务名 → 宿主端口(仅用于状态提示)
 $DEPS_SERVICES = @(
-    @{ Name = "redis"; Port = 6379; Layer = "Cache";   Component = "Redis" },
-    @{ Name = "mysql"; Port = 3306; Layer = "Database"; Component = "MySQL" },
-    @{ Name = "kafka"; Port = 9092; Layer = "MQ";      Component = "Kafka" }
+    # 宿主机端口(**容器内**仍是标准端口):compose 里映射到 16379/13306/19092 —— 避开宿主上
+    # 常被其它栈(如 RuoYi 的 redis/mysql)占用的 6379/3306/9092。本机跑应用时对应:
+    #   DEPS_REDIS_PORT=16379
+    #   DEPS_MYSQL_URL=jdbc:mysql://localhost:13306/demo?connectTimeout=2000&socketTimeout=3000
+    #   DEPS_KAFKA_BOOTSTRAP=localhost:19092
+    @{ Name = "redis"; Port = 16379; Layer = "Cache";   Component = "Redis" },
+    @{ Name = "mysql"; Port = 13306; Layer = "Database"; Component = "MySQL" },
+    @{ Name = "kafka"; Port = 19092; Layer = "MQ";      Component = "Kafka" }
 )
 
 function Get-ComposeCommand {

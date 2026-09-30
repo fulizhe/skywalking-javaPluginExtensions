@@ -197,6 +197,11 @@ pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 `-Status` 看状态、`-Smoke` 打一遍造数端点、`-Down` 停。跨平台等价写法是
 `docker compose --profile deps up -d`（`agent/demo-app/docker-compose.yaml`）。
 
+> **本机跑应用时连中间件要用映射后的宿主端口**（容器内仍是标准端口）：
+> `DEPS_REDIS_PORT=16379`、`DEPS_MYSQL_URL=jdbc:mysql://localhost:13306/demo?...`、
+> `DEPS_KAFKA_BOOTSTRAP=localhost:19092`。之所以不用 6379/3306/9092，是因为宿主上这些端口
+> 常被别的栈占着（本机的 RuoYi 就自带 redis/mysql）。`deps.ps1 -Status` 会把这几条打出来。
+
 | 造数端点 | 层 | 说明 |
 | --- | --- | --- |
 | **`/api/deps-demo/all`** | **四层一次** | **演示与截图的单一入口**：顺序打 Cache/Database/MQ/外呼，逐层回成败与耗时。`?sleepMs=` 传给 MySQL 造慢边、`?site=` 选外呼站点。中间件未起约 8s、都在时约 1s（**每层有超时，是有界不是挂住**） |
