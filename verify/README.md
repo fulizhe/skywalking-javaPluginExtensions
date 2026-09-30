@@ -1,5 +1,9 @@
 # verify:容器化场景验证回路(Linux/Docker + bash 第一路径)
 
+> **第一次来本仓库?** 先读 [`README-starter.md`](README-starter.md) —— 那份按学习顺序讲
+> 「本地跑起来」:怎么让它留在运行状态用浏览器看、怎么造数据、怎么亲手造一个告警、
+> 出问题按症状怎么查。本 README 只讲回路与场景机制(写新场景的人看)。
+
 `verify/` 是插件端到端验证的**主路径**:在 Linux / CI / Windows(Docker Desktop)任一环境,用一条
 `bash` 命令完成「构建插件 → 构建 demo-app → 装配 agent → 启动 → 造数 → 断言 → 报告」,以退出码表达结果。
 

@@ -3,6 +3,10 @@
 #### 介绍
 Skywalking Java Agent插件 和 OAP端的扩展。
 
+#### 上手
+- **第一次来？** 见 [`verify/README-starter.md`](./verify/README-starter.md) —— 只需 Docker，按学习顺序带你本地跑通：一条命令让演示应用常驻、用浏览器看仪表盘、造数据、亲手造一个告警，出问题按症状查。
+- 跑自动化断言（改完代码提交前）：`bash verify/run.sh --scenario logfile-reporter`，详见 [`verify/README.md`](./verify/README.md)。
+
 #### 开发约定
 
 - **给 AI/Agent 看的约定**：见 [`AGENTS.md`](./AGENTS.md) —— 包含模块维护状态、JDK 17 构建/运行约定，以及 OpenCode/OMO 工具怪癖的排查指引（遇到"发送命令失败"等怪问题，先看那里，别在插件代码里找）。顺带读一下能少走弯路。
