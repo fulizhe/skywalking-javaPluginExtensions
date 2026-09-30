@@ -335,13 +335,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			limit = 2000;
 		}
 		final List<EdgeRow> snapshot = edgeAggregator.snapshot();
-		final boolean truncated = snapshot.size() > limit;
-		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
-		for (int i = 0; i < snapshot.size() && (i < limit || !truncated); i++) {
+		final int size = Math.min(snapshot.size(), limit);
+		final boolean truncated = snapshot.size() > size;
+		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>(size);
+		for (int i = 0; i < size; i++) {
 			rows.add(snapshot.get(i).toMap());
-		}
-		for (Map<String, Object> row : rows) {
-			row.put("timeBucketStart", ((Number) row.get("timeBucket")).longValue() * 60_000L);
 		}
 		result.put("enabled", true);
 		result.put("count", rows.size());

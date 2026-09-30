@@ -32,33 +32,10 @@ public class EdgeRow {
     private final int sampleCount;
     private final boolean operationsTruncated;
 
-    /** 由聚合器回填的操作名截断标记（构造参数之外的派生状态，故单独提供带标记的构造）。 */
-    private EdgeRow(final EdgeRow base, final boolean operationsTruncated) {
-        this.endpoint = base.endpoint;
-        this.componentId = base.componentId;
-        this.spanLayer = base.spanLayer;
-        this.operations = base.operations;
-        this.timeBucket = base.timeBucket;
-        this.requestCount = base.requestCount;
-        this.errorCount = base.errorCount;
-        this.totalLatency = base.totalLatency;
-        this.maxLatency = base.maxLatency;
-        this.p50 = base.p50;
-        this.p90 = base.p90;
-        this.p95 = base.p95;
-        this.p99 = base.p99;
-        this.sampleCount = base.sampleCount;
-        this.operationsTruncated = operationsTruncated;
-    }
-
-    public EdgeRow withOperationsTruncated() {
-        return this.operationsTruncated ? this : new EdgeRow(this, true);
-    }
-
     public EdgeRow(final String endpoint, final int componentId, final String spanLayer,
             final List<String> operations, final long timeBucket, final long requestCount, final long errorCount,
             final long totalLatency, final long maxLatency, final int p50, final int p90, final int p95,
-            final int p99, final int sampleCount) {
+            final int p99, final int sampleCount, final boolean operationsTruncated) {
         this.endpoint = endpoint;
         this.componentId = componentId;
         this.spanLayer = spanLayer;
@@ -73,7 +50,16 @@ public class EdgeRow {
         this.p95 = p95;
         this.p99 = p99;
         this.sampleCount = sampleCount;
-        this.operationsTruncated = false;
+        this.operationsTruncated = operationsTruncated;
+    }
+
+    /** 常规构造（操作名未被截断）。 */
+    public EdgeRow(final String endpoint, final int componentId, final String spanLayer,
+            final List<String> operations, final long timeBucket, final long requestCount, final long errorCount,
+            final long totalLatency, final long maxLatency, final int p50, final int p90, final int p95,
+            final int p99, final int sampleCount) {
+        this(endpoint, componentId, spanLayer, operations, timeBucket, requestCount, errorCount, totalLatency,
+                maxLatency, p50, p90, p95, p99, sampleCount, false);
     }
 
     public String getEndpoint() {

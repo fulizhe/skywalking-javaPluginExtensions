@@ -2,10 +2,12 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.metrics;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
@@ -253,7 +255,7 @@ public class EdgeMetricsAggregator {
 
     /** 组件数（不含兜底组件）。 */
     private int componentCount(final Map<EdgeKey, EdgeAccumulator> byKey) {
-        final java.util.Set<Integer> seen = new java.util.HashSet<Integer>();
+        final Set<Integer> seen = new HashSet<Integer>();
         for (EdgeKey key : byKey.keySet()) {
             if (!OTHER_EDGE_ENDPOINT.equals(key.endpoint) && key.componentId != OTHER_EDGE_COMPONENT) {
                 seen.add(key.componentId);
@@ -285,11 +287,10 @@ public class EdgeMetricsAggregator {
 
     private EdgeRow toRow(final long bucket, final EdgeKey key, final EdgeAccumulator accumulator) {
         final int[] percentiles = accumulator.percentiles();
-        final EdgeRow row = new EdgeRow(key.endpoint, key.componentId, key.spanLayer, accumulator.operationList(),
-                bucket, accumulator.requestCount, accumulator.errorCount, accumulator.totalLatency,
-                accumulator.maxLatency, percentiles[0], percentiles[1], percentiles[2], percentiles[3],
-                accumulator.sampleCount);
-        return accumulator.operationsTruncated ? row.withOperationsTruncated() : row;
+        return new EdgeRow(key.endpoint, key.componentId, key.spanLayer, accumulator.operationList(), bucket,
+                accumulator.requestCount, accumulator.errorCount, accumulator.totalLatency, accumulator.maxLatency,
+                percentiles[0], percentiles[1], percentiles[2], percentiles[3], accumulator.sampleCount,
+                accumulator.operationsTruncated);
     }
 
     private void bump(final String name) {
@@ -360,15 +361,32 @@ public class EdgeMetricsAggregator {
     /** 单条边在一个分钟桶内的聚合单元：精确计数 + 小蓄水池耗时样本 + 去重操作名。 */
     private static final class EdgeAccumulator {
 
+        /** 这条边在这一分钟被调了多少次。一次出口 span 记一次，不做 traceId 去重。 */
         private long requestCount;
+        /** 其中出错多少次（取自出口 span 的 isError）。 */
         private long errorCount;
+        /** 所有耗时之和。想算平均耗时就拿它 ÷ 调用次数。 */
         private long totalLatency;
+        /** 见过的最慢一次耗时。抓"慢尾巴"靠它。 */
         private long maxLatency;
+        /**
+         * 总共见过多少条样本（<b>含</b>没被蓄水池留下的那些）。蓄水池满后靠它算"抽中第几个"
+         * 来定替换概率——保证每条样本被留下的机会一样，这叫等概率抽样。
+         */
         private long seen;
+        /**
+         * 耗时的蓄水池本体。固定 {@link #EDGE_MAX_SAMPLES_PER_KEY} 条：先到先塞，满了之后
+         * 每来一条就随机顶掉旧的一条。平时是乱序的，算分位时才排序。
+         * <p>
+         * 刻意<b>远小于</b>端点级的 5000——边键是「端点 × 组件」交叉积，存活对象数会被放大。
+         * </p>
+         */
         private final long[] samples = new long[EDGE_MAX_SAMPLES_PER_KEY];
+        /** 池子里当前放了多少条（= min(见过数, 上限)）。既是水位，也是算分位时的有效长度。 */
         private int sampleCount;
         /** 该边上出现过的出口操作名（去重、有上限）。只增不删，随桶一起淘汰。 */
         private final LinkedHashMap<String, Boolean> operations = new LinkedHashMap<String, Boolean>();
+        /** 操作名是否因超过 {@link #MAX_OPERATIONS_PER_EDGE} 而被截断（读口要据此提示页面）。 */
         private boolean operationsTruncated;
 
         void add(final long duration, final boolean error, final Random random) {

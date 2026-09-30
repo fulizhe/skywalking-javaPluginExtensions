@@ -3,7 +3,9 @@ package org.apache.skywalking.apm.agent.core.reporter.logfile.metrics;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.skywalking.apm.network.language.agent.v3.RefType;
 import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SegmentReference;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanLayer;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
 import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
@@ -138,22 +140,56 @@ public class EdgeMetricsAggregatorTest {
     /**
      * <b>核心取舍的钉子</b>：异步（跨段）出口依赖<b>不进图</b>。
      * <p>
-     * 理由：跨段配对需要维护"父段 ID → 入口端点"的有界索引，而本仓 trace 热层与 H2 内存层都是
-     * 分钟级窗口 + FIFO 淘汰，父段可能已被淘汰——那会产生<b>无法与"没有这个调用"区分</b>的随机缺边，
-     * 比缺边本身更坏。此测试存在的意义是防止后人"顺手修好"它而破坏已知边界。
+     * 构造的是**真正的跨段形态**：异步子段的段内**没有 Entry span**（根是 Local），
+     * 但它**带父段引用**（{@code SegmentReference}）——所以它<b>不是</b>孤段，
+     * {@code isOrphanSegment} 会放它进链路存储，也确实会到达本聚合器。
+     * 这与「无引用无 Entry」的孤段是<b>两种不同形态</b>，各自的测试分开钉。
+     * </p>
+     * <p>
+     * 不建边的理由：跨段配对需要维护「父段 ID → 入口端点」的有界索引，而本仓 trace
+     * 内存热层与 H2 内存层都是分钟级窗口 + FIFO 淘汰，父段可能已被淘汰——
+     * 那会产生<b>无法与"没有这个调用"区分</b>的随机缺边，比缺边本身更坏。
+     * </p>
+     * <p>
+     * 此测试存在的意义是防止后人"顺手修好"它而破坏已知边界。<b>改动前请先读这段注释。</b>
      * </p>
      */
     @Test
     public void doesNotCreateEdgeForAsyncCrossSegmentExit() {
         final EdgeMetricsAggregator aggregator = newAggregator();
         final long t = now();
-        // 异步子段：段内只有 Exit，没有 Entry span。
-        aggregator.onSegment(SegmentObject.newBuilder().setTraceId("t").setTraceSegmentId("child").setService(SERVICE)
-                .addSpans(exit("H2/JDBC/PreparedStatement/executeQuery", COMPONENT_H2, t, t + 100L, false))
+        // 异步子段:根 span 是 Local 且带父段引用(指向父段的 Entry),段内另有 Exit。
+        final SegmentObject asyncChild = SegmentObject.newBuilder().setTraceId("t-child").setTraceSegmentId("child")
+                .setService(SERVICE)
+                .addSpans(SpanObject.newBuilder().setSpanId(0).setParentSpanId(-1).setOperationName("async work")
+                        .setStartTime(t).setEndTime(t + 50L).setSpanType(SpanType.Local)
+                        .addRefs(SegmentReference.newBuilder().setRefType(RefType.CrossThread)
+                                .setTraceId("t-parent").setParentTraceSegmentId("parent-seg").setParentSpanId(0)
+                                .setParentService(SERVICE).setParentEndpoint("GET:/api/order/1")
+                                .setParentServiceInstance(SERVICE + "-i1").build())
+                        .build())
+                .addSpans(exit("H2/JDBC/PreparedStatement/executeQuery", COMPONENT_H2, SpanLayer.Database, t, t + 100L,
+                        false))
+                .build();
+
+        aggregator.onSegment(asyncChild);
+
+        Assert.assertTrue("带父段引用的异步子段不应产生依赖边", aggregator.snapshot().isEmpty());
+        Assert.assertEquals("应计入无入口段计数(有引用,但段内无 Entry)",
+                1L, ((Number) aggregator.snapshotCounters().get("noEntrySpan")).longValue());
+    }
+
+    @Test
+    public void doesNotCreateEdgeForOrphanSegmentWithoutEntryOrRef() {
+        // 与上面的跨段形态对照:无引用且无 Entry = 孤段,更不该建边。
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        final long t = now();
+        aggregator.onSegment(SegmentObject.newBuilder().setTraceId("t").setTraceSegmentId("s").setService(SERVICE)
+                .addSpans(exit("H2/JDBC/PreparedStatement/executeQuery", COMPONENT_H2, SpanLayer.Database, t, t + 100L,
+                        false))
                 .build());
 
-        Assert.assertTrue("异步子段不应产生依赖边", aggregator.snapshot().isEmpty());
-        Assert.assertEquals("应计入无入口段计数", 1L, aggregator.snapshotCounters().get("noEntrySpan"));
+        Assert.assertTrue(aggregator.snapshot().isEmpty());
     }
 
     @Test
