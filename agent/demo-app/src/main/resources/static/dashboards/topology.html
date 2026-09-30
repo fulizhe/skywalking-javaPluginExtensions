@@ -86,7 +86,6 @@
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
     <button class="sec win" data-min="60" type="button">近 1 小时</button>
   </span>
-  <button id="btn-refresh" class="sec" type="button">刷新</button>
   <button id="btn-poll" class="on" type="button">停止刷新</button>
   <span class="summary" id="summary">加载中…</span>
 </div>
@@ -119,8 +118,9 @@
       <h2><span>调用关系图</span><span class="hint" id="chart-hint"></span></h2>
       <div id="chart"></div>
       <div class="legend">
-        <div><b>节点形状 = 组件大类</b>（扫一眼就能分清层次）：<b>柱体</b> Database ·
-             <b>六边形</b> MQ · <b>菱形</b> Http · <b>三角</b> Cache · <b>圆形</b> 其它/本服务</div>
+        <div><b>节点图标 = 组件类型</b>（与 SkyWalking 拓扑图同一套读法）：<b>圆柱</b> 数据库 ·
+             <b>堆叠盘</b> 缓存 · <b>六边形</b> 消息队列 · <b>云朵</b> HTTP 出网 ·
+             <b>圆环</b> 其它 · <b>实心圆</b> 本服务</div>
         <div><b>节点边框色 = SLA 分档</b>（按该组件所有边的错误率；阈值硬编码，非 OAP 的 100/99.9/99/95）</div>
         <div>
           <span class="swatch" style="background:#86efac"></span>无错误
@@ -206,20 +206,67 @@
     return e.componentName || ("component-" + e.componentId);
   }
 
-  // 节点形状 = 组件大类。借 spanLayer(SkyWalking 插件给出的层分类)判定,不按组件名硬编码 ——
-  // 组件名会随组件库措辞变(h2-jdbc-driver / Mysql / kafka-producer),层分类稳定。
-  // 目的是"扫一眼分清层次",不是精确分类,所以兜底一律圆形。
-  var LAYER_SHAPES = {
-    "Database": "roundRect",
-    "MQ": "hexagon",
-    "Http": "diamond",
-    "Cache": "triangle",
-    "RPCFramework": "pentagon",
-    "gRPC": "rect"
+  // 节点图标:按组件名优先、层分类兜底。**内联 SVG**(零网络请求、无新依赖)。
+  // 为什么不用"逐个组件的官方 svg":SkyWalking UI 的 icon 目录是几百个带版权头的文件,
+  // 拷进 demo-app 属于另一条线;这里只保证**常见组件一眼能认**,认出层次而不是背组件表。
+  // 若哪天要官方图标,改这里的 map 即可(ECharts symbol 支持 image:// 路径)。
+  var ICON_SVG = {
+    // 数据库:圆柱(经典 DB 符号)
+    database: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<ellipse cx="20" cy="9" rx="12" ry="4.5" fill="none" stroke="#7fd1ff" stroke-width="2.4"/>'
+      + '<path d="M8 9v22c0 2.5 5.4 4.5 12 4.5s12-2 12-4.5V9" fill="none" stroke="#7fd1ff" stroke-width="2.4"/>'
+      + '<path d="M8 20c0 2.5 5.4 4.5 12 4.5s12-2 12-4.5" fill="none" stroke="#7fd1ff" stroke-width="2"/>'
+      + '</svg>',
+    // 缓存:三片堆叠的盘(ECharts 的 Cache 类默认形状)
+    cache: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<rect x="7" y="8" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
+      + '<rect x="7" y="16.8" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
+      + '<rect x="7" y="25.6" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
+      + '</svg>',
+    // 消息队列:六边形 + 三个点(Kafka 三节点)
+    mq: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<polygon points="20,4 34,12 34,28 20,36 6,28 6,12" fill="none" stroke="#c3e88d" stroke-width="2.4"/>'
+      + '<circle cx="14" cy="25" r="2.7" fill="#c3e88d"/><circle cx="20" cy="16" r="2.7" fill="#c3e88d"/>'
+      + '<circle cx="26" cy="25" r="2.7" fill="#c3e88d"/>'
+      + '</svg>',
+    // HTTP 出网:云 + 双向箭头
+    http: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<path d="M14 30a7.5 7.5 0 0 1 .5-14.5A9.5 9.5 0 0 1 32 18.5 5.8 5.8 0 0 1 31.5 30z" fill="none"'
+      + ' stroke="#e6c07b" stroke-width="2.4"/>'
+      + '<path d="M11 20h11m-3.5-3.5L22 20l-3.5 3.5" fill="none" stroke="#e6c07b" stroke-width="2.2"/>'
+      + '</svg>',
+    // 兜底:圆环
+    generic: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<circle cx="20" cy="20" r="12" fill="none" stroke="#9aa4b2" stroke-width="2.4"/>'
+      + '</svg>',
+    // 本服务:实心圆 + 环(中心节点只有它,不该和外部依赖同形)
+    self: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<circle cx="20" cy="20" r="7" fill="#7fd1ff"/><circle cx="20" cy="20" r="12.5" fill="none"'
+      + ' stroke="#7fd1ff" stroke-width="2.2"/>'
+      + '</svg>'
   };
 
-  function shapeFor(spanLayer) {
-    return LAYER_SHAPES[spanLayer] || "circle";
+  function svgSymbol(svg) {
+    return "image://data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function iconFor(componentName, spanLayer) {
+    var n = String(componentName || "").toLowerCase();
+    if (n.indexOf("jedis") >= 0 || n.indexOf("redis") >= 0
+        || n === "cache" || spanLayer === "Cache") {
+      return svgSymbol(ICON_SVG.cache);
+    }
+    if (n.indexOf("kafka") >= 0 || n.indexOf("mq") >= 0 || spanLayer === "MQ") {
+      return svgSymbol(ICON_SVG.mq);
+    }
+    if (spanLayer === "Http" || n.indexOf("http") >= 0 || n.indexOf("hutool") >= 0) {
+      return svgSymbol(ICON_SVG.http);
+    }
+    if (spanLayer === "Database" || n.indexOf("jdbc") >= 0 || n.indexOf("mysql") >= 0
+        || n.indexOf("h2") >= 0 || n.indexOf("postgres") >= 0) {
+      return svgSymbol(ICON_SVG.database);
+    }
+    return svgSymbol(ICON_SVG.generic);
   }
 
   // 依赖节点身份:总览档=组件类型;明细档=组件类型 + 出口操作名
@@ -392,7 +439,7 @@
     function yAt(i, n) { return n <= 1 ? 60 : 60 + (i * 420) / (n - 1); }
     if (isSummary) {
       nodes.push({
-        id: SELF_ID, name: "本服务", category: 0, symbolSize: 44,
+        id: SELF_ID, name: "本服务", category: 0, symbolSize: 44, symbol: svgSymbol(ICON_SVG.self),
         // 单节点贴顶会与右列错位,总览档按右列高度垂直居中
         x: 90, y: rows <= 1 ? 60 : 60 + 210,
         itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 },
@@ -420,7 +467,7 @@
       var d = deps[dk];
       var rate = d.n > 0 ? d.err / d.n : 0;
       nodes.push({
-        id: d.id, name: d.name, category: 1, symbolSize: 40, symbol: shapeFor(d.spanLayer),
+        id: d.id, name: d.name, category: 1, symbolSize: 40, symbol: iconFor(d.comp, d.spanLayer),
         // 右列 x=545 而非更靠右:标签在节点右侧,靠右会被面板右边界裁掉
         x: 545, y: yAt(i, rows),
         itemStyle: { color: "#1c2027", borderColor: slaColor(rate), borderWidth: 3 },
@@ -640,7 +687,6 @@
 
   document.getElementById("btn-summary").addEventListener("click", function () { setView("summary"); });
   document.getElementById("btn-detail").addEventListener("click", function () { setView("detail"); });
-  document.getElementById("btn-refresh").addEventListener("click", function () { load(); });
   Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (b) {
     b.addEventListener("click", function () {
       state.minutes = Number(b.getAttribute("data-min"));
