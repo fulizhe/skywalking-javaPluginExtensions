@@ -212,6 +212,7 @@ pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 | --- | --- |
 | **连接没建起来的依赖不进图** | 出口 span 建立在"连接已建立之后的调用"上，`connection refused` / 主机名解析失败发生在它**之前** → **没有依赖边**。所以 Redis/MySQL 连不上时图上该组件**缺席**，缺席**不能**读成"没有这个调用"（确认请看链路视图） |
 | **有边 ≠ 一定是红的** | Kafka `send` 超时那种"调用发生了但客户端只是超时"的情况，边会存在而 `errorCount` 仍可能是 0（出口 span 不由该异常置 `isError`）。**红边只表示 span 被判错** |
+| **判成功 ≠ 调用真的成功** | 反过来也不成立：Kafka 在 broker 不可达时 `send()` 等满 `max.block.ms` 抛超时，而 agent 的 producer span 靠**异步 callback** 回填错误、同步超时没有 callback → 该边 `errorCount = 0`，**只有耗时涨到超时上限**（如 3.02s）是线索。判断成功与否以端点响应体 / 业务日志为准 |
 | **节点只到组件类型** | 不按实例地址、不按外呼站点拆分（3 个站点 = 1 个 Http 节点） |
 | **只做段内配对** | 同一链路段内的 Entry × Exit；`@Async` 出口不进图（跨段需父段索引，父段可能已淘汰） |
 | **每条出网调用都显式超时** | Redis 1s / MySQL 2s+3s / Kafka 3s+5s+3s / Hutool 3s。造数端点会被 16 线程压测打、也被页面 5s 轮询读 |

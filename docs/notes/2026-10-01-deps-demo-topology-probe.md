@@ -75,7 +75,18 @@ demo-app 自带 `component-libraries.yml` 里的顶层键：
 最终实测：`op=consume` **1.97s**（首次，含 ensureTopic）/ **0.30s**（后续）；`op=produce` 3.0s（`max.block.ms` 兜住）。
 
 **顺带一条发现**：`op=produce` 超时那条边 `errorCount = 0` —— agent 的 kafka producer span **不会**因为
-`send()` 的 `max.block.ms` 超时被判错。所以「有边」与「红边」是两件事，**红边只表示 span 被判错**。
+`send()` 的 `max.block.ms` 超时被判错。原因：它靠 `send()` 的**异步 callback**（`onCompletion`）回填错误，
+而 broker 不可达时 `send()` 同步等满 `max.block.ms` 就抛了，**根本没有 callback 回来**。
+
+所以要分清两件事：
+
+| 图上读到的 | 实际含义 |
+| --- | --- |
+| 有边 + `errorCount = 0` + 耗时 ≈ `max.block.ms`（实测 3.02s） | **调用失败了**，只是 span 没被判错 |
+| 有边 + `errorCount = 0` + 耗时很小 | 调用大概率真成功 |
+
+「有边」与「红边」是两件事；**反过来"判成功"也不等于"调用成功"**。判断成功与否要看端点自己的
+响应体（`{"ok":false,"error":"...TimeoutException..."}`）或业务日志，不能只看颜色。
 
 ## 四、各通道超时的**实际生效值**（无中间件状态）
 

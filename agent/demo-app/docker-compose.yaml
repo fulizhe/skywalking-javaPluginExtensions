@@ -21,11 +21,18 @@
 #     curl "http://127.0.0.1:9600/api/deps-demo/mysql?sleepMs=300"
 #     curl "http://127.0.0.1:9600/api/deps-demo/kafka?op=produce"
 #     curl "http://127.0.0.1:9600/api/deps-demo/http?site=httpbin"
+#   一条命令打齐四层: curl "http://127.0.0.1:9600/api/deps-demo/all"
+#   全貌入口(每种被监控的组件各一次): curl "http://127.0.0.1:9600/fullSample"
 #   浏览器打开 http://127.0.0.1:9600/dashboards/topology.html
 #
-# 不带 deps profile 时 demo-app **照调**这三个依赖,连不上就变成图里的**红边**
-# (错误率着色)——所以没起中间件也能验证"组件识别 + 边级错误",不是"没有依赖"。
-# 外网可达性取决于宿主网络:baidu / google 不通同样是红边,属预期,不是故障。
+# 不带 deps profile 时 demo-app **照调**这三个依赖,但结果分两种(**都不是"红边"**):
+#   - Cache / Database(Redis / MySQL):连接都没建起来 → **不产生依赖边**,图上这两个组件**缺席**。
+#     缺席**不能**读成"没有这个调用"(确认请看链路视图)。
+#   - MQ / 外呼(Kafka / HTTP):调用本身被观测到 → **有边**,但 errorCount 可能仍是 0
+#     (Kafka 在 broker 不可达时 send() 等满 max.block.ms 抛超时,而 agent 的 producer span
+#      靠异步 callback 回填错误、同步超时没有 callback —— 判成功 ≠ 调用真的成功)。
+# 所以没起中间件也能验证"组件识别",只是 Cache/Database 两层要在起中间件后才看得见。
+# 外网可达性取决于宿主网络:baidu / google 不通同样表现为无边或失败边,属预期,不是故障。
 #
 # 观测点:stress 日志里 plugin= 段(rowsUpserted/lateDropped/sampleOverflow/
 # endpointOverflow/persistErrors/aggregateErrors)是否异常增长、heap= 是否持续攀升;
@@ -49,8 +56,9 @@ services:
     environment:
       WebPort: "9600"
       # deps profile 的中间件地址:容器内用 compose 服务名。
-      # 不起 deps profile 时这些服务名解析不了 → DepsDemoController 连不上即红边
-      # (见文件头说明),不会静默不出边。MySQL 的超时参数必须在 URL 上,配置侧已带。
+      # 只有 deps profile 起着时这些服务名才解析得到;不起时 → Cache/Database 两层**没有依赖边**
+      # (连接未建立不产生出口 span),MQ/外呼仍有边 —— 见文件头说明,不是"红边"。
+      # MySQL 的超时参数必须在 URL 上,配置侧已带。
       DEPS_REDIS_HOST: redis
       DEPS_MYSQL_URL: "jdbc:mysql://mysql:3306/demo?connectTimeout=2000&socketTimeout=3000"
       DEPS_MYSQL_USER: demo
@@ -184,8 +192,13 @@ services:
       # persistErrors/aggregateErrors 计数与 heap 趋势。
       # 要压"指标+告警耦合",把本行换成含错误端点的路径集即可(如在末尾追加
       # ,/api/trace-alert-demo/error,/api/trace-alert-demo/http500)。
-      # /fullSample?deps=false:全貌入口默认带三层依赖,中间件未起时约 8s/请求会把吞吐拖垮。
-      # 要连依赖面一起压,加 --profile deps 并把 /api/deps-demo/* 路径加进下面这行。
+      # /fullSample?deps=false —— 默认关掉依赖三层,原因:**stress profile 单独起时中间件不在**
+      # (redis/mysql/kafka 只在 deps profile 里),全貌入口默认那四次调用会各等 1~3s 超时
+      # ≈ 8s/请求,把吞吐拖垮。
+      # 要连依赖面一起压 —— 两个 profile 一起起,并把本行换成:
+      #   docker compose --profile stress --profile deps up --build -d
+      #   -Dloadtest.paths=/hello,/fullSample,/api/deps-demo/redis?op=set,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
+      # (去掉 ?deps=false 让全貌入口带上三层,再显式补上可单独造慢边的路径)
       - -Dloadtest.paths=/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
       - -DargLine=-Xmx512m
     mem_limit: 2g
