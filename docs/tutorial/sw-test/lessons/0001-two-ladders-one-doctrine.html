@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 1 课 · 两个测试台，一条信条</title>
+<link rel="stylesheet" href="../../assets/course.css">
+</head>
+<body>
+
+<h1>第 1 课 · 两个测试台，一条信条</h1>
+<p class="subtitle">读懂 <a href="https://github.com/apache/skywalking-java/tree/main/test"><code>apache/skywalking-java/test</code></a> 的全貌，以及它背后那条真正值钱的设计主张。</p>
+
+<div class="callout tip">
+  <strong>本课战果。</strong> 看完这一课，你能打开 <code>test/plugin/scenarios/</code> 下任意一个目录，
+  在 5 分钟内说清三件事：<b>它声明了什么</b>、<b>它断言了什么</b>、<b>为什么这两件事被严格分开</b>。
+  并且能解释为什么这套东西<b>不</b>用 mock 单元测试。
+</div>
+
+<p class="meta">第 1 课 · 约 10 分钟 · 无需动手环境，先读懂结构</p>
+
+<h2>一、先纠正一个直觉：<code>test/</code> 不是「一个测试模块」</h2>
+
+<p>你给的链接里只有一个 <code>test/</code> 目录，很容易以为它是一套东西。实际上它是<b>两台
+完全不同的机器</b>，服务两种不同的问题：</p>
+
+<table class="compare">
+<thead>
+<tr><th></th><th><code>test/plugin</code></th><th><code>test/e2e</code></th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>回答的问题</td>
+  <td>「这个插件<b>插桩对不对</b>？兼容哪些版本？」</td>
+  <td>「整条链路<b>接通了吗</b>？」</td>
+</tr>
+<tr>
+  <td>真相从哪来</td>
+  <td>容器内一个<b>假的 OAP</b>（mock collector，端口 19876）接收 agent 真实上报的数据</td>
+  <td><b>真的</b>拉起 OAP + BanyanDB，再用 <code>swctl</code> 发 GraphQL 查回来</td>
+</tr>
+<tr>
+  <td>粒度</td>
+  <td>一个 scenario = 一个插件 × 一组版本</td>
+  <td>一个 case = 一套 provider / consumer 组合</td>
+</tr>
+<tr>
+  <td>量级与耗时</td>
+  <td>200+ scenario，每个几分钟</td>
+  <td>少数几个 case，每个十几到几十分钟</td>
+</tr>
+<tr>
+  <td>谁该写</td>
+  <td><b>插件作者</b>（加插件就加它的 scenario）</td>
+  <td>框架/OAP 侧的人（验证组件<b>之间</b>的接线）</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <strong>选哪台机器，看你要回答的问题落在哪一格。</strong>
+  大多数人第一次接触时想用 <code>test/e2e</code>，因为它看起来「更完整」。但如果你要验证的是
+  「我写的插件有没有正确地把 span 打出来」，那 <code>test/e2e</code> 是<b>过度</b>的：
+  它要为一件事拉起一整套 OAP。选错阶梯的代价是慢到没人愿意跑。
+</div>
+
+<h2>二、那条信条：场景就是测试</h2>
+
+<p>Apache 自己在 <a href="https://github.com/apache/skywalking-java/blob/main/test/plugin/CLAUDE.md"><code>test/plugin/CLAUDE.md</code></a>
+里的原话很直接：</p>
+
+<div class="callout warn">
+  <p>「对一个 agent 插件来说，<b>插件测试场景就是那个主要且充分的测试</b>。
+  <b>不要</b>为了插件过度设计、堆一堆单元测试。」</p>
+  <p style="margin-bottom:0">— <a href="https://github.com/apache/skywalking-java/blob/main/test/plugin/CLAUDE.md"><code>test/plugin/CLAUDE.md</code></a>，Testing philosophy</p>
+</div>
+
+<p>为什么这么绝对？因为一个插桩插件的真实风险<b>只有两处</b>，而这两处 mock 在结构上就测不到：</p>
+
+<h3>风险一：cast / 取数据逻辑</h3>
+<p>插件把拦截到的参数强转成框架类型，再从上面读 header、method、URI、status、param。
+如果框架的实际类<b>根本没有你以为的那个方法</b>，或者某个版本换了包名——你的 mock
+写得再对也照样绿，因为 <b>mock 里那个类是你自己造的那个类</b>。mock 只能证明
+「代码符合我对框架的假设」，证不了「假设成立」。</p>
+
+<h3>风险二：版本兼容</h3>
+<p>同一份 interceptor 要在 N 个版本上工作。mock 是你挑的版本，它对不对全凭你自觉。</p>
+
+<div class="callout tip">
+  <strong>关键洞察。</strong> 跑一次真框架的 scenario，把上面两件事<b>同时</b>证明了——
+  因为真实类真的被加载了、真实版本真的被增强过。<b>一次运行，两份证据。</b>
+  这就是为什么他们敢劝退 mock 单测：不是嫌 mock 差，是嫌 mock 在这里<b>信息量为零</b>。
+</div>
+
+<h3>对照你自己的仓库看这个道理</h3>
+
+<p>你不用相信我，去看自己代码——反面例子就摆在这儿：</p>
+
+<table class="compare">
+<thead>
+<tr><th></th><th><code>logfile-reporter-plugin</code></th><th>含义</th></tr>
+</thead>
+<tbody>
+<tr><td>mock 单元测试</td><td>约 <b>169</b> 个</td><td>证明逻辑分支被覆盖</td></tr>
+<tr><td>场景断言（<code>verify/</code>）</td><td><b>24</b> 条</td><td>证明端到端行为对</td></tr>
+</tbody>
+</table>
+
+<p>169 比 24，多出来的那 145 条在测「我的代码按我以为的方式运行」。它们不是没价值
+（重构护栏、分支覆盖），但它们<b>没有一条</b>能证明「agent 增强之后，interceptor 真的从
+真实的 logback 对象上读到了它要的东西」。那是 <code>verify/</code> 那 24 条干的活。
+数量和覆盖风险完全是两回事——这是本课最该带走的一句话。</p>
+
+<h2>三、精读：一个 scenario 的两份契约</h2>
+
+<p>框架自带两个 Maven archetype（<code>jvm</code> 和 <code>tomcat</code>），
+<code>generator.sh</code> 就是拿它们生成新 scenario 的。所以 <b>archetype 就是 scenario 的
+标准合同</b>——比任何真实 scenario 都干净，没有框架特有的噪声。看 <code>tomcat</code> 那个：</p>
+
+<div class="tree">archetypes/tomcat/…/archetype-resources/
+├── configuration.yml          ← 契约一：声明「怎么跑」
+├── config/
+│   └── expectedData.yaml      ← 契约二：声明「必须产生什么」
+├── support-version.list       ← 声明「跑哪些版本」
+├── pom.xml
+└── src/main/
+    ├── java/
+    │   ├── CaseServlet.java        被测入口
+    │   └── HealthCheckServlet.java 健康检查（注意：处理 HEAD）
+    ├── resources/log4j2.xml
+    └── webapp/WEB-INF/web.xml</div>
+
+<h3>契约一：<code>configuration.yml</code> —— 只说「怎么跑」</h3>
+
+<p>下面是 archetype 里的<b>原文</b>（只剥掉了 Apache license 头，<code>${…}</code> 是
+archetype 模板变量，<code>generator.sh</code> 会替换掉）：</p>
+
+<pre><code>type: tomcat
+entryService: http://localhost:8080/${scenario_name}/case/${scenario_case}
+healthCheck: http://localhost:8080/${scenario_name}/case/healthCheck
+environment:
+dependencies:</code></pre>
+
+<p>注意它<b>刻意不写什么</b>：不写 Tomcat 版本，不写 JDK 版本，不写期望的 span。
+这三样分别由 CI 泳道、<code>support-version.list</code> 和 <code>expectedData.yaml</code> 负责。
+配置只回答「把这个东西怎么启动起来、然后敲哪个 URL」。</p>
+
+<h3>契约二：<code>config/expectedData.yaml</code> —— 只说「必须产生什么」</h3>
+
+<p>同样是 archetype 原文，<b>几乎是空的</b>——因为框架不知道你要插什么桩：</p>
+
+<pre><code>registryItems:
+  services:
+    - {${scenario_name}: 2}
+  instances:
+    - {${scenario_name}: 1}
+  operationNames:
+    - ${scenario_name}: []
+  heartbeat: []
+segmentItems:
+  - serviceName: ${scenario_name}
+    segmentSize:
+    segments:</code></pre>
+
+<p>四类断言对象：<code>registryItems</code>（服务/实例注册）、<code>segmentItems</code>（链路），
+后面还有 <code>meterItems</code>（指标）、<code>logItems</code>（日志）。
+<b>你的测试代码一行断言都不写</b>——你写的是一份数据，通用引擎拿它去比对容器里抓到的真实上报。</p>
+
+<div class="callout">
+  <strong>这份「两份契约严格分离」是整套设计里最值钱的东西。</strong>
+  环境怎么来和数据应该长什么样，是两个正交的变化轴。改断言不碰环境，改环境不碰断言。
+  这个模式的名字叫<b>声明式预言</b>，第 2 课专门拆它。
+</div>
+
+<h3>真实的 expectedData.yaml 长什么样：看那个 <code>refs</code> 块</h3>
+
+<p>上面是空模板。真要看「断言完整形状」是什么意思，看
+<a href="https://github.com/apache/skywalking-java/tree/main/test/plugin/scenarios/struts2.7-scenario"><code>struts2.7-scenario</code></a>
+的 <code>config/expectedData.yaml</code>（原文节选）：</p>
+
+<pre><code>segmentItems:
+- serviceName: struts2.7-scenario
+  segmentSize: gt 2
+  segments:
+  - segmentId: not null
+    spans:
+    - operationName: /struts2.7-scenario/case/case1.action
+      parentSpanId: -1
+      spanId: 0
+      spanLayer: Http
+      startTime: gt 0
+      endTime: gt 0
+      componentId: 15
+      isError: false
+      spanType: Entry
+      peer: ''
+      tags:
+      - {key: url, value: 'http://localhost:8080/struts2.7-scenario/case/case1.action'}
+      - {key: http.method, value: GET}
+      - {key: http.status_code, value: '200'}
+      refs:
+      - {parentEndpoint: /struts2.7-scenario/case/case.action, networkAddress: 'localhost:8080',
+        refType: CrossProcess, parentSpanId: 1, parentTraceSegmentId: not null,
+        parentServiceInstance: not null, parentService: struts2.7-scenario, traceId: not null}</code></pre>
+
+<p>这个场景打的是 <code>curl → case.action → 它自己发起的 HttpClient 调用 → case1.action</code>，
+所以真实链路上有 <b>2 个 entry + 1 个 exit</b>。而 <code>case1.action</code> 上这个
+<code>refs</code> 块是<b>整份文件里最值钱的 8 行</b>：</p>
+
+<div class="callout warn">
+  <strong>它证明了「跨进程上下文真的传过去了」。</strong>
+  没有 <code>refs</code>，<code>case1.action</code> 就是一个孤立的 span，和
+  <code>case.action</code> 没有任何关系——你测的其实是两个独立的东西。
+  上游把这叫<b>假通过</b>：<a href="https://github.com/apache/skywalking-java/blob/main/test/plugin/CLAUDE.md"><code>CLAUDE.md</code></a>
+  原话是「断言了 span 却不断言 ref 的 scenario，并没有证明传播」。
+</div>
+
+<p>顺带注意值不是字面量：<code>not null</code>、<code>gt 2</code>、<code>gt 0</code>。
+traceId、segmentId、耗时都是运行时生成的，写死就永远失败。所以<b>宽松匹配是被迫的</b>——
+但被迫不等于随意：哪些字段放宽、为什么放宽，是写在文件里的<b>显式决定</b>，不是默认值。
+这条取舍第 2 课细讲。</p>
+
+<h3>顺带一个必知细节：<code>type: jvm</code> 的 <code>startup.sh</code></h3>
+
+<p>fat-jar 场景（<code>type: jvm</code>）的 <code>bin/startup.sh</code> 原文只有一行有效代码：</p>
+
+<pre><code>home="$(cd "$(dirname $0)"; pwd)"
+java -jar ${agent_opts} ${home}/../libs/${scenario_name}.jar &amp;</code></pre>
+
+<p><code>${agent_opts}</code> 那个占位符<b>不能删</b>。框架靠它注入 <code>-javaagent:</code> 行；
+删了它 agent 根本没挂上，场景必挂，而且失败信息会把人引到「去查插件逻辑」这个错误方向上。
+这类<b>失败信息误导</b>的坑，是密闭测试框架的典型副作用，后面第 3 课实跑时会撞到更多。</p>
+
+<h2>四、检索练习</h2>
+
+<p>先别往下看，闭眼答一遍。这两条是本课的骨架。</p>
+
+<div class="quiz" data-answer="B">
+  <p class="q">1. <code>test/plugin</code> 判定一个 scenario 通过与否，最终取决于什么？</p>
+  <fieldset>
+    <label class="opt"><input type="radio" name="q1" value="A">应用正常启动且无异常日志</label>
+    <label class="opt"><input type="radio" name="q1" value="B">真实上报数据匹配预期规则</label>
+    <label class="opt"><input type="radio" name="q1" value="C">健康检查接口按时返回成功</label>
+    <label class="opt"><input type="radio" name="q1" value="D">打包产物里含被测插件的包</label>
+  </fieldset>
+  <div class="verdict" hidden></div>
+  <div class="why">
+    <p><b>为什么。</b> 启动成功、健康检查通过、jar 打进包了——这些都是<b>必要条件</b>，
+    框架内部逐步检查，任何一步不过都会在更早的地方退出。它们都<b>不构成</b>「通过」的定义。</p>
+    <p>「通过」的唯一定义是最后一步：<code>skywalking-validator</code> 拿
+    <code>expectedData.yaml</code> 和容器里 mock collector 抓到的真实数据比对，全部满足才退出 0。
+    注意 D 项是<b>真的会被检查</b>的（<code>PLUGIN_LOAD_REGEX</code> 之类），
+    但它是「插件有被加载」而非「插件行为正确」——这是最容易被混为一谈的两个命题。</p>
+  </div>
+  <button class="reset" type="button">重答</button>
+</div>
+
+<div class="quiz" data-answer="A">
+  <p class="q">2. 断言「跨进程传播生效」时，最不能省的是哪一项？</p>
+  <fieldset>
+    <label class="opt"><input type="radio" name="q2" value="A">第二个入口上的跨进程引用块</label>
+    <label class="opt"><input type="radio" name="q2" value="B">入口链路片段的耗时在阈值内</label>
+    <label class="opt"><input type="radio" name="q2" value="C">退出链路片段的对端地址非空</label>
+    <label class="opt"><input type="radio" name="q2" value="D">整条链路的片段总数正好为二</label>
+  </fieldset>
+  <div class="verdict" hidden></div>
+  <div class="why">
+    <p><b>为什么。</b> A 是<b>唯一</b>能区分「两个独立请求」和「一次调用链」的证据。
+    没有 <code>refs</code>，你断言的 2 个 entry span 可能来自两次毫不相干的独立请求，
+    测试照样绿——这就是<b>假通过</b>。</p>
+    <p>C 有价值（peer 说明 exit span 指对了目标），但它只证明「知道往哪发」，
+    不证明「对面收到了我是谁」。B 是性能断言，和传播正交。
+    D 恰恰是<b>陷阱</b>：真实环境里 agent 自己的健康探测也会产生 segment，所以
+    <code>segmentSize</code> 必须用 <code>ge</code> 而不是 <code>eq</code>——
+    写成 <code>eq</code> 会得到一个<b>偶发失败</b>的测试，比没有更糟。</p>
+  </div>
+  <button class="reset" type="button">重答</button>
+</div>
+
+<h2>五、5 分钟动手：验证你真读懂了</h2>
+
+<p>不要跳。合上上面的内容，自己做三件事：</p>
+
+<ol>
+  <li>打开 <a href="https://github.com/apache/skywalking-java/tree/main/test/plugin/scenarios/httpclient-4.3.x-scenario"><code>scenarios/httpclient-4.3.x-scenario</code></a>，
+      读它的 <code>configuration.yml</code> 和 <code>config/expectedData.yaml</code>。</li>
+  <li>回答：<b>它有没有 <code>refs</code> 块？为什么应该有还是没有？</b>
+      （提示：看 <code>type</code> 和它的应用形态。）</li>
+  <li>然后做真正有价值的对照：打开你仓库的
+      <span class="path">verify/scenarios/override-httpclient/checks.sh</span>，
+      找出它里面<b>等价于</b>「断言 <code>http.request.params</code> 这个 tag」的那一条命令，
+      写下来。</li>
+</ol>
+
+<div class="callout tip">
+  <strong>第 3 步是本课的真正作业。</strong>
+  上游写 <code>- {key: http.params, value: '...'}</code>（一行声明）；
+  你的 <code>checks.sh</code> 要写一串 jq 管道去从应用接口的返回里刨出同一个事实。
+  同一个断言，两种范式——<b>声明式 vs 命令式</b>。
+  这就是第 2 课要拆的东西，也是你能带走的最直接的一件工具。
+</div>
+
+<h2>六、这在别处叫什么（可迁移性）</h2>
+
+<p>你说这门课要能用到别的 Java 项目、甚至 Go 项目上。那就逐条对上号——<b>学到模式，
+而不是学到 API</b>：</p>
+
+<table class="compare">
+<thead><tr><th>本课看到的</th><th>换个名字你可能已经认识</th></tr></thead>
+<tbody>
+<tr>
+  <td>「场景即测试」，劝退 mock 单测</td>
+  <td><a href="https://testing.googleblog.com/2010/12/test-sizes.html">Testing on the Boundary</a>
+      （Michael Feathers）；Google 的「小/中/大测试」分级——核心主张一致：<b>不要 mock 你要测的那一层</b>。
+      Go 生态对应 <code>httptest</code> + 真依赖，而非 mock 掉自己的 handler</td>
+</tr>
+<tr>
+  <td><code>expectedData.yaml</code> 当预言</td>
+  <td><a href="https://approvaltests.com/">Approval Tests</a>、Jest snapshot、
+      Go 的 golden file、<a href="https://docs.pact.io/">Pact</a> 契约文件——
+      全都是同一个形状：<b>期望写成数据，交给通用引擎比对</b></td>
+</tr>
+<tr>
+  <td>宽松匹配算子（<code>not null</code> / <code>gt</code>）</td>
+  <td>容差断言；OpenAPI schema 级校验；property-based testing 的 matcher</td>
+</tr>
+<tr>
+  <td>「不断言 refs 就是假通过」</td>
+  <td><a href="https://martinfowler.com/articles/mutationTesting.html">变异测试</a>存在的全部理由：
+      一个改坏了代码还绿的测试，等于没测</td>
+</tr>
+<tr>
+  <td>mock collector 冒充 OAP</td>
+  <td>Testcontainers + WireMock / Mountebank / gRPC test server。Java 用
+      <a href="https://java.testcontainers.org/">Testcontainers</a>，Go 用
+      <a href="https://golang.testcontainers.org/">testcontainers-go</a></td>
+</tr>
+<tr>
+  <td>版本钉在 CI 泳道，不在配置里</td>
+  <td>依赖注入、Terraform 的 variable/provider 分离、12-factor 的 config 原则</td>
+</tr>
+<tr>
+  <td><code>generator.sh</code> + archetype</td>
+  <td>脚手架即框架的一部分。Go 的 <code>go test</code> 模板、Spring Initializr、
+      <code>cargo new</code>。没有脚手架的框架，采纳率会死在「不知道从哪抄一个」</td>
+</tr>
+</tbody>
+</table>
+
+<h2>七、一手资料与下一步</h2>
+
+<div class="callout tip">
+  <strong>本课主源（只读这一份就够）：</strong>
+  <a href="https://github.com/apache/skywalking-java/blob/main/test/plugin/CLAUDE.md"><code>test/plugin/CLAUDE.md</code></a>
+  —— Apache 写给「要加插件测试的人」的指南，本课大半论断出自这里。9 KB，读得完。
+</div>
+
+<p>想深挖机制（全部字段语义、匹配算子全集）时再查
+<a href="https://github.com/apache/skywalking-java/blob/main/docs/en/setup/service-agent/java-agent/Plugin-test.md"><code>docs/…/Plugin-test.md</code></a>。
+术语随时查 <a href="../reference/glossary.html"><code>reference/glossary.html</code></a>。</p>
+
+<h3>下一课预告</h3>
+<p><b>第 2 课 · 声明式预言</b> —— 把 <code>expectedData.yaml</code> 拆开：匹配算子的全部语义、
+为什么必须宽松、宽松的代价是什么、以及怎么判断一条断言是「有效」还是「宽松到没用」。
+带一个动手改 YAML 的练习。</p>
+
+<p><b>然后是第 3 课</b> —— 真跑起来。在 Docker 里把一个场景跑绿，<b>然后故意把插件改坏，
+看它变红</b>。这是唯一能证明「我的测试有效」的手段，也是这套东西最值得偷师的一招。</p>
+
+<div class="callout">
+  <strong>有任何不清楚的，直接问。</strong> 哪一段读着卡、哪个术语不认识、
+  「这个结论在我自己的项目里对应什么」——都可以问。我是你的老师，
+  这页任何一个地方看不懂都是我的问题。
+</div>
+
+<p class="foot">
+  <a href="../../index.html">← 返回课程目录</a> ·
+  术语表：<a href="../reference/glossary.html">glossary.html</a> ·
+  下一课《声明式预言》尚未产出——上完这课再回来，或让 agent 继续生成。<br>
+  样式由 <code>../assets/course.css</code> 提供 · 打印友好
+</p>
+
+<script src="../../assets/quiz.js"></script>
+</body>
+</html>
