@@ -11,6 +11,11 @@ Example:
 
 Env fallbacks: DEPLOY_SSH_HOST, DEPLOY_SSH_USER, DEPLOY_SSH_PASSWORD, DEPLOY_SSH_PORT.
 
+Stress paths: the local compose deliberately压测**只压正常路径**(排除 /error、/http500)，
+因为错误路径会触发同步 webhook 回打自身形成放大环路，污染指标稳定性观测。但远端这台
+压力机要的是"指标+告警"全压，故本脚本默认把 `-Dloadtest.paths` 覆盖成含错误路径的混合
+列表；传 `--stress-paths compose` 可沿用 compose 里的值。
+
 What it does:
   1. docker save <image> | gzip  -> local temp tar.gz
   2. render an image-only compose (drops the local build context, points the
@@ -37,6 +42,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_COMPOSE = os.path.normpath(os.path.join(HERE, "..", "docker-compose.yaml"))
 DEFAULT_SETTINGS = os.path.normpath(os.path.join(HERE, "..", "..", "settings.xml"))
 
+# 远端压力机的默认压测路径：正常 + 错误/告警(全压)。与本地 compose 的"只压正常路径"不同，
+# 见模块 docstring 的取舍说明。
+STRESS_PATHS_FULL = ("/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,"
+                      "/api/trace-alert-demo/error,/api/trace-alert-demo/http500,/longTimeTask")
+LOADTEST_PATHS_PREFIX = "-Dloadtest.paths="
+
 
 def local_image_exists(image: str) -> bool:
     rc = subprocess.call(["docker", "image", "inspect", image],
@@ -62,7 +73,19 @@ def build_tarball(image: str, out_path: str) -> None:
     print(f"[local] tarball ready: {size_mb:.0f} MB")
 
 
-def render_remote_compose(src: str, dst: str) -> None:
+def set_loadtest_paths(command: list, paths: str) -> bool:
+    """把 command 里的 -Dloadtest.paths 覆盖成 paths；没有就追加。返回是否发生了覆盖。"""
+    if not isinstance(command, list):
+        return False
+    for i, arg in enumerate(command):
+        if isinstance(arg, str) and arg.startswith(LOADTEST_PATHS_PREFIX):
+            command[i] = LOADTEST_PATHS_PREFIX + paths
+            return True
+    command.append(LOADTEST_PATHS_PREFIX + paths)
+    return False
+
+
+def render_remote_compose(src: str, dst: str, stress_paths: str | None = None) -> None:
     with open(src, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     doc["services"]["demo-app"].pop("build", None)
@@ -75,6 +98,10 @@ def render_remote_compose(src: str, dst: str) -> None:
         (v.replace("../settings.xml", "./settings.xml") if isinstance(v, str) else v)
         for v in stress.get("volumes", [])
     ]
+    if stress_paths:
+        applied = set_loadtest_paths(stress.get("command", []), stress_paths)
+        print(f"[local] stress paths -> {stress_paths}"
+              f"{'' if applied else '  (WARN: compose 里没有 -Dloadtest.paths, 已追加)'}")
     with open(dst, "w", encoding="utf-8") as f:
         yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
     print(f"[local] rendered remote compose -> {dst}")
@@ -150,7 +177,12 @@ def main() -> int:
     ap.add_argument("--settings", default=DEFAULT_SETTINGS)
     ap.add_argument("--skip-load", action="store_true", help="skip docker save/upload/load")
     ap.add_argument("--keep-tarball", action="store_true", help="keep local temp tar.gz")
+    ap.add_argument("--stress-paths", default=STRESS_PATHS_FULL,
+                    help="压测路径(逗号分隔)。默认=全压(含 /error,/http500)；"
+                         "传 'compose' 沿用 compose 里的值(只压正常路径)")
     args = ap.parse_args()
+
+    stress_paths = None if str(args.stress_paths).strip().lower() == "compose" else args.stress_paths
 
     if not args.host or not args.password:
         ap.error("--host and --password (or DEPLOY_SSH_HOST/DEPLOY_SSH_PASSWORD) are required")
@@ -169,7 +201,7 @@ def main() -> int:
             build_tarball(args.image, tarball)
 
         compose_tmp = os.path.join(tempfile.gettempdir(), "docker-compose.remote.yaml")
-        render_remote_compose(args.compose, compose_tmp)
+        render_remote_compose(args.compose, compose_tmp, stress_paths)
 
         print(f"[ssh] connecting {args.user}@{args.host}:{args.port}")
         client = ssh_connect(args.host, args.port, args.user, args.password)
