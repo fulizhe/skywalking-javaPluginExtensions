@@ -159,15 +159,59 @@ pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 
 - **纯指标稳定性**:`pwsh ./scripts/run-with-agent.ps1 -NoAlert` 起实例 + `pwsh ./scripts/stress.ps1 -NormalOnly`(只压正常端点,排除 `/error`、`/http500`)。
 - **指标 + 告警耦合**:`run-with-agent.ps1`(默认 alert on) + `stress.ps1`(默认混合路径,含 error);错误请求会触发插件**同步 webhook 回打自身**,形成放大回路。
+- **依赖面观测**:`run-with-agent.ps1 -WithDeps` + `stress.ps1 -WithDeps`(与前两条互斥,见下)。
 - `stress.ps1 -StartApp` 自身起的应用**不带 alert**(纯指标)。
 
-常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`(只压正常端点)、`-KeepRunning`、`-SkipMetrics`。
+> `-NormalOnly` 与 `-WithDeps` **互斥**:前者压业务正常端点,后者压依赖造数端点。同时给会直接报错退出(1),
+> 避免"以为压了正常端点、实际压的是依赖端点"这种静默偏差。
+
+常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`(只压正常端点)、`-WithDeps`(只压依赖造数端点,与 `run-with-agent.ps1 -WithDeps` 同名同义)、`-KeepRunning`、`-SkipMetrics`。
 
 > 稳定性观测:`-Continuous` 下每轮 `[progress]` 行含 `plugin=` 段,即插件 `/inner/sw/metrics` 的计数
 > (`rowsUpserted`/`lateDropped`/`sampleOverflow`/`endpointOverflow`/`persistErrors`/`aggregateErrors`)——
 > 持续观察这些计数是否异常增长、以及 `heap=` 是否持续攀升，即可判断插件在长跑下的稳定性。
 
 压测后浏览器打开 `http://127.0.0.1:9600/dashboards/metrics.html`。
+
+## 依赖拓扑演示（依赖面三层 + 真实外呼）
+
+`/dashboards/topology.html` 画的是「我调了哪些外部依赖、哪条路慢」。总览档左侧只有一个
+**本服务**节点（窗口内全部入口端点的聚合：合计调用 / 合计错误 / 覆盖端点数），
+右侧按**组件类型**排开依赖；端点维度在明细档与页面边列表里。
+
+起齐三层中间件（**默认 profile 不起**，避免拖慢只想看效果的人）——Windows 上两条命令闭环：
+
+```powershell
+# 1) 起应用，-WithDeps 先拉起 redis / mysql / kafka（Docker 没起也不报错，只是三层没有边）
+pwsh ./scripts/run-with-agent.ps1 -WithDeps
+
+# 2) 压测造数，-WithDeps 让压测路径切到依赖造数端点，边与分位持续累积
+pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
+```
+
+只要中间件不想经脚本拉（例如已经在 compose 里起着），用 `pwsh ./scripts/deps.ps1 -Up`；
+`-Status` 看状态、`-Smoke` 打一遍造数端点、`-Down` 停。跨平台等价写法是
+`docker compose --profile deps up -d`（`agent/demo-app/docker-compose.yaml`）。
+
+| 造数端点 | 层 | 说明 |
+| --- | --- | --- |
+| `/api/deps-demo/redis?op=get\|set\|del` | Cache | 三种 op 在明细档落成三个节点（节点身份 = 组件 + 出口操作名） |
+| `/api/deps-demo/mysql?sleepMs=0` | Database | 只 `SELECT 1` / `SELECT SLEEP(?)`，**不建表**；`sleepMs` 上限 3000，用来看分位与四档着色 |
+| `/api/deps-demo/kafka?op=produce\|consume` | MQ | KRaft 单节点；topic 由端点内 AdminClient 首次调用时建 |
+| `/api/deps-demo/http?site=httpbin\|baidu\|google` | 外呼 | **白名单枚举**（不接受任意 URL）；三个站点同属 Http 组件 → 仍是**一个**节点 |
+
+读图口径（页内 caveats 同款）：
+
+| 口径 | 含义 |
+| --- | --- |
+| **连接没建起来的依赖不进图** | 出口 span 建立在"连接已建立之后的调用"上，`connection refused` / 主机名解析失败发生在它**之前** → **没有依赖边**。所以 Redis/MySQL 连不上时图上该组件**缺席**，缺席**不能**读成"没有这个调用"（确认请看链路视图） |
+| **有边 ≠ 一定是红的** | Kafka `send` 超时那种"调用发生了但客户端只是超时"的情况，边会存在而 `errorCount` 仍可能是 0（出口 span 不由该异常置 `isError`）。**红边只表示 span 被判错** |
+| **节点只到组件类型** | 不按实例地址、不按外呼站点拆分（3 个站点 = 1 个 Http 节点） |
+| **只做段内配对** | 同一链路段内的 Entry × Exit；`@Async` 出口不进图（跨段需父段索引，父段可能已淘汰） |
+| **每条出网调用都显式超时** | Redis 1s / MySQL 2s+3s / Kafka 3s+5s+3s / Hutool 3s。造数端点会被 16 线程压测打、也被页面 5s 轮询读 |
+| **中间件客户端版本要对齐 agent 插件** | 版本落在 support 范围外会**静默不生效**（不报错、图上就是没那个节点）。见 `NOTES-docker-stress.md` 第 16 条 |
+
+依赖边是**纯内存、分钟级窗口、重启即失**；单边样本 <20 时 `p90/p95/p99` 显示 `-1` 属正常口径。
 
 ## 术语指引
 
@@ -180,6 +224,9 @@ pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 | Trace 告警 | 基于已合并链路的慢/错识别规则,命中后经 HTTP webhook 通知外部;默认关闭 |
 | 运行时开关 | 不重启应用即启用/禁用数据流写入本地缓存,用于对比验证 |
 | 演示应用 / 验证回路 | 面向读者的可视化样例 / 面向作者的快速反馈通道(一条命令全流程) |
+| 依赖边 | 一次链路段内「入口端点 × 外部依赖」的调用关系;纯内存、分钟级窗口、重启即失 |
+| 依赖拓扑 | 以自身服务为中心、向外画出「调了哪些外部依赖」的视图;节点只到**组件类型** |
+| 总览档 / 明细档 | 依赖拓扑页的两档:总览档左列是**本服务单点**、右列按组件类型(节点少而稳定,可截图对比);明细档左列是入口端点、右列按组件 + 出口操作名 |
 
 ## 结构
 
@@ -201,6 +248,7 @@ agent/demo-app/
     ├── setup.ps1              # 环境自足:检测/下载 agent、装插件、产出启动命令
     ├── validate.ps1           # 验证回路(构建→安装→启动→造数→断言→报告)
     ├── validate-h2.ps1        # H2 影子存储 + Trace 指标专项验证
+    ├── deps.ps1               # 依赖拓扑演示的中间件编排(-Up/-Down/-Status/-Smoke/-All)
     ├── stress.ps1             # 压测辅助(起应用/压测/指标摘要/停应用;委托 HttpLoadTest)
     ├── run-with-agent.ps1     # IDE/手动模式(同参,保持运行)
     └── start-demo.ps1         # 纯应用启动(无 agent)

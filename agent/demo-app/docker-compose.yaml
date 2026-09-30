@@ -14,6 +14,19 @@
 #   docker compose logs -f stress        # 每 10s 一行 [progress]:吞吐 + plugin 计数 + heap
 #   docker compose down                  # 停止并删除容器(volume 保留)
 #
+# 【想看依赖拓扑图的"分层"】——显式带上 deps profile,起 Redis / MySQL / Kafka:
+#   docker compose --profile deps up --build -d
+#   造数(每条至少点一次,让依赖边出现):
+#     curl "http://127.0.0.1:9600/api/deps-demo/redis?op=set"
+#     curl "http://127.0.0.1:9600/api/deps-demo/mysql?sleepMs=300"
+#     curl "http://127.0.0.1:9600/api/deps-demo/kafka?op=produce"
+#     curl "http://127.0.0.1:9600/api/deps-demo/http?site=httpbin"
+#   浏览器打开 http://127.0.0.1:9600/dashboards/topology.html
+#
+# 不带 deps profile 时 demo-app **照调**这三个依赖,连不上就变成图里的**红边**
+# (错误率着色)——所以没起中间件也能验证"组件识别 + 边级错误",不是"没有依赖"。
+# 外网可达性取决于宿主网络:baidu / google 不通同样是红边,属预期,不是故障。
+#
 # 观测点:stress 日志里 plugin= 段(rowsUpserted/lateDropped/sampleOverflow/
 # endpointOverflow/persistErrors/aggregateErrors)是否异常增长、heap= 是否持续攀升;
 # demo-app 侧另见 docker compose logs -f demo-app 与 /opt/skywalking-agent/logs/。
@@ -35,6 +48,14 @@ services:
       - "8092:8092"
     environment:
       WebPort: "9600"
+      # deps profile 的中间件地址:容器内用 compose 服务名。
+      # 不起 deps profile 时这些服务名解析不了 → DepsDemoController 连不上即红边
+      # (见文件头说明),不会静默不出边。MySQL 的超时参数必须在 URL 上,配置侧已带。
+      DEPS_REDIS_HOST: redis
+      DEPS_MYSQL_URL: "jdbc:mysql://mysql:3306/demo?connectTimeout=2000&socketTimeout=3000"
+      DEPS_MYSQL_USER: demo
+      DEPS_MYSQL_PASSWORD: demo
+      DEPS_KAFKA_BOOTSTRAP: "kafka:9092"
     # 默认开 Trace 告警:告警是本插件最直观的可见效果(慢/错请求 → webhook 回打本机 →
     # 仪表盘"Trace 告警"面板出现事件),默认关会让首次访问的人误以为功能坏了。
     # 纯指标长跑时删掉下面两行 alert 参数即可(见 NOTES-docker-stress.md)。
@@ -60,6 +81,69 @@ services:
       timeout: 5s
       retries: 30
       start_period: 90s
+
+  # ---- deps profile:依赖拓扑演示用的三层中间件(默认不起,见文件头) ----
+
+  redis:
+    # Cache 层:jedis 3.8.x → agent jedis-2.x-3.x 插件;组件名 Redis(组件库已收录)
+    profiles: ["deps"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      # 映射到宿主机只为现场用 redis-cli 看;demo-app 容器内走服务名 redis:6379
+      - "6379:6379"
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  mysql:
+    # Database 层:mysql-connector-java 8.0.x → agent mysql-8.x 插件。
+    # **不建表、不挂 init sql**:DepsDemoController 只 SELECT 1 / SLEEP(?),
+    # 省掉初始化脚本与数据卷,起来即可用。
+    profiles: ["deps"]
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: demo
+    ports:
+      - "3306:3306"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  kafka:
+    # MQ 层:kafka-clients 2.8.x → agent kafka-0.11.x/1.x/2.x 插件;KRaft 单节点,
+    # 不配 ZooKeeper。首次 produce 时由 DepsDemoController 的 AdminClient 建 topic。
+    profiles: ["deps"]
+    image: bitnami/kafka:3.6
+    restart: unless-stopped
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "0@kafka:9093"
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9092:9092"
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
 
   stress:
     # 收在可选 profile 里:默认 `docker compose up` 不启动它。

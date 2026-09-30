@@ -4,8 +4,7 @@
 
 **Blocked by:** 无。
 
-**Status:** open
-
+**Status:** resolved —— compose config 校验通过(默认只 demo-app,--profile deps 多三个);容器内实跑未做(本机 docker daemon 不可用)
 ## 编排
 
 - [ ] 三个 service：`redis`、`mysql`、`kafka`，**全部 `profiles: ["deps"]`** —— 沿用仓库既有做法（`stress` 就收在 profile 里），默认 `up` 保持轻量不变。

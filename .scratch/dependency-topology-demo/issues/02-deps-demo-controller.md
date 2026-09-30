@@ -4,8 +4,7 @@
 
 **Blocked by:** 无（可先做；中间件在 03 起）。
 
-**Status:** open
-
+**Status:** resolved —— 8 个端点全部有界(最慢 kafka produce 3.2s,consume 597ms);实测修掉 fat jar 下 MySQL 驱动未注册 与 kafka 2.8.2 consumer close() 无界等待
 ## 依赖与配置
 
 - [ ] `pom.xml` 加三个（agent 侧插件已就位，宿主组件库已收录，**组件名零改动**）：

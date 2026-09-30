@@ -183,4 +183,89 @@ run_checks() {
 
   # 页面可达(不测渲染 —— 本仓验证回路只打读口、从不看页面 HTML,无先例不新建基建)
   assert_eq "依赖拓扑页 HTTP 200" 200 "$(http_code "/dashboards/topology.html")"
+
+  log ""
+  log "---- 断言 F: 依赖面造数端点(组件识别 / 超时不挂住 / 白名单)----"
+  # 分层设计:中间件不在场时端点**照调**,于是"组件识别 + 边级指标"在**任何机器上**都能验。
+  # 但有一条实测出来的边界必须写进断言(见 docs/notes/2026-10-01-deps-demo-topology-probe.md):
+  #   **连接建立失败不产生依赖边** —— Jedis/MySQL 连不上时图上**没有**该组件节点,
+  #   因为出口 span 建立在"连接已建立之后的调用"上,connection refused 发生在它之前。
+  #   所以"无中间件时 Redis/MySQL 应有红边"是**不成立**的,不能写成断言。
+  #   真正能必测的是:连接不需要成功的通道(Kafka 的 send、Hutool 外呼)一定有边。
+  local depsApi=(
+    "/api/deps-demo/redis?op=set"
+    "/api/deps-demo/redis?op=get"
+    "/api/deps-demo/redis?op=del"
+    "/api/deps-demo/mysql"
+    "/api/deps-demo/mysql?sleepMs=300"
+    "/api/deps-demo/kafka?op=produce"
+    "/api/deps-demo/kafka?op=consume"
+    "/api/deps-demo/http?site=httpbin"
+  )
+
+  # 断言 1:造数端点**不挂住**。超时未生效时这一条就会红 —— 它是"超时是硬要求"的守卫。
+  # 预算 per-endpoint:Kafka 在 broker 不可达时建连+元数据重试占几秒(有界,非挂住),
+  # 其余通道 1~3s。判据是"有上限",不是"和平时一样快"。
+  local api elapsed t0 budget
+  for api in "${depsApi[@]}"; do
+    budget=5
+    case "$api" in
+      *kafka*) budget=10 ;;
+    esac
+    t0=$(date +%s)
+    assert_eq "造数端点返回 200: $api" 200 "$(http_code "$api")"
+    elapsed=$(( $(date +%s) - t0 ))
+    if (( elapsed >= budget )); then
+      log "FAIL: 造数端点耗时 ${elapsed}s(>= ${budget}s),超时未生效? $api"
+    else
+      log "PASS: 造数端点 ${elapsed}s(< ${budget}s)内返回 —— $api"
+    fi
+  done
+  # 白名单:外呼端点不接受任意 URL(演示端点不能是 SSRF 口子)
+  assert_jq "外呼端点只接受白名单 site(未知站点被拒)" "$(http_get_or_empty '/api/deps-demo/http?site=evil.example.com')" \
+    '.ok == false'
+  assert_jq "白名单拒绝时立刻返回(没有真去连)" "$(http_get_or_empty '/api/deps-demo/http?site=evil.example.com')" \
+    '(.latencyMs != null) and (.latencyMs < 1000)'
+
+  sleep 3
+  depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
+
+  # 断言 2:组件识别。组件名取自 demo-app 自带的 component-libraries.yml,
+  # **按实测值断言**而不是按概念名 —— 库里 H2 的键是 h2-jdbc-driver、Kafka 的键是
+  # kafka-producer(不是 "H2" / "Kafka");写成概念名会永远红。
+  assert_jq "数据库出口边存在(MyBatis/JDBC 双路 → h2-jdbc-driver)" "$depTopology" \
+    '[.edges[]? | select(.componentName == "h2-jdbc-driver")] | length >= 1'
+  assert_jq "MQ 出口边存在(kafka-producer;send 不需要连接成功,故必有边)" "$depTopology" \
+    '[.edges[]? | select(.componentName == "kafka-producer")] | length >= 1'
+  assert_jq "真实外呼落在 Http 组件节点上(按组件类型,不按站点拆)" "$depTopology" \
+    '[.edges[]? | select(.spanLayer == "Http")] | length >= 1'
+  assert_jq "组件名已由宿主侧翻译(不是裸 componentId)" "$depTopology" \
+    '[.edges[]? | select(.componentName == null or .componentName == "")] | length == 0'
+  assert_jq "组件名不是宿主侧兜底 component-<id>" "$depTopology" \
+    '[.edges[]? | select(.componentName | test("^component-[0-9]+$"))] | length == 0'
+  # 样本与分位:三层造数端点打完后,至少这些边要有样本(证明"调用发生了、边记下来了")
+  assert_jq "造数端点产出的边有样本(不是空壳行)" "$depTopology" \
+    '[.edges[]? | select(.endpoint | test("/api/deps-demo/")) | select(.sampleCount > 0)] | length >= 1'
+
+  # 断言 3(可选):中间件在场时,Cache / Database 两层才**有边**(连接建立成功才有边),
+  # 且应为绿边。中间件不在场时这两层没有边是**预期**,跳过时说清楚,不改断言。
+  local reachable="yes"
+  if ! http_get_or_empty "/api/deps-demo/redis?op=set" | jq -e '.ok == true' >/dev/null 2>&1; then
+    reachable="no"
+  fi
+  if [[ "$reachable" == "yes" ]]; then
+    assert_jq "中间件在场:Redis 边存在且为绿(errorCount=0 且有调用量)" "$depTopology" \
+      '[.edges[]? | select(.componentName | test("Redis|Jedis")) | select(.errorCount == 0 and .requestCount > 0)] | length >= 1'
+    assert_jq "中间件在场:MySQL 边存在且为绿" "$depTopology" \
+      '[.edges[]? | select(.componentName | test("MySQL|Mysql")) | select(.errorCount == 0 and .requestCount > 0)] | length >= 1'
+    assert_jq "中间件在场:Kafka 边为绿" "$depTopology" \
+      '[.edges[]? | select(.componentName | test("kafka-producer|Kafka")) | select(.errorCount == 0 and .requestCount > 0)] | length >= 1'
+    # 慢边:mysql?sleepMs=300 的 maxLatency 必须明显高于 SELECT 1,证明边能反映耗时差异
+    assert_jq "慢边可造:mysql?sleepMs=300 的边 maxLatency >= 300ms" "$depTopology" \
+      '[.edges[]? | select(.componentName | test("MySQL|Mysql")) | select(.maxLatency >= 300)] | length >= 1'
+  else
+    log "SKIP: 中间件不可达(redis 未启动)—— Cache/Database 两层**没有依赖边是预期**:"
+    log "      连接建立失败不产生出口 span(见 docs/notes/2026-10-01-deps-demo-topology-probe.md)。"
+    log "      起中间件: pwsh ./scripts/deps.ps1 -Up(Windows) 或 docker compose --profile deps up -d"
+  fi
 }

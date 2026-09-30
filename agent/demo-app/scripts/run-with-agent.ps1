@@ -17,7 +17,12 @@
 #   pwsh ./scripts/run-with-agent.ps1 -BuildJavaHome D:\apps\java\jdk-17.0.8  # 构建工具链用 JDK 17
 #   pwsh ./scripts/run-with-agent.ps1 -ConsolePort 8093      # H2 Web Console 端口(默认 8092)
 #   pwsh ./scripts/run-with-agent.ps1 -NoAlert               # 纯指标实例:不开告警(无 webhook 自环)
+#   pwsh ./scripts/run-with-agent.ps1 -WithDeps              # 先起 deps profile 中间件(依赖拓扑三层)
 #
+# 依赖拓扑演示(-WithDeps):起 redis / mysql / kafka(docker compose --profile deps up -d)。
+#   中间件端口映射到宿主机(6379/3306/9092),本机跑的应用走 application.yml 的
+#   localhost 默认值即可,**不需要**设 DEPS_* 环境变量。不起也能用——依赖边照样出现,
+#   只是 errorCount > 0(红边),见 NOTES-docker-stress.md 第 15 条。
 # H2 Web Console:本脚本默认开启(可对内存库 jdbc:h2:mem:sw_trace_segment 执行任意 SQL,仅本机调试用),
 #                启动后访问 http://127.0.0.1:<ConsolePort>(User: sa,密码空)。
 #
@@ -36,7 +41,9 @@ param(
     [int]$Port = 9600,
     [int]$ConsolePort = 8092,
     # 关闭告警(alert.enabled=false):起"纯指标"实例;默认不开此开关=带告警
-    [switch]$NoAlert
+    [switch]$NoAlert,
+    # 起应用前先拉起 deps profile 的 redis/mysql/kafka(依赖拓扑演示);Docker 缺席时只警告不失败
+    [switch]$WithDeps
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,6 +113,17 @@ function Test-HttpOnce($url) {
         $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
         return $r.StatusCode -eq 200
     } catch { return $false }
+}
+
+# ---- 0. 可选:先拉起 deps profile 中间件(依赖拓扑演示)----
+# 放在最前面,是为了"起应用前中间件已在" —— 反过来的话,应用起来后造的数会先撞上一批红边。
+# Docker 缺席**只警告不失败**:中间件不在场时依赖边照样出现(红边),见 NOTES 第 15 条。
+if ($WithDeps) {
+    Write-Host "[..] -WithDeps:拉起 deps profile 中间件(redis / mysql / kafka)"
+    & pwsh -NoProfile -File (Join-Path $PSScriptRoot "deps.ps1") -Up
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[WARN] deps 中间件未就绪(exit=$LASTEXITCODE)。继续起应用 —— 依赖边会表现为红边。"
+    }
 }
 
 # ---- 1. 应用 jar(默认每次重建,保证源码变更必然生效)----

@@ -13,6 +13,8 @@
 #
 # 纯指标 vs 告警耦合(把"指标稳定性"与"告警稳定性"分开压):
 #   - -NormalOnly:本脚本只压正常端点(排除 /error 与 /http500,含 /longTimeTask) -> 压"纯指标聚合"
+#   - -WithDeps:只压依赖拓扑造数端点(Redis/MySQL/Kafka/外呼) -> 看依赖边的分位与错误率走势;
+#     与 run-with-agent.ps1 -WithDeps 同名同义(那一个管中间件在不在,这一个管压哪些路径)
 #   - 告警开关属于"应用启动"这一层,由 run-with-agent.ps1 控制:
 #       run-with-agent.ps1 -NoAlert  起"纯指标"实例(alert off)
 #       run-with-agent.ps1           起"带告警"实例(默认 alert on,含 webhook 自环)
@@ -55,6 +57,11 @@ param(
     [switch]$KeepRunning,
     # 只压正常端点(排除 /error 与 /http500):压"纯指标聚合"(告警开关见 run-with-agent.ps1 -NoAlert)
     [switch]$NormalOnly,
+    # 纳入依赖三层(Redis/MySQL/Kafka/外呼):压测路径切到依赖造数端点。
+    # 与 run-with-agent.ps1 -WithDeps **同名同义** —— 那一个管"中间件在不在",这一个管"压哪些路径";
+    # 两条命令连起来是依赖面的完整闭环(起应用 + 造数)。
+    # 与 -NormalOnly 互斥(一个压业务正常端点,一个压依赖造数端点)。
+    [switch]$WithDeps,
     # 跳过压测后的指标摘要
     [switch]$SkipMetrics,
     # 指标摘要前等待秒数(给翻转线程一点时间)
@@ -81,8 +88,20 @@ $script:startedProc = $null
 
 # 正常端点集(排除 /error 与 /http500);用于 -NormalOnly 的"纯指标"压测
 $NORMAL_PATHS = "/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask"
+# 依赖拓扑造数端点集;用于 -WithDeps。
+# mysql 那条带 sleepMs=30:造一条明显慢于其余的边,压测中能看出分位差异。
+# 注意 Kafka 不可达时单次 produce 会等到 max.block.ms(3s)超时 —— 这是**有界的**,
+# 那条边照样会被记下来(kafka-producer),只是 errorCount 可能仍是 0
+# (出口 span 不由 send 的超时异常置 isError,见探针笔记)。
+$DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin"
+if ($NormalOnly -and $WithDeps) {
+    Write-Host "[FAIL] -NormalOnly 与 -WithDeps 互斥:前者压业务正常端点(排除 error),后者压依赖造数端点。"
+    Write-Host "       只保留一个,重跑。"
+    exit 1
+}
 $effectivePaths = $Paths
 if (-not $effectivePaths -and $NormalOnly) { $effectivePaths = $NORMAL_PATHS }
+if (-not $effectivePaths -and $WithDeps) { $effectivePaths = $DEPS_PATHS }
 $pathsText = if ($effectivePaths) { $effectivePaths } else { "(HttpLoadTest 内置默认:混合,含 error)" }
 
 function Get-DriveRoot { return 'D:' }

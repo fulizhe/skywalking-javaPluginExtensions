@@ -4,8 +4,7 @@
 
 **Blocked by:** 02（要有真实客户端调用）、03（要有中间件在场才能验绿边）。
 
-**Status:** open
-
+**Status:** resolved —— docs/notes/2026-10-01-deps-demo-topology-probe.md 已落;推翻三处预设(见提交说明)
 ## 为什么必须做
 
 上一轮（`0578cb4`）探针**推翻了两处预设**：operationName 已被 agent 归一化、实例身份由 `db.instance`/`url` 标签零成本提供。

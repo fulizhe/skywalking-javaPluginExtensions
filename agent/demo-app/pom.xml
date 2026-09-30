@@ -45,6 +45,10 @@
              须真实存在于应用 classpath,故 demo-app 依赖 hutool-http;core/json 随 `${hutool.version}` 一并对齐,
              避免 hutool-http 传递的 core 版本与显式声明的 json 版本打架。默认值与插件模块 hutool.version 一致。 -->
         <hutool.version>5.4.1</hutool.version>
+        <!-- 依赖拓扑演示的中间件客户端版本;取值须落在 agent 9.4.0 插件 support 范围内
+             (jedis-2.x-3.x / mysql-8.x / kafka-0.11.x~2.x),超范围会静默不生效。见 pom 里的注释。 -->
+        <jedis.version>3.8.0</jedis.version>
+        <kafka.version>2.8.2</kafka.version>
     </properties>
 
     <dependencies>
@@ -137,6 +141,30 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <!-- 依赖拓扑演示(票 02):三类中间件客户端,喂 Cache / Database / MQ 三层依赖边。
+             agent 侧插件已就位,宿主组件库已收录 Redis / MySQL / Kafka,故组件名零改动。
+             版本**刻意对齐 agent 9.4.0 插件的 support范围**(实测读 plugins/*.jar 的 plugin.def):
+               - jedis 3.8.x  → jedis-2.x-3.x-plugin   (不用 lettuce:插件只匹配 lettuce-5.x,
+                 而 Spring Boot 2.7 管理的 lettuce 是 6.x,版本不匹配会**静默不生效**)
+               - mysql-connector-java 8.0.x → mysql-8.x-plugin
+               - kafka-clients 2.8.x → kafka-0.11.x/1.x/2.x  (3.x 不在范围内;3.7.x 是另一条定义)
+             **中间件不在场也照调** —— 连不上照样出依赖边(红边),见 DepsDemoController。 -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+        </dependency>
+        <!-- 刻意用原生 kafka-clients 而非 spring-kafka:少一层自动配置,超时更可控 -->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
         </dependency>
 
         <!-- @Slf4j/@Getter 等 -->

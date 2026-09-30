@@ -108,6 +108,13 @@ done
 | Trace 查询 | `/dashboards/trace-query.html` | 按 traceId 查整条链路 | 单条链路下钻 |
 | 慢查询 | `/dashboards/trace-slow.html` | 慢 span 列表 | 慢在哪 |
 | 链路视图 | `/dashboards/trace-view.html` | 完整链路拓扑 | 跨 span 串起来 |
+| 依赖拓扑 | `/dashboards/topology.html` | 左=**本服务**单点（合计调用/错误/端点数），右=外部依赖（按组件类型着色，红=有失败调用） | 我调了哪些外部依赖、哪条路慢 |
+
+> 依赖拓扑页的边是**纯内存、分钟级窗口、重启即失** —— 看图前先造数（点一次
+> `/queryDbByMybatis`、`/api/hutool-demo/post-json`、`/api/deps-demo/kafka?op=produce` 等）。
+> 想看 Cache/Database/MQ 三层：`pwsh ./agent/demo-app/scripts/run-with-agent.ps1 -WithDeps` 起应用与中间件，
+> `pwsh ./agent/demo-app/scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8` 造数
+> （细节见 [`agent/demo-app/README.md`](../agent/demo-app/README.md) 的「依赖拓扑演示」）。
 
 各仪表盘是**自动轮询**的(3~6 秒一次),不用手动刷新。
 

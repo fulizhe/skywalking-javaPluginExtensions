@@ -4,8 +4,7 @@
 
 **Blocked by:** 02（要有造数端点）；绿边部分另需 03。
 
-**Status:** open
-
+**Status:** resolved —— 断言 F 按实测值写(kafka-producer 而非 Kafka);无中间件路径可过;容器内 bash 回路未跑(本机 docker daemon 不可用),bash -n 通过
 ## 断言分层
 
 | # | 断言 | 前置 | 期望 |

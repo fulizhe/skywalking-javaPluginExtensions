@@ -87,6 +87,7 @@
     <button class="sec win" data-min="60" type="button">近 1 小时</button>
   </span>
   <button id="btn-refresh" class="sec" type="button">刷新</button>
+  <button id="btn-poll" class="on" type="button">停止刷新</button>
   <span class="summary" id="summary">加载中…</span>
 </div>
 
@@ -97,11 +98,18 @@
       <li>依赖边<b>只统计同一个链路段内</b>的调用（段内 Entry × Exit 配对）。</li>
       <li><b>异步调用的出口依赖不进图</b>——跨段配对需要父段索引，而父段可能已被淘汰，
           那会产生无法与「没有这个调用」区分的随机缺边。@Async 出口请到链路可视化页看。</li>
-      <li>依赖节点<b>只到组件类型</b>，<b>不区分具体实例地址</b>（同一组件的多个实例会并成一个节点）。</li>
+      <li>依赖节点<b>只到组件类型</b>，<b>不区分具体实例地址</b>（同一组件的多个实例会并成一个节点；
+          同理，访问 3 个不同站点的 HTTP 也<b>只是 1 个 Http 节点</b>，不是 3 个依赖）。</li>
+      <li><b>总览档左列只有一个「本服务」节点</b>，它是窗口内全部入口端点的<b>聚合</b>
+          （合计调用 / 合计错误 / 覆盖端点数），端点维度在<b>明细档</b>与本页<b>边列表</b>里看。</li>
       <li><b>明细档</b>的依赖节点标签取该边上去重后的<b>出口操作名</b>（每边最多 8 个，超出会截断并标 <code>+N</code>；
           完整列表看节点 tooltip）。<b>总览档</b>只显示组件类型。</li>
       <li>节点颜色与标记的判据是<b>边级错误率</b>（取自出口 span 的 <code>isError</code>），
           <b>不是规则引擎告警</b>；边上的耗时分位是<b>蓄水池抽样</b>得出的，样本少时尾部分位噪声大。</li>
+      <li><b>连接都没建起来的依赖，不出现在这张图上</b> —— 依赖边建立在「调用已发生」之上，
+          而连接建立本身（connection refused、主机名解析失败）发生在被观测的调用之前，
+          <b>不会产生依赖边</b>。所以某个组件缺席<b>不能</b>读成「没有这个调用」，
+          要确认请到链路视图里看那条请求的失败现场。</li>
       <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。</li>
     </ul>
   </section>
@@ -111,6 +119,8 @@
       <h2><span>调用关系图</span><span class="hint" id="chart-hint"></span></h2>
       <div id="chart"></div>
       <div class="legend">
+        <div><b>节点形状 = 组件大类</b>（扫一眼就能分清层次）：<b>柱体</b> Database ·
+             <b>六边形</b> MQ · <b>菱形</b> Http · <b>三角</b> Cache · <b>圆形</b> 其它/本服务</div>
         <div><b>节点边框色 = SLA 分档</b>（按该组件所有边的错误率；阈值硬编码，非 OAP 的 100/99.9/99/95）</div>
         <div>
           <span class="swatch" style="background:#86efac"></span>无错误
@@ -119,7 +129,8 @@
           <span class="swatch" style="background:#e74c3c;margin-left:10px"></span>≥ 5%
         </div>
         <div><b>右上角橙点</b> = 该组件最近有失败调用；<b>边标签</b> = 调用量 / 错误率 · p95 耗时</div>
-        <div>点击<b>端点节点</b> → 慢查询页；点击<b>依赖节点</b> → 该依赖上的慢链路</div>
+        <div>点击<b>依赖节点</b> → 该依赖上调用量最大的端点的慢链路；明细档点<b>端点节点 / 边</b> → 该端点的慢查询</div>
+        <div><b>总览档左列是聚合，不可下钻</b>（没有单一端点可传）——端点明细看下方边列表，或切到<b>明细档</b></div>
       </div>
     </div>
 
@@ -136,14 +147,19 @@
       </div>
       <div class="empty" id="empty" style="display:none">
         暂无依赖边。<br>先造点带外部调用的流量,例如：<br>
-        <code>/queryDbByMybatis</code> · <code>/queryDbByJdbc</code> · <code>/api/hutool-demo/post-json</code>
+        <code>/queryDbByMybatis</code> · <code>/queryDbByJdbc</code> · <code>/api/hutool-demo/post-json</code><br>
+        三层依赖面：<code>/api/deps-demo/redis?op=set</code> ·
+        <code>/api/deps-demo/mysql?sleepMs=300</code> ·
+        <code>/api/deps-demo/kafka?op=produce</code> ·
+        <code>/api/deps-demo/http?site=httpbin</code>
       </div>
     </div>
   </div>
 
   <p class="foot">
-    左列端点的耗时与分位来自 <a href="metrics.html" target="_blank">Trace 指标页</a>（端点级口径），
-    本页只画依赖关系与边级指标。数据源读口：<code>/inner/sw/topology</code>。
+    <b>明细档</b>左列端点的耗时与分位来自 <a href="metrics.html" target="_blank">Trace 指标页</a>（端点级口径），
+    本页只画依赖关系与边级指标。<b>总览档</b>左列的本服务节点是这些端点的聚合，其数字由本页边集现场汇总。
+    数据源读口：<code>/inner/sw/topology</code>。
   </p>
 </div>
 
@@ -153,6 +169,7 @@
 
   var OTHER_EDGE = "(other)";
   var OTHER_COMPONENT = -1;
+  var SELF_ID = "s:self";
   // 与插件侧 EdgeMetricsAggregator 的硬编码分档保持一致（非 OAP 的 100/99.9/99/95）
   var SLA_BANDS = [
     { max: 0,     color: "#86efac", label: "无错误" },
@@ -187,6 +204,22 @@
 
   function componentLabel(e) {
     return e.componentName || ("component-" + e.componentId);
+  }
+
+  // 节点形状 = 组件大类。借 spanLayer(SkyWalking 插件给出的层分类)判定,不按组件名硬编码 ——
+  // 组件名会随组件库措辞变(h2-jdbc-driver / Mysql / kafka-producer),层分类稳定。
+  // 目的是"扫一眼分清层次",不是精确分类,所以兜底一律圆形。
+  var LAYER_SHAPES = {
+    "Database": "roundRect",
+    "MQ": "hexagon",
+    "Http": "diamond",
+    "Cache": "triangle",
+    "RPCFramework": "pentagon",
+    "gRPC": "rect"
+  };
+
+  function shapeFor(spanLayer) {
+    return LAYER_SHAPES[spanLayer] || "circle";
   }
 
   // 依赖节点身份:总览档=组件类型;明细档=组件类型 + 出口操作名
@@ -306,16 +339,25 @@
   }
 
   function renderChart() {
+    var isSummary = state.view === "summary";
     var endpoints = {};
     var deps = {};
     var order = [];
     var depOrder = [];
+    // 本服务聚合量：全部取自窗口内**已跨桶合并**的边集，不新增读口字段。
+    var self = { n: 0, err: 0, slowest: "", max: 0 };
 
     state.edges.forEach(function (e) {
       var epId = "e:" + e.endpoint;
       if (!endpoints[epId]) {
         endpoints[epId] = { id: epId, name: e.endpoint, kind: "endpoint" };
         order.push(epId);
+      }
+      self.n += Number(e.requestCount) || 0;
+      self.err += Number(e.errorCount) || 0;
+      if (Number(e.maxLatency) > self.max) {
+        self.max = Number(e.maxLatency) || 0;
+        self.slowest = depLabel(e);
       }
       var dk = depKey(e);
       if (!deps[dk]) {
@@ -324,75 +366,118 @@
           name: depLabel(e),
           kind: "dep",
           n: 0, err: 0, p95: 0, max: 0, comp: componentLabel(e),
-          ops: depOps(e)
+          spanLayer: e.spanLayer,
+          ops: depOps(e),
+          topEndpoint: "", topN: 0
         };
         depOrder.push(dk);
       }
       var d = deps[dk];
-      d.n += Number(e.requestCount) || 0;
+      var n = Number(e.requestCount) || 0;
+      d.n += n;
       d.err += Number(e.errorCount) || 0;
       d.max = Math.max(d.max, Number(e.maxLatency) || 0);
       d.p95 = Math.max(d.p95, Number(e.p95) < 0 ? 0 : Number(e.p95));
+      // 记下该依赖调用量最大的端点：总览档合成单条边后，下钻只能落到它。
+      if (!d.topEndpoint || n > d.topN) { d.topEndpoint = e.endpoint; d.topN = n; }
     });
 
     var nodes = [];
-    // 二部图坐标:左列=入口端点,右列=外部依赖。
+    // 二部图坐标:左列=外部依赖的对端(总览档「本服务」/ 明细档「入口端点」),右列=外部依赖。
     // 刻意**不用 force 布局** —— 力导每次渲染位置都不同,截图无法对比,
     // 且两类节点会随机混在一起、丢掉"左进右出"的可读性。
     // 固定坐标让总览档成为一张**可复现**的图(给汇报用)。
-    var leftN = order.length, rightN = depOrder.length;
-    var rows = Math.max(leftN, rightN, 1);
-    order.forEach(function (id, i) {
-      var ep = endpoints[id];
+    var rightN = depOrder.length;
+    var rows = Math.max(isSummary ? 1 : order.length, rightN, 1);
+    function yAt(i, n) { return n <= 1 ? 60 : 60 + (i * 420) / (n - 1); }
+    if (isSummary) {
       nodes.push({
-        id: ep.id, name: ep.name, category: 0, symbolSize: 32,
-        x: 90, y: 60 + (rows === 1 ? 0 : (i * 420) / (rows - 1)),
+        id: SELF_ID, name: "本服务", category: 0, symbolSize: 44,
+        // 单节点贴顶会与右列错位,总览档按右列高度垂直居中
+        x: 90, y: rows <= 1 ? 60 : 60 + 210,
         itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 },
-        label: { color: "#eaeaea", fontSize: 11, position: "left", distance: 6 }
+        label: {
+          // 标签放节点**上方**:左侧放不下(会被面板左边界裁掉),下方会压到边标签
+          color: "#eaeaea", fontSize: 11, position: "top", distance: 12,
+          align: "center", width: 170, lineHeight: 15,
+          formatter: "本服务\n调用 " + self.n + " · 错误 " + self.err + " · 端点 " + order.length
+        },
+        selfStats: self,
+        endpoints: order.map(function (id) { return endpoints[id].name; })
       });
-    });
+    } else {
+      order.forEach(function (id, i) {
+        var ep = endpoints[id];
+        nodes.push({
+          id: ep.id, name: ep.name, category: 0, symbolSize: 32,
+          x: 90, y: yAt(i, rows),
+          itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 },
+          label: { color: "#eaeaea", fontSize: 11, position: "left", distance: 6 }
+        });
+      });
+    }
     depOrder.forEach(function (dk, i) {
       var d = deps[dk];
       var rate = d.n > 0 ? d.err / d.n : 0;
       nodes.push({
-        id: d.id, name: d.name, category: 1, symbolSize: 40,
-        x: 620, y: 60 + (rows === 1 ? 0 : (i * 420) / (rows - 1)),
+        id: d.id, name: d.name, category: 1, symbolSize: 40, symbol: shapeFor(d.spanLayer),
+        // 右列 x=545 而非更靠右:标签在节点右侧,靠右会被面板右边界裁掉
+        x: 545, y: yAt(i, rows),
         itemStyle: { color: "#1c2027", borderColor: slaColor(rate), borderWidth: 3 },
-        label: { color: "#eaeaea", fontSize: 11, position: "right", distance: 6 },
+        label: { color: "#eaeaea", fontSize: 11, position: "right", distance: 6, width: 120 },
         // 失败标记：边上有 error 即算（口径=边级错误率,非规则引擎告警）
         mark: d.err > 0,
         ops: d.ops,
         comp: d.comp,
+        layerName: d.spanLayer,
         n: d.n,
         err: d.err
       });
     });
 
     var links = [];
-    // 同一 (左,右) 之间可能有多条边（明细档按操作名拆开）。给每组分配不同曲率，
-    // 否则它们会完全重叠成一条线。
-    var pairSeq = {};
-    state.edges.forEach(function (e) {
-      var d = deps[depKey(e)];
-      var pair = e.endpoint + " -> " + depKey(e);
-      var idx = pairSeq[pair] === undefined ? 0 : pairSeq[pair];
-      pairSeq[pair] = idx + 1;
-      links.push({
-        source: "e:" + e.endpoint,
-        target: d.id,
-        value: Number(e.requestCount) || 0,
-        rate: Number(e.requestCount) > 0 ? (Number(e.errorCount) || 0) / Number(e.requestCount) : 0,
-        p95: Number(e.p95),
-        endpoint: e.endpoint,
-        depName: d.name,
-        curveness: pairSeq[pair] > 1 ? (idx % 2 === 0 ? 0.18 : -0.18) : 0.06
+    if (isSummary) {
+      // 总览档:self → 每个依赖**合成一条边**。多端点打同一组件不再叠成多条平行边
+      // —— 汇报图要的是"我伸出去几只手、每只手多重",端点维度在边列表与明细档。
+      depOrder.forEach(function (dk) {
+        var d = deps[dk];
+        links.push({
+          source: SELF_ID, target: d.id,
+          value: d.n,
+          rate: d.n > 0 ? d.err / d.n : 0,
+          p95: d.p95,
+          endpoint: d.topEndpoint,
+          depName: d.name,
+          curveness: 0.06
+        });
       });
-    });
+    } else {
+      // 明细档:逐边连。同一 (左,右) 之间可能有多条边（按操作名拆开），给每组分配不同曲率，
+      // 否则它们会完全重叠成一条线。
+      var pairSeq = {};
+      state.edges.forEach(function (e) {
+        var d = deps[depKey(e)];
+        var pair = e.endpoint + " -> " + depKey(e);
+        var idx = pairSeq[pair] === undefined ? 0 : pairSeq[pair];
+        pairSeq[pair] = idx + 1;
+        links.push({
+          source: "e:" + e.endpoint,
+          target: d.id,
+          value: Number(e.requestCount) || 0,
+          rate: Number(e.requestCount) > 0 ? (Number(e.errorCount) || 0) / Number(e.requestCount) : 0,
+          p95: Number(e.p95),
+          endpoint: e.endpoint,
+          depName: d.name,
+          curveness: pairSeq[pair] > 1 ? (idx % 2 === 0 ? 0.18 : -0.18) : 0.06
+        });
+      });
+    }
 
     if (!chart) { chart = echarts.init(document.getElementById("chart")); }
 
-    document.getElementById("chart-hint").textContent =
-      "左=入口端点 · 右=外部依赖（点节点可下钻）· 固定布局，刷新位置不变";
+    document.getElementById("chart-hint").textContent = isSummary
+      ? "左=本服务（全部入口端点的聚合） · 右=外部依赖（点依赖节点可下钻） · 固定布局，刷新位置不变"
+      : "左=入口端点 · 右=外部依赖（点节点可下钻） · 固定布局，刷新位置不变";
 
     chart.setOption({
         tooltip: {
@@ -407,15 +492,26 @@
             var d = p.data;
             var ops = (d.ops && d.ops.length) ? d.ops.join("<br>") : "(无记录)";
             return "<b>" + escapeHtml(d.name) + "</b><br>组件: " + escapeHtml(d.comp)
+              + "<br>层: " + escapeHtml(d.layerName || "(未知)")
               + "<br>窗口内调用 " + d.n + " 次 · 错误 " + d.err
               + (d.mark ? "<br><b>最近有失败调用</b>" : "")
               + "<br><br>出口操作:<br>" + ops;
+          }
+          if (p.dataType === "node" && String(p.data.id) === SELF_ID) {
+            var s = p.data.selfStats;
+            var eps = (p.data.endpoints && p.data.endpoints.length) ? p.data.endpoints.join("<br>") : "(无)";
+            return "<b>本服务</b>（窗口内全部入口端点的聚合）"
+              + "<br>合计调用 " + s.n + " 次 · 合计错误 " + s.err + " 次"
+              + "<br>覆盖端点 " + p.data.endpoints.length + " 个"
+              + "<br>最慢的依赖: " + escapeHtml(s.slowest || "-") + "（" + fmtMs(s.max) + "）"
+              + "<br><br>入口端点:<br>" + eps
+              + "<br><br>本节点无下钻（没有单一端点可传），端点明细见下方边列表或切明细档";
           }
           return escapeHtml(p.name || "");
         }
       },
       legend: [{
-        data: ["入口端点", "外部依赖"], top: 6, textStyle: { color: "#9aa4b2" }
+        data: [isSummary ? "本服务" : "入口端点", "外部依赖"], top: 6, textStyle: { color: "#9aa4b2" }
       }],
       series: [{
         type: "graph",
@@ -424,7 +520,8 @@
         roam: true,
         draggable: true,
         categories: [
-          { name: "入口端点", itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 } },
+          { name: isSummary ? "本服务" : "入口端点",
+            itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 } },
           { name: "外部依赖", itemStyle: { color: "#1c2027", borderColor: "#86efac", borderWidth: 3 } }
         ],
         label: { show: true, overflow: "break", width: 150 },
@@ -468,6 +565,10 @@
         if (best) {
           window.open("trace-slow.html?endpoint=" + encodeURIComponent(best.endpoint), "_blank");
         }
+        return;
+      }
+      if (id === SELF_ID) {
+        // 本服务是聚合节点,没有单一端点可传 —— 不下钻,提示已写在 tooltip 与图例里
         return;
       }
       if (id.indexOf("e:") === 0) {
@@ -550,9 +651,38 @@
   });
   window.addEventListener("resize", function () { if (chart) { chart.resize(); } });
 
+  // ---------------------------------------------------------------- 轮询开关
+  //
+  // 依赖边是**分钟级窗口**,每5 秒重拉一次主要是为了"看窗口滑动",不是看秒级变化。
+  // 停下来盯着图(比如要照着截图对比)时轮询只会把图刷掉,所以给一个明确的停止开关 ——
+  // 与其他大屏页的"停止轮询"按钮同一约定。
+  var pollTimer = null;
+
+  function startPolling() {
+    if (pollTimer === null) { pollTimer = setInterval(load, 5000); }
+  }
+
+  function stopPolling() {
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  document.getElementById("btn-poll").addEventListener("click", function () {
+    var btn = document.getElementById("btn-poll");
+    if (pollTimer !== null) {
+      stopPolling();
+      btn.textContent = "恢复刷新";
+      btn.className = "sec";
+    } else {
+      startPolling();
+      btn.textContent = "停止刷新";
+      btn.className = "on";
+      load();
+    }
+  });
+
   setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
-  setInterval(load, 5000);
+  startPolling();
 })();
 </script>
 </body>

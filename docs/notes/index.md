@@ -10,3 +10,6 @@
   - **2026-09-27：h2-full-trace-mem 操作手册（全量 trace / 双源对照 / 慢查询 / QPS / 慢判定复用）** —— 何时读：忘了这些功能在哪看、怎么开、怎么验证，或要重建/重启 demo 观察效果时。→ `2026-09-27-h2-full-trace-mem-操作手册.md`
   - **2026-09-29：跨 ClassLoader 传自定义类为何不 CNFE——炸的是语义，不是链接** —— 何时读：改动"要被宿主持有的数据结构"（如用 POJO 替代 Map）、或排查宿主读口 JSON 契约键名时。→ `2026-09-29-cross-classloader-tag-json-semantics.md`
 - **2026-09-29：孤段过滤入门——为什么会"凭空"出现一段、两种典型 trace 原型** —— 何时读：新手入门 trace/segment/refs，或判断某条 trace 是否为孤段、会不会被插件过滤时。→ `2026-09-29-孤段过滤入门-两种典型trace原型.md`
+- **2026-09-30：出口 span 实跑探针（operationName / 组件身份 / spanLayer 事实）** —— 何时读：改依赖边、出口标签、组件名解析，或要判断"实例级依赖"能不能零成本解锁时。→ `2026-09-30-exit-span-runtime-probe.md`
+- **2026-09-30：依赖边聚合的三个取舍（只段内配对 / 双维上限 / 小样本池）** —— 何时读：有人想把异步出口纳进依赖图、想调边数上限、或问"为什么边不落库"时。→ `2026-09-30-edge-aggregator-tradeoffs.md`
+- **2026-10-01：依赖面造数实跑探针（连接失败不产生边 / 组件名按实测值 / 插件 support 范围 / Kafka 三个坑）** —— 何时读：改 `DepsDemoController`、给依赖拓扑加组件、或给 `checks.sh` 写依赖面断言前。→ `2026-10-01-deps-demo-topology-probe.md`

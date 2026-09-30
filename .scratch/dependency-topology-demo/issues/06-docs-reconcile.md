@@ -4,8 +4,7 @@
 
 **Blocked by:** 01（self 节点口径）、02（造数端点与超时）、03（compose 用法）、05（断言口径）。
 
-**Status:** open
-
+**Status:** resolved —— NOTES 14/15/16、README 依赖拓扑小节 + 术语表、starter 页面速查表、notes index、既有 spec 矛盾均已改
 ## 改既有文档
 
 | 文件 | 动作 |
