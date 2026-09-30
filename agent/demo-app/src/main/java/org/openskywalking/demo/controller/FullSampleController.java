@@ -39,6 +39,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import org.openskywalking.demo.service.DepsDemoService;
 import org.openskywalking.demo.service.HelloService;
 import com.github.xiaoymin.knife4j.annotations.ApiOperationSupport;
 
@@ -69,9 +70,11 @@ public class FullSampleController {
 	@Autowired
 	private CloseableHttpClient skyWalkingDemoHttpClient;
 
-	/** 依赖面三层 + 外呼的造数端点。刻意直接复用:全貌入口不该另写一套调用逻辑。 */
+	/** 依赖面三层 + 外呼的造数实现。刻意注入**普通 Service** 而不是 DepsDemoController:
+	 *  直接调用别的 Controller 的 handler 方法会被 agent 的 Spring MVC 增强当成 Entry,
+	 *  一次请求的 7 个出口会全被记到那个 handler 的 operationName 名下(实测踩过)。 */
 	@Autowired
-	private DepsDemoController depsDemo;
+	private DepsDemoService depsDemo;
 
 	// 文档： https://skywalking.apache.org/docs/skywalking-java/v9.4.0/en/setup/service-agent/java-agent/application-toolkit-trace-annotation/
 	@Trace

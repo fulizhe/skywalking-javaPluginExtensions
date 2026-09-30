@@ -248,6 +248,22 @@ run_checks() {
   sleep 3
   depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
 
+  # ---- 归因断言:全貌入口的出口必须记在它自己名下 ----
+  # /fullSample 一次请求打齐四层(内部调用 DepsDemoService)。**曾经踩过的坑**:
+  # 那四层逻辑原先住在 DepsDemoController 里,fullSample 直接调它的 handler 方法,
+  # agent 的 Spring MVC 增强把 handler 的 operationName 当成 Entry —— 一次 fullSample
+  # 的 7 个出口全被记到 GET:/api/deps-demo/redis 名下。下面两条正是那个 bug 的照妖镜。
+  local k
+  for ((k = 0; k < 3; k++)); do
+    http_get_or_empty "/fullSample" >/dev/null
+  done
+  sleep 3
+  depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
+  assert_jq "全貌入口的出口归在它自己名下(GET:/fullSample 至少两条边)" "$depTopology" \
+    '[.edges[]? | select(.endpoint == "GET:/fullSample")] | length >= 2'
+  assert_jq "内部调用不改写 Entry:deps 端点名下不出现跨层出口" "$depTopology" \
+    '[.edges[]? | select(.endpoint | test("^GET:/api/deps-demo/")) | select(.spanLayer == "MQ" or .spanLayer == "Http")] | length == 0'
+
   # 断言 2:组件识别。组件名取自 demo-app 自带的 component-libraries.yml,
   # **按实测值断言**而不是按概念名 —— 库里 H2 的键是 h2-jdbc-driver、Kafka 的键是
   # kafka-producer(不是 "H2" / "Kafka");写成概念名会永远红。

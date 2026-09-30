@@ -111,7 +111,43 @@ pwsh ./agent/demo-app/scripts/deps.ps1 -Smoke -BaseUrl http://127.0.0.1:9600
 curl.exe -s --noproxy "*" "http://127.0.0.1:9600/inner/sw/topology?view=summary"
 ```
 
-## 六、还没验的（留给下一次）
+## 六、最严重的一条：`/fullSample` 直接调 handler 方法 → **Entry 被改写、依赖边归因错位**
+
+压测（`stress.ps1 -AllEndpoints`）时在明细档看到：`/api/deps-demo/redis` 名下挂着 **4 条出口**
+（`Jedis/set`、`/api/trace-alert-demo/ok`、`Kafka/sw-demo/Producer`、`/get`），而且**调用量整整齐齐
+都是同一个数字**；`/queryDbByMybatis` 名下还有两条 H2 边。
+
+在干净实例（9601）上**单次** `/fullSample` 即稳定复现，`trace-recent` 显示：
+
+```
+GET:/api/deps-demo/redis     isError=True   latency=3885   ← 这其实是 /fullSample 的段
+GET:/api/trace-alert-demo/ok isError=False  latency=2      ← HttpClient 自调产生的第二个段(真 entry)
+GET:/api/deps-demo/redis     isError=True   latency=4508
+GET:/api/deps-demo/redis     isError=True   latency=5616   ← latency 一条比一条长
+```
+
+**根因**：那四层逻辑原先写在 `DepsDemoController` 里，而 `/fullSample` 为了"全貌"直接
+`depsDemo.redis("set")` 这样**调用另一个 Controller 的 handler 方法**。agent 的 Spring MVC 增强
+把那些 handler 的 operationName 当成了本次请求的 Entry，于是**一次请求产生的 7 个出口**
+（JDBC ×2 / HttpClient 自调 / Jedis / MySQL / Kafka / 外呼）全被归到 `GET:/api/deps-demo/redis` 名下。
+
+**不是并发问题**：单次调用即复现，稳定。
+
+**修法**：四层逻辑搬进普通 `@Service`（`org.openskywalking.demo.service.DepsDemoService`），
+`DepsDemoController` 退化成 HTTP 薄壳，`FullSampleController` 注入 service。搬完之后
+**Entry 只来自真实 HTTP 入口**（Tomcat 插件），内部复用不再改写入口名。
+
+**回归断言**（加在 `checks.sh` 断言 F 里）：
+
+| 断言 | 作用 |
+| --- | --- |
+| `[.edges[]? \| select(.endpoint == "GET:/fullSample")] \| length >= 2` | 全貌入口的出口必须归在它自己名下 |
+| `[.edges[]? \| select(.endpoint \| test("^GET:/api/deps-demo/")) \| select(.spanLayer == "MQ" or .spanLayer == "Http")] \| length == 0` | deps 端点名下**不许**出现跨层出口 —— 正是这个 bug 的照妖镜 |
+
+**教训**：凡是要给"外部入口"复用的逻辑，别放在 handler 方法里 —— 内部调用会被 web 插件
+当成一次新请求入口，污染依赖图的端点维度。
+
+## 七、还没验的（留给下一次）
 
 - `Redis` / `Jedis` 与 `Mysql` 的 `componentName` **实测值**（需中间件真的在跑；断言写的是 `test("Redis|Jedis")` / `test("MySQL|Mysql")` 双形态匹配）。
 - 中间件在场时是否三条边都为绿、`mysql?sleepMs=300` 的 `maxLatency` 是否 ≥ 300ms。
