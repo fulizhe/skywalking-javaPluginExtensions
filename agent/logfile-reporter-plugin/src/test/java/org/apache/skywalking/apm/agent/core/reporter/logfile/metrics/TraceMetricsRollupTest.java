@@ -21,14 +21,14 @@ public class TraceMetricsRollupTest {
     }
 
     @Test
-    public void toHourRows_sumsCountsAndWeightedPercentiles() {
+    public void mergeByEndpoint_stampsBucketAndSumsCounts() {
         final List<MetricsRow> minuteRows = new ArrayList<MetricsRow>();
         minuteRows.add(row("GET:/a", 100L, 1L, 0L, 0L, 10L, 10L, 10, 20, 25, 30, 1));
         minuteRows.add(row("GET:/a", 101L, 3L, 1L, 1L, 60L, 40L, 30, 40, 45, 50, 3));
         minuteRows.add(row("*", 100L, 1L, 0L, 0L, 10L, 10L, 10, 20, 25, 30, 1));
         minuteRows.add(row("*", 101L, 3L, 1L, 1L, 60L, 40L, 30, 40, 45, 50, 3));
 
-        final List<MetricsRow> hourRows = TraceMetricsRollup.toHourRows(minuteRows, 1L);
+        final List<MetricsRow> hourRows = TraceMetricsRollup.mergeByEndpoint(minuteRows, 1L);
         Assert.assertEquals(2, hourRows.size());
 
         MetricsRow a = null, global = null;
@@ -54,13 +54,42 @@ public class TraceMetricsRollupTest {
         Assert.assertEquals(40, a.getP95());
     }
 
+    /**
+     * 小时 rollup 的实际输入形状：SQL {@code GROUP BY endpoint} 预聚合行（{@code time_bucket} 为占位 0、
+     * 带 {@code worst*} 与 {@code bucket_count}）＋ H2 尚无桶的在飞内存分钟行。
+     * 合并后必须落在真实小时桶、请求数精确守恒，且不以占位 0 覆写内存行的分位。
+     */
     @Test
-    public void toHourRows_missingPercentileYieldsNull() {
+    public void mergeByEndpoint_rollupSumsSqlAggAndPendingMinute() {
+        final List<MetricsRow> rows = new ArrayList<MetricsRow>();
+        // SQL 预聚合行：整小时已落库部分（占位桶 0）
+        rows.add(new MetricsRow("GET:/a", 0L, 7L, 1L, 0L, 70L, 30L, 10, 20, 25, 30, 7, 10, 20, 25, 30, 7));
+        // 在飞内存分钟行：同一小时末尾那一分钟（真实分钟桶）
+        rows.add(row("GET:/a", 599L, 3L, 0L, 1L, 90L, 45L, 30, 40, 45, 50, 3));
+
+        final List<MetricsRow> out = TraceMetricsRollup.mergeByEndpoint(rows, 42L);
+        Assert.assertEquals(1, out.size());
+        final MetricsRow hour = out.get(0);
+        Assert.assertEquals("输出行落在真实小时桶", 42L, hour.getTimeBucket());
+        Assert.assertEquals("请求数精确守恒", 10L, hour.getRequestCount());
+        Assert.assertEquals(1L, hour.getErrorCount());
+        Assert.assertEquals(1L, hour.getSlowCount());
+        Assert.assertEquals(160L, hour.getTotalLatency());
+        Assert.assertEquals("最大耗时取最大", 45L, hour.getMaxLatency());
+        Assert.assertEquals(10, hour.getSampleCount());
+        // 加权平均：(10*7 + 30*3)/10 = 16
+        Assert.assertEquals(16, hour.getP50());
+        Assert.assertEquals("worst 由预聚合行透传", 30, hour.getWorstP99());
+        Assert.assertEquals(7, hour.getBucketCount());
+    }
+
+    @Test
+    public void mergeByEndpoint_missingPercentileYieldsNull() {
         final List<MetricsRow> minuteRows = new ArrayList<MetricsRow>();
         minuteRows.add(row("GET:/a", 100L, 1L, 0L, 0L, 10L, 10L, 10, 20, 25, 30, 1));
         minuteRows.add(row("GET:/a", 101L, 2L, 0L, 0L, 20L, 20L, 12, -1, -1, -1, 2));
 
-        final List<MetricsRow> hourRows = TraceMetricsRollup.toHourRows(minuteRows, 1L);
+        final List<MetricsRow> hourRows = TraceMetricsRollup.mergeByEndpoint(minuteRows, 1L);
         Assert.assertEquals(1, hourRows.size());
         Assert.assertEquals(-1, hourRows.get(0).getP90());
         Assert.assertEquals(3L, hourRows.get(0).getRequestCount());

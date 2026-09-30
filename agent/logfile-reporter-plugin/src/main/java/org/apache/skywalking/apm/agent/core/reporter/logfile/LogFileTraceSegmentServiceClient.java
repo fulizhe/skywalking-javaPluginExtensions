@@ -613,7 +613,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		this.metricsFlushExecutor = executor;
 	}
 
-	/** 30s 翻转周期：分钟翻转落库 → 上一小时 rollup → 保留期清理；异常全部吞掉。 */
+	/** 30s 翻转周期：分钟翻转落库 → 小时 rollup（上一小时 + 进行中的当前小时） → 保留期清理；异常全部吞掉。 */
 	private void flushMetricsSafely() {
 		if (metricsAggregator == null) {
 			return;
@@ -621,7 +621,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		try {
 			final long now = System.currentTimeMillis();
 			metricsAggregator.flushClosedBuckets(now);
-			rollupPreviousHour(now);
+			rollupHours(now);
 			cleanupMetricsRetention(now);
 		} catch (Exception e) {
 			LOGGER.error(e, "### [Metrics] flush cycle failed (swallowed).");
@@ -629,26 +629,70 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
-	 * 把上一小时的分钟行 rollup 成小时行（幂等覆盖）。
+	 * 把分钟行 rollup 成小时行：结算**上一小时**与**进行中的当前小时**两个桶（幂等覆盖）。
+	 * <p>
+	 * 连当前小时一起结算，是为了让「近 7d / 30d」（读小时表）的窗口右端与「近 24h」（读分钟表）对齐——
+	 * 否则 7d 会整整少一个小时，出现"24h 请求总数 &gt; 7d"的矛盾。当前小时是**滚动部分值**：
+	 * 每 30s 用 MERGE 覆盖重算，整点后自然收敛为该小时真值。
+	 * </p>
 	 * <p>
 	 * 每次翻转都重跑上一小时：迟到段在保留窗口内改写分钟行后，本小时行会被重算覆盖，
 	 * 近似值随之收敛（分位为请求数加权平均，v1 已知偏差）。
 	 * </p>
 	 */
-	private void rollupPreviousHour(final long now) {
+	private void rollupHours(final long now) {
 		if (traceSegmentStorage == null) {
 			return;
 		}
-		final long prevHourBucket = now / TraceMetricsQuery.HOUR_MS - 1L;
-		final long fromMinute = prevHourBucket * TraceMetricsQuery.MINUTES_PER_HOUR;
+		final long currentHourBucket = now / TraceMetricsQuery.HOUR_MS;
+		rollupHourBucket(currentHourBucket - 1L);
+		rollupHourBucket(currentHourBucket);
+	}
+
+	/**
+	 * 单个小时桶的 rollup：SQL 按 endpoint 预聚合的行 + H2 尚无桶的在飞内存行 → 合并 → 覆盖写小时行。
+	 * <p>
+	 * 取数用 {@code GROUP BY endpoint} 预聚合而非逐桶拉行：行数从「端点数 × 分钟数」降到「端点数」，
+	 * 既消除 {@code MAX_QUERY_POINTS} 静默截断（旧实现按 {@code endpoint ASC} 排序后 LIMIT，
+	 * 一小时内端点数×分钟数超过上限时会整段丢掉字典序靠后的 endpoint），也让每 30s 的开销与端点数成正比。
+	 * </p>
+	 */
+	private void rollupHourBucket(final long hourBucket) {
+		final long fromMinute = hourBucket * TraceMetricsQuery.MINUTES_PER_HOUR;
 		final long toMinute = fromMinute + TraceMetricsQuery.MINUTES_PER_HOUR - 1L;
-		final List<MetricsRow> minuteRows = traceSegmentStorage.queryMetricRows("minute", null, fromMinute, toMinute,
-				TraceMetricsQuery.MAX_QUERY_POINTS);
-		if (minuteRows.isEmpty()) {
+		final List<MetricsRow> rows = new ArrayList<MetricsRow>(traceSegmentStorage.aggregateMetricRows("minute",
+				fromMinute, toMinute, TraceMetricsQuery.LIMIT_MAX));
+		rows.addAll(pendingMinuteRows(fromMinute, toMinute));
+		if (rows.isEmpty()) {
 			return;
 		}
-		final List<MetricsRow> hourRows = TraceMetricsRollup.toHourRows(minuteRows, prevHourBucket);
-		traceSegmentStorage.storeMetricRows("hour", hourRows);
+		traceSegmentStorage.storeMetricRows("hour", TraceMetricsRollup.mergeByEndpoint(rows, hourBucket));
+	}
+
+	/**
+	 * 范围内 H2 尚无桶的**在飞内存分钟行**（整分翻转前的那一分钟），按桶去重后并入 rollup。
+	 * <p>
+	 * 去重口径与聚合读口一致（见 {@link #aggregateMetrics}）：只要该分钟桶已落库就以 H2 为准，
+	 * 迟到的增量由下一轮 {@code flushClosedBuckets} 覆盖写收敛，不会重复计数。
+	 * </p>
+	 */
+	private List<MetricsRow> pendingMinuteRows(final long fromMinute, final long toMinute) {
+		if (metricsAggregator == null) {
+			return Collections.emptyList();
+		}
+		final List<MetricsRow> memory = metricsAggregator.memoryRows();
+		if (memory.isEmpty()) {
+			return Collections.emptyList();
+		}
+		final Set<Long> persisted = traceSegmentStorage.distinctMetricBuckets("minute", fromMinute, toMinute);
+		final List<MetricsRow> out = new ArrayList<MetricsRow>();
+		for (MetricsRow row : memory) {
+			if (row.getTimeBucket() >= fromMinute && row.getTimeBucket() <= toMinute && row.getRequestCount() > 0L
+					&& !persisted.contains(Long.valueOf(row.getTimeBucket()))) {
+				out.add(row);
+			}
+		}
+		return out;
 	}
 
 	private void cleanupMetricsRetention(final long now) {
@@ -720,7 +764,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			try {
 				final long now = System.currentTimeMillis();
 				metricsAggregator.flushClosedBuckets(now);
-				rollupPreviousHour(now);
+				rollupHours(now);
 			} catch (Exception e) {
 				LOGGER.error(e, "### [Metrics] final flush on shutdown failed (swallowed).");
 			}

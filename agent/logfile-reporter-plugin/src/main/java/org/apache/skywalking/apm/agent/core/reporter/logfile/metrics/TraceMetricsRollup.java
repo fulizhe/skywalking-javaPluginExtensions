@@ -19,16 +19,6 @@ public final class TraceMetricsRollup {
     }
 
     /**
-     * 把某一小时的分钟行按 endpoint 合并为小时行（含全局保留键 {@code "*"}）。
-     *
-     * @param minuteRows 该小时内的分钟行（endpoint 可混合）
-     * @param hourBucket 目标小时桶（{@code startTime / 3600000}）
-     */
-    public static List<MetricsRow> toHourRows(final List<MetricsRow> minuteRows, final long hourBucket) {
-        return mergeByEndpoint(minuteRows, hourBucket);
-    }
-
-    /**
      * 按 endpoint 合并任意行集合为「每端点一行」（与 rollup 同口径）。
      * <p>
      * 用于：小时 rollup、以及读口「按端点聚合」把 SQL 聚合结果与内存实时窗口合并。
