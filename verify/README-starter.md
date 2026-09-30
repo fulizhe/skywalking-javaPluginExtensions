@@ -160,9 +160,10 @@ docker compose logs -f stress      # 每 10s 一行 [progress]
 
 ```bash
 # 在仓库根目录
-bash verify/run.sh --list                          # 先看有哪些场景
+bash verify/run.sh --list                          # 先看有哪些场景(三个活跃插件各一个)
+bash verify/run.sh                                  # 一条命令跑全部场景
 bash verify/run.sh --scenario logfile-reporter    # 主场景
-bash verify/run.sh --scenario override-httpclient --matrix   # 附带跑 httpclient 版本矩阵
+bash verify/run.sh --matrix                        # 附带跑各场景的依赖版本矩阵
 ```
 
 看到这样就是成功:

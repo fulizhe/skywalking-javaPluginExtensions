@@ -115,7 +115,9 @@ bash verify/run.sh
 
 - **mock collector 端到端对账**：把 logfile-reporter 的本地缓存与真实 agent→OAP 上报做外部真值比对
   （借上游 `skywalking-mock-collector`），价值最高。
-- **override-hutool 场景**：demo-app 暂无 hutool 读口桩/控制器，需先补读口。
+- **override-hutool 场景**：~~demo-app 暂无 hutool 读口桩/控制器，需先补读口。~~
+  **已补齐**（2026-09-30）：demo-app 加 `hutool-http` 依赖 + `HutoolHttpDemoController` 出口触发端点，
+  场景见 `verify/scenarios/override-hutool/`（含 hutool 5.4.1 / 5.8.47 版本矩阵），见 [`verify/README.md`](../../verify/README.md)。
 - pwsh 脚本保留为次选；如需彻底移除另开 task。
 
 ## 11. code-review 修正（2026-09-29 追加）

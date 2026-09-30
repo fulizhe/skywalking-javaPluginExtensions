@@ -8,6 +8,9 @@
 #   bash verify/run.sh --scenario logfile-reporter      # 只跑某场景
 #   bash verify/run.sh --scenario override-httpclient --matrix   # 跑版本矩阵
 #   bash verify/run.sh --list                           # 列出场景
+#
+# 版本矩阵:场景的 support-version.list 每行一个版本,--matrix 时以
+# -D<场景声明的 MATRIX_PROPERTY>=<版本> 构建 demo-app(见 scenario.conf)。
 set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -57,12 +60,18 @@ for scenario in "${scenario_args[@]}"; do
   list_file="$SCENARIOS_DIR/$scenario/support-version.list"
   if [[ "$matrix" == "true" && -f "$list_file" ]]; then
     mapfile -t versions < <(grep -vE '^[[:space:]]*(#|$)' "$list_file")
+    # 矩阵版本注入的 maven 属性名由场景声明(见 scenario.conf 的 MATRIX_PROPERTY)
+    matrix_property=$(sed -n 's/^[[:space:]]*MATRIX_PROPERTY="\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+      "$SCENARIOS_DIR/$scenario/scenario.conf" | head -n 1)
+    [[ -n "$matrix_property" ]] || matrix_property="httpclient.version"
+  else
+    matrix_property=""
   fi
   for version in "${versions[@]}"; do
-    label="$scenario${version:+ (httpclient=$version)}"
+    label="$scenario${version:+ ($matrix_property=$version)}"
     echo ""
     echo "===== 运行场景: $label ====="
-    SCENARIO="$scenario" HTTPCLIENT_VERSION="$version" \
+    SCENARIO="$scenario" MATRIX_PROPERTY="$matrix_property" MATRIX_VERSION="$version" \
       docker compose -f "$COMPOSE_FILE" run --rm verify
     code=$?
     if [[ $code -ne 0 ]]; then failed+=("$label (exit $code)"); fi

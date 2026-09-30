@@ -17,7 +17,9 @@ services:
       - verify-m2:/root/.m2
     environment:
       SCENARIO: ${SCENARIO:-logfile-reporter}
-      HTTPCLIENT_VERSION: ${HTTPCLIENT_VERSION:-}
+      # 版本矩阵:版本号 + 注入的 maven 属性名(由场景 scenario.conf 的 MATRIX_PROPERTY 决定)
+      MATRIX_VERSION: ${MATRIX_VERSION:-}
+      MATRIX_PROPERTY: ${MATRIX_PROPERTY:-}
 
 volumes:
   verify-m2:

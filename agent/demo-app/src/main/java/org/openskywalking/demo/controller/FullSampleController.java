@@ -52,7 +52,7 @@ import io.swagger.annotations.ApiOperation;
  * </p>
  * <p>
  * 保持 demo 现状、不额外引依赖：<b>redis</b> 未引入依赖/实例故暂不接入；
- * <b>hutool http</b> 仅有 hutool-core/json（无 hutool-http），HTTP 出口统一用 Apache HttpClient。
+ * 本端点的 <b>HTTP 出口</b>统一用 Apache HttpClient（hutool 出口见 {@link HutoolHttpDemoController}）。
  * </p>
  */
 @RestController

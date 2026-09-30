@@ -41,6 +41,10 @@
         <skywalking.toolkit.version>9.4.0</skywalking.toolkit.version>
         <!-- verify 版本矩阵可变点:覆盖 Spring Boot 管理的 Apache HttpClient 版本(见 verify/scenarios/override-httpclient/support-version.list) -->
         <httpclient.version>4.5.14</httpclient.version>
+        <!-- verify 版本矩阵可变点:hutool 出口(override-hutool-http-5.x-plugin 的增强目标 cn.hutool.http.HttpRequest)
+             须真实存在于应用 classpath,故 demo-app 依赖 hutool-http;core/json 随 `${hutool.version}` 一并对齐,
+             避免 hutool-http 传递的 core 版本与显式声明的 json 版本打架。默认值与插件模块 hutool.version 一致。 -->
+        <hutool.version>5.4.1</hutool.version>
     </properties>
 
     <dependencies>
@@ -78,7 +82,15 @@
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-json</artifactId>
-            <version>5.4.1</version>
+            <version>${hutool.version}</version>
+        </dependency>
+
+        <!-- override-hutool-http-5.x 插件的增强目标(cn.hutool.http.HttpRequest#execute):应用侧真实出口,
+             供 verify/scenarios/override-hutool 端到端断言(见 HutoolHttpDemoController) -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-http</artifactId>
+            <version>${hutool.version}</version>
         </dependency>
 
         <!-- trace 告警验证:httpclient exit span(agent httpclient 插件可观测),版本由 spring-boot 管理 -->

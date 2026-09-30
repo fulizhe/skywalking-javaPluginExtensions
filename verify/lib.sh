@@ -35,10 +35,12 @@ assert_le() {
   if [[ "$actual" =~ ^-?[0-9]+$ ]] && (( actual <= max )); then pass "$name"; else fail "$name" "expected <= $max, got '$actual'"; fi
 }
 
-# assert_jq name json expr —— expr 求值为字符串 true 则通过。
+# assert_jq name json expr [jq args...] —— expr 求值为字符串 true 则通过。
+# 额外的 jq 参数(如 --arg/--argjson)原样透传给 jq,便于断言带动态值。
 assert_jq() {
   local name=$1 json=$2 expr=$3 out
-  out=$(printf '%s' "$json" | jq -r "$expr" 2>/dev/null)
+  shift 3
+  out=$(printf '%s' "$json" | jq -r "$@" "$expr" 2>/dev/null)
   if [[ "$out" == "true" ]]; then pass "$name"; else fail "$name" "jq '$expr' => ${out:-<error>}"; fi
 }
 

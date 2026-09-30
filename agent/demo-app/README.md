@@ -4,10 +4,10 @@
 > 讲「本地跑起来」:一条命令让它留在运行状态、用浏览器看哪些页面、怎么造数据和亲手造一个告警、
 > 出问题按症状怎么查。本 README 是完整参考(全部读口 / 参数 / 压测 / 术语)。
 
-面向三个活跃插件(当前聚焦 `logfile-reporter-plugin`)的演示应用与验证台,单目录三块结构:
+面向三个活跃插件的演示应用与验证台,单目录三块结构:
 
-- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器;
-- **验证回路**:`scripts/` 下的一条命令完成 构建插件 → 安装进 agent → 启动 → 造数 → 断言 → 报告;
+- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器,以及两个 override 插件的出口触发端点(Hutool HttpClient / Apache HttpClient);
+- **验证回路**:三个活跃插件各有一个容器化场景(`verify/scenarios/`,主路径),`scripts/` 下另有一套本地 `pwsh` 次选回路;
 - **能力导览**:本 README + 导览首页(`/`,即 `src/main/resources/static/index.html`),讲清插件是什么、logfile 命名来历、怎么跑。
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
@@ -107,6 +107,34 @@ pwsh ./scripts/start-demo.ps1
 - `GET /inner/sw/trace-alert/recent` — 查看已收讫的 webhook 事件
 
 > 本地 HTTP 调用均建议用 `curl.exe --noproxy "*"` 直连(见 ticket 05 记录:交互式 profile 注入的代理默认参数会把回环请求误送外部代理而得到 502)。
+
+### override 插件的验证读口
+
+两个 override 插件(`override-httpclient-4.x`、`override-hutool-http-5.x`)自身不提供数据读口,
+span/tag 一律由 `logfile-reporter-plugin` 捕获后经 `/statistic` 读取;运行时开关共用
+`SWHttpClientCollectUtils`,读口是 `SWHttpClientCollectController`。对应场景
+`verify/scenarios/override-httpclient`、`verify/scenarios/override-hutool`。
+
+Apache HttpClient 出口触发端点:
+
+- `GET /api/trace-alert-demo/httpclient-post?value=X` — 经 HttpClient 向自身 POST 表单体
+  (期望出口 span tag `http.request.params=form=value=X`)。
+
+Hutool 出口触发端点(`HutoolHttpDemoController`,插件增强目标 `cn.hutool.http.HttpRequest#execute`;
+全部回环自调用,并在响应里回显**业务自己读到的响应体** `businessBody`):
+
+| 端点 | 触发什么 | 期望采到的 tag |
+| --- | --- | --- |
+| `GET /api/hutool-demo/get-query?marker=X` | hutool GET + query string | `http.request.params=query=marker=X`(官方开关) |
+| `GET /api/hutool-demo/post-form?value=X&phase=P` | hutool POST 表单体 | `http.request.params=form=value=X`(override 开关) |
+| `GET /api/hutool-demo/post-json?value=X&phase=P` | hutool POST `body(...)` 原始体 | `http.request.params=body={...}` |
+| `GET /api/hutool-demo/post-multipart?value=X` | hutool POST multipart(文本字段 + 文件) | `http.request.params=value=X` 与 `http.request.files=file={filename/size/contentType}` |
+| `GET /api/hutool-demo/error-call` | hutool GET 目标 500 | 出口 span `isError=true` |
+
+`phase` 会进回环目标路径(`/api/hutool-demo/echo/<phase>`),因此断言可按 `operationName` 精确区分
+不同阶段的出口 span。响应体采集开关关断后(`POST /httpclient/collect/toggle?enable=false`),
+出口 span 仍在、但 `http.request.params` / `http.response.body` tag 消失 —— 即"监控不改变链路结构,
+关断也不影响业务读 body"。
 
 ### 压测(可选)
 

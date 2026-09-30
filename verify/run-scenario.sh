@@ -3,7 +3,8 @@
 #
 # 环境变量:
 #   SCENARIO            场景名(verify/scenarios/<name>),默认 logfile-reporter
-#   HTTPCLIENT_VERSION  可选;非空时以 -Dhttpclient.version=<v> 构建 demo-app(版本矩阵)
+#   MATRIX_VERSION      可选;非空时以 -D<场景声明的 MATRIX_PROPERTY>=<v> 构建 demo-app(版本矩阵)
+#   MATRIX_PROPERTY     可选;兜底值,场景在 scenario.conf 里声明 MATRIX_PROPERTY 为准
 #   REPO                仓库挂载点,默认 /src
 #   WebPort             demo-app 端口,默认 9600
 #
@@ -35,14 +36,20 @@ PLUGIN_JAR_GLOBS=""
 PLUGIN_LOAD_REGEX=""
 HEALTH_PATH="/"
 AGENT_OPTS=""
-REMOVE_OFFICIAL_HTTPCLIENT="false"
+# 官方插件移除:空格分隔的 jar 通配(相对 agent plugins/),override 场景避免同源类被重复增强
+REMOVE_OFFICIAL_PLUGINS=""
+# 版本矩阵注入的 maven 属性名;场景在 scenario.conf 里声明为准(此处仅兜底直接跑容器的场景)
+MATRIX_PROPERTY="${MATRIX_PROPERTY:-httpclient.version}"
 # shellcheck disable=SC1090
 source "$SCENARIO_DIR/scenario.conf"
 
 export WebPort
+# 矩阵版本对 checks.sh 可见:断言可按被测版本给出不同口径(如 hutool 5.4/5.8 的 body 采集差异)
+export MATRIX_PROPERTY
+export MATRIX_VERSION="${MATRIX_VERSION:-}"
 
 log "==============================================================="
-log " verify 场景回路: scenario=$SCENARIO ${HTTPCLIENT_VERSION:+httpclient=$HTTPCLIENT_VERSION}"
+log " verify 场景回路: scenario=$SCENARIO ${MATRIX_VERSION:+$MATRIX_PROPERTY=$MATRIX_VERSION}"
 log " repo=$REPO  WebPort=$WebPort"
 log "==============================================================="
 
@@ -55,7 +62,7 @@ if [[ $? -ne 0 ]]; then log "[FAIL] 插件构建失败"; exit 1; fi
 
 # ---- 2. 构建 demo-app(JDK8, 与既有 Dockerfile 口径一致)----
 app_build_args=()
-if [[ -n "${HTTPCLIENT_VERSION:-}" ]]; then app_build_args+=("-Dhttpclient.version=$HTTPCLIENT_VERSION"); fi
+if [[ -n "${MATRIX_VERSION:-}" ]]; then app_build_args+=("-D$MATRIX_PROPERTY=$MATRIX_VERSION"); fi
 log "[..] 构建 demo-app (${app_build_args[*]:-默认依赖版本})"
 JAVA_HOME="$JAVA8_HOME" PATH="$JAVA8_HOME/bin:$PATH" \
   mvn -B -q -ntp -s "$SETTINGS" -f "$REPO/agent/demo-app/pom.xml" \
@@ -66,9 +73,16 @@ if [[ ! -f "$APP_JAR" ]]; then log "[FAIL] demo-app jar 不存在: $APP_JAR"; ex
 # ---- 3. 装配 agent(可写副本)并安装插件 jar ----
 rm -rf "$AGENT_RUN"
 cp -r "$AGENT_SRC" "$AGENT_RUN"
-if [[ "$REMOVE_OFFICIAL_HTTPCLIENT" == "true" ]]; then
-  rm -f "$AGENT_RUN"/plugins/apm-httpClient-4.x-plugin-*.jar
-fi
+for pattern in $REMOVE_OFFICIAL_PLUGINS; do
+  # nullglob:通配无命中时不做任何事(否则字面量会传给 rm)
+  shopt -s nullglob
+  removed=("$AGENT_RUN"/plugins/$pattern)
+  shopt -u nullglob
+  for jar in "${removed[@]}"; do
+    rm -f "$jar"
+    log "[OK] 移除官方插件: $(basename "$jar")"
+  done
+done
 for rel in $PLUGIN_JAR_GLOBS; do
   for jar in "$REPO"/agent/$rel; do
     if [[ ! -e "$jar" ]]; then log "[FAIL] 插件 jar 未找到: agent/$rel"; exit 1; fi

@@ -1,0 +1,5 @@
+# override-hutool-http-5.x-plugin 支持的 hutool 版本(demo-app 依赖版本,矩阵时覆盖)。
+# 插件按 hutool 5.4.x(bodyBytes 字段)与 5.8.x(body 字段)两套内部结构做反射适配,故各取一个代表版本。
+# 每行一个版本,由 verify/run.sh --matrix 读取。
+5.4.1
+5.8.47

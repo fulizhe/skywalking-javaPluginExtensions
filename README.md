@@ -5,7 +5,7 @@ Skywalking Java Agent插件 和 OAP端的扩展。
 
 #### 上手
 - **第一次来？** 见 [`verify/README-starter.md`](./verify/README-starter.md) —— 只需 Docker，按学习顺序带你本地跑通：一条命令让演示应用常驻、用浏览器看仪表盘、造数据、亲手造一个告警，出问题按症状查。
-- 跑自动化断言（改完代码提交前）：`bash verify/run.sh --scenario logfile-reporter`，详见 [`verify/README.md`](./verify/README.md)。
+- 跑自动化断言（改完代码提交前）：`bash verify/run.sh` 一条命令跑全部场景（三个活跃插件各一个），单个场景 `bash verify/run.sh --scenario override-hutool`，详见 [`verify/README.md`](./verify/README.md)。
 
 #### 开发约定
 

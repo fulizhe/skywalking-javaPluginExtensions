@@ -61,10 +61,11 @@ verify/scenarios/<plugin>/
 | `PLUGIN_LOAD_REGEX` | agent 日志中"插件已加载"的 `grep -E` 正则 |
 | `HEALTH_PATH` | 就绪探测路径(默认 `/`) |
 | `AGENT_OPTS` | 追加的 `-Dskywalking.*` 启动参数 |
-| `REMOVE_OFFICIAL_HTTPCLIENT` | `true` 时移除官方 `apm-httpClient-4.x-plugin`(override 场景避免重复增强) |
+| `REMOVE_OFFICIAL_PLUGINS` | 移除的官方插件 jar 通配(空格分隔,相对 agent `plugins/`);override 场景避免同源类被重复增强 |
+| `MATRIX_PROPERTY` | 版本矩阵注入 demo-app 的 maven 属性名(见下文「版本矩阵」) |
 
-断言助手(见 `verify/lib.sh`):`assert_eq` / `assert_ge` / `assert_le` / `assert_jq`(jq 表达式求值为 `true` 通过)、
-`http_get` / `http_get_or_empty` / `http_post` / `wait_ready`。
+断言助手(见 `verify/lib.sh`):`assert_eq` / `assert_ge` / `assert_le` / `assert_jq`(jq 表达式求值为 `true` 通过,
+可追加 `--arg` / `--argjson` 透传给 jq)、`http_get` / `http_get_or_empty` / `http_post` / `wait_ready`。
 
 ## 现有场景
 
@@ -72,12 +73,20 @@ verify/scenarios/<plugin>/
 |------|------|
 | `logfile-reporter` | 与 `agent/demo-app/scripts/validate.ps1` 的 A/B/C/D 等价:trace 缓存合并、告警链端到端 + webhook 收讫、运行时开关、五类数据流读口冒烟 |
 | `override-httpclient` | 采集开关读口 + enable/disable;httpclient POST 表单体采为 `http.request.params` tag 端到端;httpclient `4.5.13`/`4.5.14` 版本矩阵 |
+| `override-hutool` | hutool 四类采集面(query / 表单体 / `body(...)` 原始体 / multipart 文件元数据)+ `http.response.body` + 目标 500 置 `isError` + 超阈值裁剪 + 运行时开关(关断后 span 在、参数与响应体 tag 消失);hutool `5.4.1`/`5.8.47` 版本矩阵 |
+
+> 三个活跃插件(`docs/repo/module-status.md`)各有一个场景:`bash verify/run.sh` 一条命令全跑。
+> override 插件自身不提供数据读口 —— span/tag 一律由 `logfile-reporter` 场景同款的
+> `logfile-reporter-plugin` 捕获后经 `/statistic` 读取,所以 override 场景都一并装载它。
 
 ## 版本矩阵
 
-`support-version.list` 每行一个库版本;`--matrix` 时运行器以 `-D<name>=<v>` 构建 demo-app。
-`override-httpclient` 用 `-Dhttpclient.version=<v>` 覆盖 demo-app 的 Spring Boot 托管版本
-(见 `agent/demo-app/pom.xml` 的 `<httpclient.version>`)。
+`support-version.list` 每行一个库版本;`--matrix` 时运行器以 `-D<场景声明的 MATRIX_PROPERTY>=<v>` 构建 demo-app:
+
+| 场景 | `MATRIX_PROPERTY` | 对应 demo-app pom 属性 |
+|------|------------------|----------------------|
+| `override-httpclient` | `httpclient.version` | 覆盖 Spring Boot 托管的 Apache HttpClient 版本 |
+| `override-hutool` | `hutool.version` | 同时对齐 `hutool-http` 与 `hutool-json`/`hutool-core` |
 
 ## 新增一个插件场景
 
@@ -93,5 +102,4 @@ verify/scenarios/<plugin>/
 ## 不在范围
 
 - mock collector 端到端对账(借上游 `skywalking-mock-collector`,另立 spec);
-- override-hutool 场景(demo-app 暂无 hutool 读口桩/控制器);
 - 上游式 Freemarker 配置生成与 tomcat-container 形态。
