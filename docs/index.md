@@ -8,5 +8,6 @@
 - **架构评审产物（review）** —— 何时读：阅读评审快照 / 走评审流水线时。→ `review/index.md`
 - **外部实现参考（reference / wiki）** —— 何时读：设计 H2 表结构 / 写入与查询模型 / 本地持久化策略等需对照外部系统时。→ `reference/index.md`
 - **Repo 约定** —— 何时读：动模块、看已知 TODO 前。→ `repo/index.md`
+- **教学空间（tutorial）** —— 何时读：学工具用法（OMO 线）或学测试设计模式（SkyWalking `test/` 线）。从 `tutorial/index.html` 进。→ `tutorial/index.html`
 
 > 根文件：`CONTEXT.md`（领域词表，探索前必读）；本目录即 docs 总入口。

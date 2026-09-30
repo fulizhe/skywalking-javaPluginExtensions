@@ -3,84 +3,184 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OMO 教学空间 · 目录</title>
-<link rel="stylesheet" href="assets/omo.css">
+<title>教学空间 · 课程目录</title>
+<link rel="stylesheet" href="assets/course.css">
 <style>
-  .nav { display: flex; flex-wrap: wrap; gap: 1.5rem; list-style: none; padding: 0; margin: 1.5rem 0; }
-  .nav li { flex: 1 1 18rem; border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1.2rem; background: #fff; }
-  .nav a { display: block; font-weight: 700; margin-bottom: 0.3rem; }
-  .track { font-size: 0.8rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
-  .tag { display: inline-block; font-size: 0.7rem; padding: 0.1em 0.5em; border-radius: 10px; margin-left: 0.4em; vertical-align: middle; }
-  .tag.know { background: #eaf2ea; color: #2e6b3a; }
-  .tag.err { background: #fbf0e2; color: #a3651d; }
+  /* 仅本页特有：卡片网格。左侧大纲与两栏布局复用 assets/course.css 的 .hub-grid / .outline */
+  .cards { list-style: none; padding: 0; margin: 1.2rem 0; display: grid; gap: 0.8rem; }
+  .cards li {
+    border: 1px solid var(--rule); border-radius: 8px;
+    padding: 0.85rem 1.05rem; background: #fff; margin: 0;
+  }
+  .cards a { font-weight: 700; display: inline-block; margin-bottom: 0.15rem; }
+  .cards p { margin: 0; font-size: 0.9rem; }
+  .track {
+    font-size: 0.7rem; color: var(--ink-faint); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 0.3rem; font-weight: 700;
+  }
+  .track.new { color: var(--accent); }
 </style>
 </head>
-<body>
+<body class="hub">
 
-<h1>OMO 教学空间</h1>
-<p class="subtitle">给初学者（以及未来的自己 / 别人）的一份 OpenCode + OMO 使用指南。目录即导航，点进去就能学。</p>
+<div class="hub-grid">
+
+<nav class="outline" aria-label="课程大纲">
+  <p class="outline-title">大纲</p>
+  <ul>
+    <li><span class="cur">课程目录</span></li>
+
+    <li>
+      <span class="branch">线一 · SkyWalking <code>test/</code>
+        <span class="kind">可移植集成测试模式 · 含实跑</span>
+      </span>
+      <ul>
+        <li class="group">知识线 · 课程</li>
+        <li><a href="sw-test/lessons/0001-two-ladders-one-doctrine.html">第 1 课 · 两个测试台，一条信条</a></li>
+        <li class="todo">第 2 课 · 声明式预言（待产出）</li>
+        <li class="todo">第 3 课 · 真跑通 + 变异检验（待产出）</li>
+        <li class="group">参考</li>
+        <li><a href="sw-test/reference/glossary.html">术语表</a></li>
+        <li class="group">教学档案</li>
+        <li><a href="sw-test/MISSION.md">MISSION · 为什么学</a></li>
+        <li><a href="sw-test/RESOURCES.md">RESOURCES · 一手来源</a></li>
+        <li><a href="sw-test/NOTES.md">NOTES · 偏好与草图</a></li>
+      </ul>
+    </li>
+
+    <li>
+      <span class="branch">线二 · OMO（OhMyOpenCode）
+        <span class="kind">工具使用 · 已完结</span>
+      </span>
+      <ul>
+        <li class="group">知识线 · 课程</li>
+        <li><a href="lessons/0001-omo-startup.html">第 1 课 · OMO 起步</a></li>
+        <li><a href="lessons/0002-matt-omo-collab.html">第 2 课 · matt-skills × OMO 协同</a></li>
+        <li class="group">参考 · 速查与避坑</li>
+        <li><a href="reference/omo-cheatsheet.html">OMO 速查手册</a></li>
+        <li><a href="reference/omo-pitfalls.html">OMO 避坑手册</a></li>
+        <li><a href="reference/matt-omo-collab.html">matt-skills ↔ OMO 分工说明</a></li>
+        <li class="group">教学档案</li>
+        <li><a href="MISSION.md">MISSION · 为什么学</a></li>
+        <li><a href="RESOURCES.md">RESOURCES · 权威来源</a></li>
+      </ul>
+    </li>
+  </ul>
+  <p class="outline-foot">2 条线 · 3 课 · 4 篇参考。<br>看完大纲再选，或直接进第 1 课。</p>
+</nav>
+
+<main>
+
+<h1>教学空间</h1>
+<p class="subtitle">两条独立的课程线。各自有使命、各自的术语表和课程，从本页进入。</p>
 
 <div class="callout">
-<strong>给未来 / 新会话的话。</strong> 这是一套<strong>完整的 OMO 课程体系</strong>，不是零散文件。请<strong>从这个目录（本页）开始读</strong>：先看下面的分类，再点进对应页面——每一页都有「返回目录」链接，能随时跳回来。想快速上手从<b>第 1 课</b>开始；想知道「matt-skills 和 OMO 怎么分工」看<b>第 2 课</b>；日常查命令看<b>速查表</b>；遇到怪问题先翻<b>避坑手册</b>（那页最值钱，全是踩过的真坑）。
+  <strong>给未来 / 新会话的话。</strong> 这是<strong>两条完整课程</strong>，不是零散文件。
+  左侧是全部内容的树状大纲——<strong>先扫一眼大纲掌握全貌</strong>，再点进去。
+  每页底部都有返回本页的链接。两条线的<strong>方法论不同</strong>：
+  OMO 那条是<strong>工具使用</strong>（用熟一个东西），
+  SkyWalking 那条是<strong>设计模式</strong>（看懂一套设计，并迁移到别的项目）。
 </div>
 
-<h2>课程（知识线）</h2>
-<p>按顺序学，每课 5 分钟，讲完就能上手。</p>
-<ul class="nav">
+<h2>线一 · SkyWalking <code>test/</code> 精读 → 可移植的集成测试模式</h2>
+<p>主线。以 <a href="https://github.com/apache/skywalking-java/tree/main/test">apache/skywalking-java/test</a>
+为案例研究，最终产出能带去别的 Java / Go 项目用的模式。<b>含真跑环节（Docker）。</b></p>
+<ul class="cards">
   <li>
-    <div class="track">LESSONS<br>第 1 课</div>
-    <a href="lessons/0001-omo-startup.html">OMO 起步：基本流程与常用命令</a>
-    三种用法 + 4 个 agent 对应关系 + `@` 三类 + 常用命令。
+    <div class="track new">MISSION · 为什么学</div>
+    <a href="sw-test/MISSION.md">为什么学这门课</a>
+    <p>目标不是学会用 SkyWalking 的测试框架，而是抽出它背后的可迁移模式。含成功标准与范围边界。</p>
   </li>
   <li>
-    <div class="track">LESSONS<br>第 2 课</div>
-    <a href="lessons/0002-matt-omo-collab.html">matt-skills 与 OMO 协同</a>
-    谁管"做什么"、谁补"怎么做"—真实的分工边界与决策表。
+    <div class="track new">LESSONS · 第 1 课</div>
+    <a href="sw-test/lessons/0001-two-ladders-one-doctrine.html">两个测试台，一条信条</a>
+    <p><code>test/</code> 的全貌地图（<code>test/plugin</code> vs <code>test/e2e</code>）+
+    「场景即测试」这条信条 + 精读一个 scenario 的两份契约。约 10 分钟，无需动手环境。</p>
+  </li>
+  <li>
+    <div class="track new">REFERENCE · 术语表</div>
+    <a href="sw-test/reference/glossary.html">术语表</a>
+    <p>两部分：上游专有名词（不认得就看不懂源码）+ <b>可迁移模式词汇</b>（带「在别处叫什么」对照栏）。</p>
+  </li>
+  <li>
+    <div class="track new">RESOURCES</div>
+    <a href="sw-test/RESOURCES.md">一手来源清单</a>
+    <p>上游源码 permalink、本仓库对照面、以及同一模式在 Testcontainers / Pact / k6 等生态里的对应物。</p>
   </li>
 </ul>
 
-<h2>参考文档（速查 + 说明）</h2>
-<ul class="nav">
+<h2>线二 · OMO（OhMyOpenCode）使用</h2>
+<p>已完结。工具使用向的课程，内容稳定，可随时回来查。</p>
+<ul class="cards">
+  <li>
+    <div class="track">LESSONS · 第 1 课</div>
+    <a href="lessons/0001-omo-startup.html">OMO 起步：基本流程与常用命令</a>
+    <p>三种用法 + 4 个 agent 对应关系 + <code>@</code> 三类 + 常用命令。</p>
+  </li>
+  <li>
+    <div class="track">LESSONS · 第 2 课</div>
+    <a href="lessons/0002-matt-omo-collab.html">matt-skills 与 OMO 协同</a>
+    <p>谁管「做什么」、谁补「怎么做」——真实的分工边界与决策表。</p>
+  </li>
+</ul>
+
+<h3>线二 · 速查与避坑</h3>
+<div class="callout warn">
+  <strong>避坑手册最值钱。</strong> 遇到 OMO 相关的「怪问题」（消息发不出去、agent 名对不上、
+  控制台中文乱码假象、配置改完要重启），先去
+  <a href="reference/omo-pitfalls.html"><code>reference/omo-pitfalls.html</code></a> 对号入座，别再绕一圈。
+  本仓库 <code>AGENTS.md</code> 也指向这一页。
+</div>
+<ul class="cards">
   <li>
     <div class="track">REFERENCE</div>
     <a href="reference/omo-cheatsheet.html">OMO 速查手册</a>
-    打印友好。命令、3 种用法、agent 分工、`@` 三类、本仓库配置备忘。
+    <p>打印友好。命令、3 种用法、agent 分工、<code>@</code> 三类、本仓库配置备忘。</p>
+  </li>
+  <li>
+    <div class="track">REFERENCE <span class="tag err">错误线</span></div>
+    <a href="reference/omo-pitfalls.html">OMO 避坑手册</a>
+    <p>6 个真实坑 + 每条的「我绕过的弯路」+ 一份通用排查清单。</p>
   </li>
   <li>
     <div class="track">REFERENCE</div>
     <a href="reference/matt-omo-collab.html">matt-skills ↔ OMO 分工说明</a>
-    主体工作流 + 补短板的完整对照与真实例子。
-  </li>
-</ul>
-
-<h2>避坑手册（错误线）<span class="tag err">踩过的坑</span></h2>
-<div class="callout warn">
-<strong>这页最值钱。</strong> 每个坑都是我们真实踩过、纠正过的。遇到"怪问题"，先来这里对号入座，别再绕一圈。含：goal 钩子拦消息、agent 名对不上教程、`@` 三类、`@tools_list` 误解、控制台乱码假象、配置需重启。
-</div>
-<ul class="nav">
-  <li>
-    <div class="track">REFERENCE <span class="tag err">错误线</span></div>
-    <a href="reference/omo-pitfalls.html">OMO 避坑手册</a>
-    6 个真实坑 + 每条的"我绕过的弯路" + 一份通用排查清单。
+    <p>主体工作流 + 补短板的完整对照与真实例子。</p>
   </li>
 </ul>
 
 <h2>教学档案（内部）</h2>
-<ul class="nav">
+<ul class="cards">
   <li>
-    <div class="track">MISSION</div>
-    <a href="MISSION.md">Mission · 为什么学</a>
-    学习目标与成功标准。
+    <div class="track">MISSION · 线二</div>
+    <a href="MISSION.md">OMO · 为什么学</a>
+    <p>与 matt-skills 的协同模型、学习目标与范围边界。</p>
   </li>
   <li>
-    <div class="track">RESOURCES</div>
-    <a href="RESOURCES.md">Resources · 权威来源</a>
-    官方文档、本机源码、配置文件的来源清单。
+    <div class="track">RESOURCES · 线二</div>
+    <a href="RESOURCES.md">OMO · 权威来源</a>
+    <p>官方文档、本机实际安装的插件源码、配置文件位置。</p>
+  </li>
+  <li>
+    <div class="track">NOTES · 线一</div>
+    <a href="sw-test/NOTES.md">SkyWalking 线 · 偏好与草图</a>
+    <p>环境事实、课程编排草图、<code>verify/</code> 与上游的逐项对照表、待办悬念。</p>
   </li>
 </ul>
 
-<p class="meta">本目录是教学空间的总入口。任何新开会话的人，从这里开始就能摸清全部内容，不用靠对话记忆。</p>
+<p class="meta">
+  两条线的学习记录分别在 <code>sw-test/learning-records/</code> 与
+  <code>learning-records/</code>。教学约定见本仓库 <code>AGENTS.md</code>。
+</p>
 
-<p class="foot">教学空间根目录：<code>C:\Users\lqzkc\.scratch\omo-tutorial\</code>。样式由 <code>assets/omo.css</code> 统一提供。</p>
+<p class="foot">
+  样式由 <code>assets/course.css</code> 统一提供（<code>assets/omo.css</code> 是它的兼容薄壳）。
+  左侧大纲由 <code>.hub-grid</code> + <code>.outline</code> 组件提供，窄屏自动降级为单栏。
+</p>
+
+</main>
+
+</div>
+
 </body>
 </html>
