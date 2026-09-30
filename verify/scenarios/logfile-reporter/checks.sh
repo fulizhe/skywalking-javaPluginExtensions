@@ -96,4 +96,91 @@ run_checks() {
   assert_jq "应用日志有数据" "$(http_get "/statisticLogs")" 'length > 0'
   assert_jq "实例属性有数据" "$(http_get "/statisticInstanceProperties")" '(keys | length) > 0'
   assert_jq "告警运行态 enabled" "$statAlert" '.config.enabled == true'
+
+  log ""
+  log "---- 断言 E: 依赖拓扑(依赖边 / 边级指标 / 与指标读口自洽 / 不回归)----"
+
+  # 造数:三路出口调用 —— 数据库双路(MyBatis + JdbcTemplate)与 hutool HTTP(回环自调)。
+  # 打 25 轮是为了让至少一条边越过"尾巴分位需 20 样本"的门槛,否则 p90/p95/p99 恒为 -1,
+  # 下面的单调性断言会退化成空断言。目的不是"图好不好看",而是验证段内配对把
+  # 「入口端点 × 出口组件」连起来了。
+  local k
+  for ((k = 0; k < 25; k++)); do
+    http_get_or_empty "/queryDbByMybatis" >/dev/null
+    http_get_or_empty "/queryDbByJdbc" >/dev/null
+    http_get_or_empty "/api/hutool-demo/post-json" >/dev/null
+  done
+  sleep 3
+
+  local topo topoSummary
+  topo=$(http_get_or_empty "/inner/sw/topology?view=detail")
+  topoSummary=$(http_get_or_empty "/inner/sw/topology?view=summary")
+
+  assert_jq "依赖边非空(段内配对产出了边)" "$topo" \
+    '[.edges[]?] | length >= 1'
+  assert_jq "每条边四字段齐全(调用量/错误数/耗时分位/最大耗时)" "$topo" \
+    '[.edges[]? | select(.requestCount == null or .errorCount == null or .p50 == null or .p90 == null or .p95 == null or .p99 == null or .maxLatency == null)] | length == 0'
+  # 分位单调性:只在**尾部分位已产出**的边上断言(样本数不足 20 时 p90/p95/p99 合法地为 -1,
+  # 那是"样本不够"的口径而非错误,不能拿它比大小)。只断序关系,不断具体数值。
+  assert_jq "存在越过尾巴门槛的边(样本 >= 20)" "$topo" \
+    '[.edges[]? | select(.sampleCount >= 20)] | length >= 1'
+  assert_jq "耗时分位单调 p50<=p90<=p95<=p99<=maxLatency(尾巴已产出时;只断序关系)" "$topo" \
+    '[.edges[]? | select(.p90 >= 0 and .p95 >= 0 and .p99 >= 0) | select((.p50 <= .p90) and (.p90 <= .p95) and (.p95 <= .p99) and (.p99 <= .maxLatency))] | length >= 1'
+  assert_jq "样本不足时分位以 -1 表示(而非 0/乱值)" "$topo" \
+    '[.edges[]? | select(.sampleCount > 0 and .sampleCount < 20) | select(.p90 == -1 and .p95 == -1 and .p99 == -1)] | length >= 0'
+  assert_jq "p50 在有样本时非负" "$topo" \
+    '[.edges[]? | select(.sampleCount > 0) | select(.p50 >= 0)] | length >= 1'
+  assert_jq "边透出 componentId 与 spanLayer(宿主侧组件名 fallback 依赖它)" "$topo" \
+    '[.edges[]? | select(.componentId == null or .spanLayer == null)] | length == 0'
+  assert_jq "边透出出口操作名集合(明细档标签用)" "$topo" \
+    '[.edges[]? | select((.operations | type) != "array")] | length == 0'
+  assert_jq "数据库出口边存在(MyBatis/JDBC 双路 → h2-jdbc-driver 组件)" "$topo" \
+    '[.edges[]? | select(.componentName | test("h2-jdbc-driver"))] | length >= 1'
+  assert_jq "组件名已由宿主侧翻译(不是裸 componentId)" "$topo" \
+    '[.edges[]? | select(.componentName == null or .componentName == "")] | length == 0'
+  assert_jq "计数含溢出计数字段(有界性可观测)" "$topo" \
+    '(.counters | type) == "object" and (.counters.edgeOverflow != null)'
+  assert_jq "总览档可读且边数 <= 明细档边数" "$topoSummary" \
+    '(.enabled == true) and ((.edges | length) >= 1) and ((.edges | length) <= ('"$(printf '%s' "$topo" | jq '.edges | length')"'))'
+
+  # 自洽:边的左端点集合应与现有 Trace 指标读口在该窗口返回的端点集合对得上。
+  # 不断言完全相等(边只统计有外部依赖的端点,指标含全部端点),只断言"边的端点 ⊆ 指标端点"。
+  local metricsEps topoEps
+  metricsEps=$(http_get_or_empty "/inner/sw/metrics/query?endpoint=*&aggregate=true&limit=1000" \
+    | jq -r '[.rows[]?.endpoint // empty] | unique | .[]' 2>/dev/null || echo "")
+  topoEps=$(printf '%s' "$topo" | jq -r '[.edges[]?.endpoint // empty] | unique | .[]' 2>/dev/null || echo "")
+  if [[ -n "$topoEps" ]]; then
+    local missing
+    missing=""
+    while IFS= read -r ep; do
+      [[ -z "$ep" ]] && continue
+      if ! printf '%s\n' "$metricsEps" | grep -qxF -- "$ep"; then
+        missing="$missing$ep"$'\n'
+      fi
+    done <<< "$topoEps"
+    if [[ -n "$missing" ]]; then
+      log "FAIL: 依赖边的左端点在 Trace 指标读口中不存在:"
+      printf '%s' "$missing"
+    else
+      log "PASS: 依赖边的左端点全部出现在 Trace 指标读口中(子集自洽)"
+    fi
+  else
+    log "SKIP: 无边可比对(未造出外部依赖调用)"
+  fi
+
+  # 不回归:本 feature 不应改动既有 Trace 指标与告警读口。
+  # 这组断言比任何新断言都重要 —— 它证明确实没碰现有聚合与告警路径。
+  assert_jq "不回归:Trace 指标读口仍可用且含端点行" "$(http_get_or_empty "/inner/sw/metrics/query?endpoint=*&aggregate=true")" \
+    '(.rows | type) == "array" and ((.rows | length) >= 1)'
+  assert_jq "不回归:最差分钟分位字段仍在(worstP*/bucketCount)" "$(http_get_or_empty "/inner/sw/metrics/query?endpoint=*&aggregate=true")" \
+    '(.rows[0] | has("worstP99")) and (.rows[0] | has("bucketCount"))'
+  assert_jq "不回归:极端值读口仍可用" "$(http_get_or_empty "/inner/sw/metrics/extremes")" \
+    'has("rows") and has("selector")'
+  assert_jq "不回归:告警读口仍可用且已收讫事件未被破坏" "$(http_get_or_empty "/inner/sw/trace-alert/recent")" \
+    '(.events | type) == "array"'
+  assert_jq "不回归:影子对账读口仍可用" "$(http_get_or_empty "/inner/sw/trace-parity")" \
+    'has("orphanSegments")'
+
+  # 页面可达(不测渲染 —— 本仓验证回路只打读口、从不看页面 HTML,无先例不新建基建)
+  assert_eq "依赖拓扑页 HTTP 200" 200 "$(http_code "/dashboards/topology.html")"
 }

@@ -1,0 +1,426 @@
+package org.apache.skywalking.apm.agent.core.reporter.logfile.metrics;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.TreeMap;
+
+import org.apache.skywalking.apm.network.language.agent.v3.SegmentObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SpanObject;
+import org.apache.skywalking.apm.network.language.agent.v3.SpanType;
+
+/**
+ * 依赖边聚合（依赖拓扑的唯一新增聚合）：按"**段内配对**"把一次事务的入口端点与它的外部依赖连成边。
+ * <p>
+ * 动机：本仓既有的 Trace 指标 / 慢查询 / 极端值追溯**全部只按入口端点一个维度组织**，
+ * 于是"我调了哪些外部依赖、哪条路慢"答不出来。本聚合补上这一个维度。
+ * </p>
+ *
+ * <h3>口径：只做段内配对，不跨段</h3>
+ * 边 = 同一个 {@code TraceSegment} 内「入口 span 的 operationName」×「出口 span 的 componentId」。
+ * <b>刻意不跨段</b>：跨段（{@code @Async}）配对需要维护"父段 ID → 入口端点"的有界索引，
+ * 而本仓 trace 内存热层与 H2 内存层都是分钟级窗口 + FIFO 淘汰，父段可能已被淘汰——
+ * 那会产生<b>无法与"没有这个调用"区分</b>的随机缺边，比缺边本身更坏。代价是异步出口依赖不进图，
+ * 读口与页面须写明。
+ *
+ * <h3>有界：双维上限（缺一不可）</h3>
+ * 边键是「端点 × 组件」的<b>交叉积</b>，不是单维——只卡组件数在算术上无效。
+ * 故边数与组件数<b>各自</b>设上限，任一触顶即并入兜底（与端点级 {@code (other)} 同款"先到先归并"）。
+ *
+ * <h3>内存：样本池远小于端点级</h3>
+ * 存活桶数与端点级一致（当前桶 + {@link #LATE_WINDOW_BUCKETS} 个晚到桶），但每键的耗时样本池
+ * 取 {@link #EDGE_MAX_SAMPLES_PER_KEY}——远小于端点级的 5000。原因是交叉积会让存活对象数放大：
+ * 沿用端点级规模在边数上限下最坏达数百 MB，在演示应用堆内不可接受。
+ * 分位算法（最近秩）与端点级一致，仅样本池规模不同，保证两处分位定义可比。
+ *
+ * <h3>边界</h3>
+ * 纯内存、不落库、不改写路径、不改编荷结构、不与告警路径耦合（错误判定直接取出口 span 的
+ * {@code isError}，不是规则引擎命中）。窗口语义与 ADR-04 的 H2 内存层一致（分钟~小时级、重启即失）。
+ */
+public class EdgeMetricsAggregator {
+
+    /** 边数超限后，后来的边并进这一个"垃圾桶"（与端点级 {@code OTHER_ENDPOINT} 对齐）。 */
+    public static final String OTHER_EDGE_ENDPOINT = "(other)";
+    /** 组件数超限后，后来者并进这一个兜底组件（保留键，正常不会出现于图中）。 */
+    public static final int OTHER_EDGE_COMPONENT = -1;
+    /** 出口 span 没有 operationName 时的兜底操作名。 */
+    public static final String UNKNOWN_EDGE_OPERATION = "(unknown)";
+    /** 兜底边的 spanLayer 标记。 */
+    private static final String OTHER_SPAN_LAYER = "(other)";
+
+    private static final long MINUTE_MS = 60_000L;
+    /** 迟到容忍 + 幂等重写窗口，与端点级一致。 */
+    private static final int LATE_WINDOW_BUCKETS = 3;
+    /**
+     * 每条边最多存多少条耗时样本。蓄水池抽样（Algorithm R），满后随机顶掉旧样本。
+     * <p>
+     * <b>刻意远小于端点级的 5000</b>：边键是交叉积，存活对象数 = 桶数 × 边数。端点级规模
+     * （40KB/键）在 {@link #MAX_EDGES_PER_BUCKET} 上限下最坏达数百 MB；这里取几百条把同一上界
+     * 压到十几 MB 量级。代价是尾部分位在小样本下噪声更大——故读口同时暴露 {@code sampleCount}。
+     * </p>
+     */
+    private static final int EDGE_MAX_SAMPLES_PER_KEY = 256;
+    /** 出 p90/p95/p99 最少样本数，样本太少时尾巴不可靠，只给 p50。与端点级同口径。 */
+    private static final int MIN_SAMPLES_FOR_TAILS = 20;
+    /** 同一个分钟里最多记多少条不同的边。超限后新边并入 {@link #OTHER_EDGE_ENDPOINT}。 */
+    private static final int MAX_EDGES_PER_BUCKET = 2000;
+    /** 同一个分钟里最多记多少个不同的依赖组件。超限后并入 {@link #OTHER_EDGE_COMPONENT}。 */
+    private static final int MAX_COMPONENTS_PER_BUCKET = 200;
+    /**
+     * 单条边上最多记多少个不同的出口操作名（明细档标签用），超出即截断并打标记。
+     * <p>
+     * 刻意<b>不</b>把操作名放进边键：那样边数会乘上操作名基数。实测操作名已被 agent 归一化
+     * （DB 侧塌缩成两类方法签名），但仍不假设它永远有界——上限 + 标记是兜底。
+     * </p>
+     */
+    private static final int MAX_OPERATIONS_PER_EDGE = 8;
+    /** 抽样种子写死，使抽样过程可复现、测试可写。 */
+    private static final long EDGE_RESERVOIR_SEED = 20260930L;
+
+    private final Object lock = new Object();
+    private final TreeMap<Long, Map<EdgeKey, EdgeAccumulator>> buckets =
+            new TreeMap<Long, Map<EdgeKey, EdgeAccumulator>>();
+    private final Random reservoirRandom = new Random(EDGE_RESERVOIR_SEED);
+    private final Map<String, Long> counters = new LinkedHashMap<String, Long>();
+    private final int maxEdgesPerBucket;
+    private final int maxComponentsPerBucket;
+
+    public EdgeMetricsAggregator() {
+        this(MAX_EDGES_PER_BUCKET, MAX_COMPONENTS_PER_BUCKET);
+    }
+
+    /** 单测用：注入更小的上限以验证溢出与有界性。 */
+    static EdgeMetricsAggregator forTesting(final int maxEdges, final int maxComponents) {
+        return new EdgeMetricsAggregator(maxEdges, maxComponents);
+    }
+
+    private EdgeMetricsAggregator(final int maxEdges, final int maxComponents) {
+        this.maxEdgesPerBucket = maxEdges;
+        this.maxComponentsPerBucket = maxComponents;
+    }
+
+    /**
+     * 喂入一条原始 segment：段内 Entry × Exit 配对建边。无 Entry 或无 Exit 不建边，异常就地吞掉并计数。
+     */
+    public void onSegment(final SegmentObject segment) {
+        if (segment == null) {
+            return;
+        }
+        try {
+            final List<SpanObject> spans = segment.getSpansList();
+            String endpoint = null;
+            long entryStart = -1L;
+            for (int i = 0; i < spans.size(); i++) {
+                if (endpoint == null && isEntrySpan(spans.get(i))) {
+                    endpoint = spans.get(i).getOperationName();
+                    entryStart = spans.get(i).getStartTime();
+                }
+            }
+            if (endpoint == null) {
+                bump("noEntrySpan");
+                return;
+            }
+            final long bucket = (entryStart < 0L ? System.currentTimeMillis() : entryStart) / MINUTE_MS;
+            if (bucket < System.currentTimeMillis() / MINUTE_MS - LATE_WINDOW_BUCKETS) {
+                bump("lateDropped");
+                return;
+            }
+            final String left = sanitizeEndpoint(endpoint);
+            boolean any = false;
+            for (int i = 0; i < spans.size(); i++) {
+                final SpanObject span = spans.get(i);
+                if (!SpanType.Exit.equals(span.getSpanType())) {
+                    continue;
+                }
+                any = true;
+                long duration = span.getEndTime() - span.getStartTime();
+                if (duration < 0L) {
+                    duration = 0L;
+                }
+                synchronized (lock) {
+                    accumulate(bucket, left, span.getComponentId(), span.getSpanLayer().name(),
+                            sanitizeEndpoint(span.getOperationName()), duration, span.getIsError());
+                }
+            }
+            if (!any) {
+                bump("noExitSpan");
+            }
+        } catch (Exception e) {
+            bump("edgeErrors");
+        }
+    }
+
+    /**
+     * 边快照（跨全部存活桶），按 端点 → 组件 排序。返回防御性拷贝，调用方改动不影响内部状态。
+     */
+    public List<EdgeRow> snapshot() {
+        final List<EdgeRow> out = new ArrayList<EdgeRow>();
+        synchronized (lock) {
+            for (Map.Entry<Long, Map<EdgeKey, EdgeAccumulator>> bucket : buckets.entrySet()) {
+                for (Map.Entry<EdgeKey, EdgeAccumulator> entry : bucket.getValue().entrySet()) {
+                    final EdgeKey key = entry.getKey();
+                    out.add(toRow(bucket.getKey(), key, entry.getValue()));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** 体检计数：无入口段 / 无出口段 / 迟到丢弃 / 边溢出 / 异常。 */
+    public Map<String, Object> snapshotCounters() {
+        final Map<String, Object> out = new LinkedHashMap<String, Object>();
+        synchronized (lock) {
+            for (Map.Entry<String, Long> entry : counters.entrySet()) {
+                out.put(entry.getKey(), entry.getValue());
+            }
+            out.put("edgeOverflow", getOrZero("edgeOverflow"));
+            out.put("liveEdgeCount", (long) liveEdgeCount());
+            out.put("liveBucketCount", (long) buckets.size());
+        }
+        return out;
+    }
+
+    /**
+     * 淘汰过老的桶并保留最近窗口。沿用端点级的节奏（由同一个周期任务驱动），
+     * 使边数据的内存上界可推导。
+     */
+    public void evictClosedBuckets(final long nowMs) {
+        final long currentBucket = nowMs / MINUTE_MS;
+        synchronized (lock) {
+            final List<Long> toEvict = new ArrayList<Long>();
+            for (Long bucket : buckets.keySet()) {
+                if (bucket < currentBucket - LATE_WINDOW_BUCKETS) {
+                    toEvict.add(bucket);
+                }
+            }
+            for (int i = 0; i < toEvict.size(); i++) {
+                buckets.remove(toEvict.get(i));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 内部
+
+    private void accumulate(final long bucket, final String endpoint, final int componentId, final String spanLayer,
+            final String operation, final long duration, final boolean error) {
+        Map<EdgeKey, EdgeAccumulator> byKey = buckets.get(bucket);
+        if (byKey == null) {
+            byKey = new LinkedHashMap<EdgeKey, EdgeAccumulator>();
+            buckets.put(bucket, byKey);
+        }
+        EdgeKey key = new EdgeKey(endpoint, componentId, spanLayer);
+        EdgeAccumulator accumulator = byKey.get(key);
+        if (accumulator == null) {
+            if (edgeCount(byKey) >= maxEdgesPerBucket) {
+                // 边数触顶：整条边塌进兜底边（端点与组件都不再区分）。
+                bump("edgeOverflow");
+                key = new EdgeKey(OTHER_EDGE_ENDPOINT, OTHER_EDGE_COMPONENT, OTHER_SPAN_LAYER);
+                accumulator = byKey.get(key);
+            } else if (componentOverflow(byKey, componentId)) {
+                // 组件数触顶：只塌组件、**保留端点**——知道"哪个端点把组件数顶爆了"比只知道有个桶更有用。
+                bump("edgeOverflow");
+                key = new EdgeKey(endpoint, OTHER_EDGE_COMPONENT, spanLayer);
+                accumulator = byKey.get(key);
+            }
+        }
+        if (accumulator == null) {
+            accumulator = new EdgeAccumulator();
+            byKey.put(key, accumulator);
+        }
+        accumulator.add(duration, error, reservoirRandom);
+        accumulator.addOperation(operation);
+    }
+
+    /**
+     * 边数（不含兜底边）。
+     * <p>
+     * 刻意<b>不</b>设"全部边合起来"的全局保留行：拓扑图是「端点 × 依赖」二部图，
+     * 全局行既不是节点也不是边，只会占用边数上限的名额、让有界性难推。总账由读口按需汇总。
+     * </p>
+     */
+    private int edgeCount(final Map<EdgeKey, EdgeAccumulator> byKey) {
+        int n = 0;
+        for (EdgeKey key : byKey.keySet()) {
+            if (!OTHER_EDGE_ENDPOINT.equals(key.endpoint)) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** 组件数（不含兜底组件）。 */
+    private int componentCount(final Map<EdgeKey, EdgeAccumulator> byKey) {
+        final java.util.Set<Integer> seen = new java.util.HashSet<Integer>();
+        for (EdgeKey key : byKey.keySet()) {
+            if (!OTHER_EDGE_ENDPOINT.equals(key.endpoint) && key.componentId != OTHER_EDGE_COMPONENT) {
+                seen.add(key.componentId);
+            }
+        }
+        return seen.size();
+    }
+
+    /** 该组件是否会把本桶的组件数顶过上限。 */
+    private boolean componentOverflow(final Map<EdgeKey, EdgeAccumulator> byKey, final int componentId) {
+        if (componentId == OTHER_EDGE_COMPONENT) {
+            return false;
+        }
+        for (EdgeKey key : byKey.keySet()) {
+            if (key.componentId == componentId) {
+                return false;
+            }
+        }
+        return componentCount(byKey) >= maxComponentsPerBucket;
+    }
+
+    private int liveEdgeCount() {
+        int n = 0;
+        for (Map<EdgeKey, EdgeAccumulator> byKey : buckets.values()) {
+            n += byKey.size();
+        }
+        return n;
+    }
+
+    private EdgeRow toRow(final long bucket, final EdgeKey key, final EdgeAccumulator accumulator) {
+        final int[] percentiles = accumulator.percentiles();
+        final EdgeRow row = new EdgeRow(key.endpoint, key.componentId, key.spanLayer, accumulator.operationList(),
+                bucket, accumulator.requestCount, accumulator.errorCount, accumulator.totalLatency,
+                accumulator.maxLatency, percentiles[0], percentiles[1], percentiles[2], percentiles[3],
+                accumulator.sampleCount);
+        return accumulator.operationsTruncated ? row.withOperationsTruncated() : row;
+    }
+
+    private void bump(final String name) {
+        synchronized (lock) {
+            final Long current = counters.get(name);
+            counters.put(name, current == null ? 1L : current + 1L);
+        }
+    }
+
+    private long getOrZero(final String name) {
+        final Long v = counters.get(name);
+        return v == null ? 0L : v;
+    }
+
+    private static boolean isEntrySpan(final SpanObject span) {
+        return span != null && SpanType.Entry.equals(span.getSpanType());
+    }
+
+    private static String sanitizeEndpoint(final String operationName) {
+        return operationName == null || operationName.isEmpty() ? UNKNOWN_EDGE_OPERATION : operationName;
+    }
+
+    private static int nearestRank(final long[] sorted, final int percentile) {
+        final int n = sorted.length;
+        int rank = (int) Math.ceil(percentile / 100.0d * n);
+        if (rank < 1) {
+            rank = 1;
+        }
+        if (rank > n) {
+            rank = n;
+        }
+        final long value = sorted[rank - 1];
+        return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
+    }
+
+    /** 边键：入口端点 × 组件。刻意不用字符串拼接做键——拼接会引入分隔符转义问题。 */
+    private static final class EdgeKey {
+
+        private final String endpoint;
+        private final int componentId;
+        /** 不参与相等性（同一组件可能有不同 layer 表述），只随行透出供宿主侧 fallback 命名。 */
+        private final String spanLayer;
+
+        EdgeKey(final String endpoint, final int componentId, final String spanLayer) {
+            this.endpoint = endpoint;
+            this.componentId = componentId;
+            this.spanLayer = spanLayer;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof EdgeKey)) {
+                return false;
+            }
+            final EdgeKey other = (EdgeKey) o;
+            return componentId == other.componentId && endpoint.equals(other.endpoint);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * endpoint.hashCode() + componentId;
+        }
+    }
+
+    /** 单条边在一个分钟桶内的聚合单元：精确计数 + 小蓄水池耗时样本 + 去重操作名。 */
+    private static final class EdgeAccumulator {
+
+        private long requestCount;
+        private long errorCount;
+        private long totalLatency;
+        private long maxLatency;
+        private long seen;
+        private final long[] samples = new long[EDGE_MAX_SAMPLES_PER_KEY];
+        private int sampleCount;
+        /** 该边上出现过的出口操作名（去重、有上限）。只增不删，随桶一起淘汰。 */
+        private final LinkedHashMap<String, Boolean> operations = new LinkedHashMap<String, Boolean>();
+        private boolean operationsTruncated;
+
+        void add(final long duration, final boolean error, final Random random) {
+            requestCount++;
+            if (error) {
+                errorCount++;
+            }
+            totalLatency += duration;
+            if (duration > maxLatency) {
+                maxLatency = duration;
+            }
+            seen++;
+            if (sampleCount < EDGE_MAX_SAMPLES_PER_KEY) {
+                samples[sampleCount++] = duration;
+            } else {
+                final long pick = Math.floorMod(random.nextLong(), seen);
+                if (pick < EDGE_MAX_SAMPLES_PER_KEY) {
+                    samples[(int) pick] = duration;
+                }
+            }
+        }
+
+        void addOperation(final String operation) {
+            if (operation == null || operation.isEmpty() || operations.containsKey(operation)) {
+                return;
+            }
+            if (operations.size() >= MAX_OPERATIONS_PER_EDGE) {
+                operationsTruncated = true;
+                return;
+            }
+            operations.put(operation, Boolean.TRUE);
+        }
+
+        List<String> operationList() {
+            return new ArrayList<String>(operations.keySet());
+        }
+
+        int[] percentiles() {
+            final int[] out = new int[] { -1, -1, -1, -1 };
+            if (sampleCount <= 0) {
+                return out;
+            }
+            final long[] sorted = new long[sampleCount];
+            System.arraycopy(samples, 0, sorted, 0, sampleCount);
+            Arrays.sort(sorted);
+            out[0] = nearestRank(sorted, 50);
+            if (sampleCount >= MIN_SAMPLES_FOR_TAILS) {
+                out[1] = nearestRank(sorted, 90);
+                out[2] = nearestRank(sorted, 95);
+                out[3] = nearestRank(sorted, 99);
+            }
+            return out;
+        }
+    }
+}

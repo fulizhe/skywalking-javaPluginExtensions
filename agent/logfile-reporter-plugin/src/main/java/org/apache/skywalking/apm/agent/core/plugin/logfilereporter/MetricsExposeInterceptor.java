@@ -45,6 +45,11 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
                 value = ReflectUtil.invoke(client, "queryMetrics", condition);
             } else if ("extremeTraces".equals(method.getName())) {
                 value = ReflectUtil.invoke(client, "getExtremeTraces");
+            } else if ("dependencyTopology".equals(method.getName())) {
+                @SuppressWarnings("unchecked")
+                final Map<String, Object> condition = (allArguments != null && allArguments.length > 0
+                        && allArguments[0] instanceof Map) ? (Map<String, Object>) allArguments[0] : null;
+                value = ReflectUtil.invoke(client, "getDependencyTopology", condition);
             } else {
                 value = ReflectUtil.invoke(client, "getMetricsStatus");
             }
@@ -69,6 +74,16 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
             empty.put("selector", "absent");
             empty.put("rows", Collections.emptyList());
             empty.put("count", 0);
+            return empty;
+        }
+        if ("dependencyTopology".equals(methodName)) {
+            final Map<String, Object> empty = new HashMap<String, Object>();
+            empty.put("enabled", false);
+            empty.put("edges", Collections.emptyList());
+            empty.put("counters", Collections.emptyMap());
+            empty.put("count", 0);
+            empty.put("totalEdges", 0);
+            empty.put("truncated", false);
             return empty;
         }
         return new HashMap<String, Object>();

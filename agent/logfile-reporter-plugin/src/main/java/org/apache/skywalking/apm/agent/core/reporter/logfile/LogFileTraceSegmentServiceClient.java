@@ -39,6 +39,8 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.SlowRuleThres
 import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMetrics;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsSink;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeMetricsAggregator;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsAggregator;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsQuery;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsRollup;
@@ -88,6 +90,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 
 	/** Trace 指标聚合器（Phase 5：入口段 a1；metrics.enabled=false 时为 null，零开销） */
 	private TraceMetricsAggregator metricsAggregator;
+	/**
+	 * 依赖边聚合器（依赖拓扑：段内 Entry × Exit 配对；纯内存、不落库、不落 H2）。
+	 * 随 metrics 开关一起初始化——它与 Trace 指标同源同生命周期，单独开关会多一个配置项（本仓原则：只留 enabled 一个）。
+	 */
+	private EdgeMetricsAggregator edgeAggregator;
 	/** 指标翻转定时线程（30s 周期：分钟翻转 → 分钟落库 → 上小时 rollup → 保留期清理） */
 	private ScheduledExecutorService metricsFlushExecutor;
 	private boolean metricsEnabled;
@@ -288,6 +295,60 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			result.put("buckets", Collections.emptyList());
 			result.put("counters", Collections.emptyMap());
 		}
+		return result;
+	}
+
+	/**
+	 * 依赖边快照（供 {@code SWMetricsUtils.dependencyTopology()} 经拦截器反射调用）。
+	 * <p>
+	 * 补上"我调了哪些外部依赖、哪条路慢"这一个维度——既有 Trace 指标 / 慢查询 / 极端值追溯
+	 * <b>全部只按入口端点组织</b>，答不出第二个问题。边 = 段内「入口端点 × 出口 span 的组件」。
+	 * </p>
+	 * <p>
+	 * 口径（读口与页面须写明，不可静默隐藏）：
+	 * <ul>
+	 *   <li><b>只做段内配对</b>：异步（跨段）出口依赖不进图。跨段需父段索引，而父段可能已被淘汰，
+	 *       会产生无法与"没有这个调用"区分的随机缺边。</li>
+	 *   <li><b>只到组件类型</b>：透出 {@code componentId} 整数，组件名由宿主侧翻译；不区分实例地址。</li>
+	 *   <li><b>健康标记 = 边级错误率</b>（取自出口 span 的 isError），<b>不是</b>规则引擎告警。</li>
+	 * </ul>
+	 * 纯内存、分钟级窗口、重启即失（与 ADR-04 的 H2 内存层同语义）。返回 JDK 原生类型。
+	 * </p>
+	 *
+	 * @param condition 预留参数：{@code fromBucket}/{@code toBucket}（分钟桶）、{@code limit}。
+	 *                  本期边只存内存窗口、桶数有界，故先按 limit 截断，桶范围过滤留给持久化阶段。
+	 */
+	public Map<String, Object> getDependencyTopology(final Map<String, Object> condition) {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		if (edgeAggregator == null) {
+			result.put("enabled", false);
+			result.put("count", 0);
+			result.put("edges", Collections.emptyList());
+			result.put("counters", Collections.emptyMap());
+			return result;
+		}
+		int limit = 2000;
+		if (condition != null && condition.get("limit") instanceof Number) {
+			limit = ((Number) condition.get("limit")).intValue();
+		}
+		if (limit <= 0) {
+			limit = 2000;
+		}
+		final List<EdgeRow> snapshot = edgeAggregator.snapshot();
+		final boolean truncated = snapshot.size() > limit;
+		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+		for (int i = 0; i < snapshot.size() && (i < limit || !truncated); i++) {
+			rows.add(snapshot.get(i).toMap());
+		}
+		for (Map<String, Object> row : rows) {
+			row.put("timeBucketStart", ((Number) row.get("timeBucket")).longValue() * 60_000L);
+		}
+		result.put("enabled", true);
+		result.put("count", rows.size());
+		result.put("totalEdges", snapshot.size());
+		result.put("truncated", truncated);
+		result.put("edges", rows);
+		result.put("counters", edgeAggregator.snapshotCounters());
 		return result;
 	}
 
@@ -590,6 +651,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// metrics 慢判定复用告警 slow_rules（只读解析器：不触发规则命中计数、不改告警行为）
 		this.metricsAggregator = new TraceMetricsAggregator(sink, Config.Agent.SERVICE_NAME, slowThresholdMs,
 				SlowRuleThresholdResolver.fromConfig());
+		this.edgeAggregator = new EdgeMetricsAggregator();
 		startMetricsFlushTimer();
 		LOGGER.info("### [Metrics] TraceMetricsAggregator initialized (service={}, slowThresholdMs={}, storageEnabled={}).",
 				Config.Agent.SERVICE_NAME, slowThresholdMs, traceSegmentStorage != null);
@@ -621,6 +683,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		try {
 			final long now = System.currentTimeMillis();
 			metricsAggregator.flushClosedBuckets(now);
+			if (edgeAggregator != null) {
+				edgeAggregator.evictClosedBuckets(now);
+			}
 			rollupHours(now);
 			cleanupMetricsRetention(now);
 		} catch (Exception e) {
@@ -848,6 +913,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			// 跑在 DataCarrier 消费线程上，只改内存桶、零 I/O，不为业务线程增加延迟。
 			if (metricsAggregator != null) {
 				metricsAggregator.onSegment(segment);
+			}
+			if (edgeAggregator != null) {
+				edgeAggregator.onSegment(segment);
 			}
 			keptObjs.add(segment);
 			keptRaw.add(raw);

@@ -23,6 +23,7 @@ public class SWMetricsUtilsInstrumentation extends ClassStaticMethodsEnhancePlug
     private static final String METHOD_STATISTIC = "statisticMetrics";
     private static final String METHOD_QUERY = "queryMetrics";
     private static final String METHOD_EXTREMES = "extremeTraces";
+    private static final String METHOD_TOPOLOGY = "dependencyTopology";
     private static final String INTERCEPTOR_CLASS = "org.apache.skywalking.apm.agent.core.plugin.logfilereporter.MetricsExposeInterceptor";
 
     @Override
@@ -35,7 +36,8 @@ public class SWMetricsUtilsInstrumentation extends ClassStaticMethodsEnhancePlug
         return new StaticMethodsInterceptPoint[] { new StaticMethodsInterceptPoint() {
             @Override
             public ElementMatcher<MethodDescription> getMethodsMatcher() {
-                return named(METHOD_STATISTIC).or(named(METHOD_QUERY)).or(named(METHOD_EXTREMES));
+                return named(METHOD_STATISTIC).or(named(METHOD_QUERY)).or(named(METHOD_EXTREMES))
+                        .or(named(METHOD_TOPOLOGY));
             }
 
             @Override

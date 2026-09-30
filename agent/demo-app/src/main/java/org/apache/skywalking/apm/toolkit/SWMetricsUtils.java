@@ -40,4 +40,17 @@ public class SWMetricsUtils {
     public static Map<String, Object> extremeTraces() {
         return Collections.emptyMap();
     }
+
+    /**
+     * 依赖拓扑快照:「入口端点 × 外部依赖」的边列表(补上"我调了哪些依赖、哪条路慢"这一维)。
+     * <p>
+     * condition 支持:limit(默认 2000)、fromBucket / toBucket(分钟桶,本期边只存内存窗口、
+     * 桶范围过滤留待持久化阶段)。边只做<b>段内配对</b>(异步出口不进图)、只到<b>组件类型</b>、
+     * 健康标记是<b>边级错误率</b>而非规则引擎告警——读口与页面须写明这三条口径。
+     * </p>
+     * 无 agent 时返回空 Map;挂载 agent 后由 {@code MetricsExposeInterceptor} 接管。
+     */
+    public static Map<String, Object> dependencyTopology(Map<String, Object> condition) {
+        return Collections.emptyMap();
+    }
 }

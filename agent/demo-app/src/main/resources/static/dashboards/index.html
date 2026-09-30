@@ -81,6 +81,11 @@
         <div class="nav-title">指标排障 · 最差分钟</div>
         <div class="nav-desc">③ 口径:分位=范围内「最差分钟」(各桶取最大),与 metrics 的加权平均并排对比;端点表按最差 P99 排序,可下钻到端点/链路</div>
     </a>
+    <a class="nav-card" href="topology.html">
+        <div class="nav-num">13</div>
+        <div class="nav-title">依赖拓扑</div>
+        <div class="nav-desc">self → 外部依赖的二部图:总览档只到组件类型(可截图),明细档带出口操作名;边上有调用量/错误率/耗时分位,点节点下钻慢查询</div>
+    </a>
 </main>
 <section class="nav-endpoints">
     <h2>原始读口（JSON，点击直开）</h2>
@@ -93,6 +98,7 @@
         <li><a href="/inner/sw/metrics" target="_blank">/inner/sw/metrics</a> —— 指标实时快照（含 QPS）</li>
         <li><a href="/inner/sw/metrics/query?endpoint=%2A&amp;limit=20" target="_blank">/inner/sw/metrics/query?endpoint=*&amp;limit=20</a> —— 指标条件查询（加 &amp;aggregate=true 出每端点一行）</li>
         <li><a href="/inner/sw/metrics/extremes" target="_blank">/inner/sw/metrics/extremes</a> —— 每端点最大耗时那次的 traceId</li>
+        <li><a href="/inner/sw/topology" target="_blank">/inner/sw/topology</a> —— 依赖边（entry × 组件），加 <code>&amp;view=summary</code> 出总览档</li>
     </ul>
 </section>
 <footer class="nav-footer">运行方式:<code>pwsh ./scripts/validate.ps1</code>(一键验证)或 <code>pwsh ./scripts/run-with-agent.ps1</code>(手动模式,保持运行后浏览器打开本页)</footer>

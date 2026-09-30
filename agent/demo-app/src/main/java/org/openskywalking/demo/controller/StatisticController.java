@@ -144,6 +144,62 @@ public class StatisticController {
         return SWMetricsUtils.extremeTraces();
     }
 
+    /**
+     * 依赖拓扑读口:/inner/sw/topology 返回「入口端点 × 外部依赖」的边列表。
+     * <p>
+     * 插件侧只透出 {@code componentId} 整数，<b>组件名在宿主侧翻译</b>（复用既有组件库映射，
+     * Agent 侧因此不必打包组件库）。翻译不到时按 {@code spanLayer} 归类退化——
+     * 实测 hutool-http 的 componentId=128 就不在组件库里（见 docs/notes/2026-09-30-exit-span-runtime-probe.md），
+     * 没有 fallback 的话该依赖节点会是空的。
+     * </p>
+     * 参数:{@code view}=summary(只回组件类型,给总览图)|detail(带出口操作名,给明细图)、
+     * {@code limit}(默认 2000)。
+     */
+    @GetMapping("/inner/sw/topology")
+    public Map<String, Object> topology(
+            @RequestParam(value = "view", required = false, defaultValue = "detail") String view,
+            @RequestParam(value = "limit", required = false) Integer limit) {
+        Map<String, Object> condition = new HashMap<>(4);
+        condition.put("view", view);
+        if (limit != null) {
+            condition.put("limit", limit);
+        }
+        Map<String, Object> result = SWMetricsUtils.dependencyTopology(condition);
+        loadComponentMapIfNeeded();
+        Object edgesObj = result.get("edges");
+        if (edgesObj instanceof List) {
+            List<?> edges = (List<?>) edgesObj;
+            for (Object edgeObj : edges) {
+                if (!(edgeObj instanceof Map)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> edge = (Map<String, Object>) edgeObj;
+                Object cidObj = edge.get("componentId");
+                if (cidObj instanceof Number) {
+                    edge.put("componentName", componentDisplayName(((Number) cidObj).intValue(),
+                            String.valueOf(edge.get("spanLayer"))));
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 组件显示名:先查组件库,查不到则按 spanLayer 归类,再查不到才退化成 {@code component-<id>}。
+     * 三级 fallback 的原因见 {@code /inner/sw/topology} 的注释——组件库并不覆盖全部插件注册的组件。
+     */
+    private String componentDisplayName(int componentId, String spanLayer) {
+        String name = COMPONENT_ID_NAME_MAP.get(componentId);
+        if (name != null && !name.isEmpty()) {
+            return name;
+        }
+        if (spanLayer != null && !spanLayer.isEmpty() && !"null".equals(spanLayer)) {
+            return spanLayer + "(#" + componentId + ")";
+        }
+        return "component-" + componentId;
+    }
+
     /** 链路段读口:/statistic 返回 data(按 endTime 倒序、附可读时间与组件名),去掉 jvm/instanceProperties 两流 */
     @GetMapping("/statistic")
     public Object statistic() {
