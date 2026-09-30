@@ -421,6 +421,30 @@ try {
         Assert "范围 $($rc.name) 路由=$($rc.expect)" (("$($rResp.StatusCode)" -eq "200") -and $resOk) "status=$($rResp.StatusCode) resolution=$($rr.resolution)"
     }
 
+    # 小时 rollup 覆盖当前小时 + 与分钟表守恒（回归守卫：修复前"近 7d 请求数 < 近 24h"）
+    function Get-StarRequestCount([string]$res, [long]$fromB, [long]$toB) {
+        $resp = Invoke-LocalHttp "/inner/sw/metrics/query?aggregate=true&resolution=$res&fromBucket=$fromB&toBucket=$toB&limit=1000"
+        $j = $null; try { $j = $resp.Content | ConvertFrom-Json } catch { $j = $null }
+        if (-not $j) { return -1L }
+        foreach ($r in @($j.rows)) { if ("$($r.endpoint)" -eq "*") { return [long]$r.requestCount } }
+        return 0L
+    }
+    $nowHourB = [long][math]::Floor($nowMinute / 60)
+    $prevHourEndB = ($nowHourB * 60) - 1
+    # (1) 小时表必须已含"进行中的当前小时"——修复前该桶恒缺，是 7d < 24h 的直接成因
+    $curStar = Get-StarRequestCount "hour" ($nowHourB * 60) $nowMinute
+    Assert "小时表含进行中的当前小时(当前小时 * > 0)" ($curStar -gt 0) "hourBucket=$nowHourB requestCount=$curStar"
+    # (2) 上一小时已整点结算，小时行与分钟行必须精确相等（rollup 守恒；截断/漏合并会打破）
+    $phFrom = $prevHourEndB - 59
+    $phHour = Get-StarRequestCount "hour" $phFrom $prevHourEndB
+    $phMin = Get-StarRequestCount "minute" $phFrom $prevHourEndB
+    Assert "上一小时 小时表 == 分钟表(精确守恒)" ($phHour -eq $phMin) "hour=$phHour minute=$phMin"
+    # (3) 近 7d 同一右端：小时表总量不得小于分钟表（用户可见口径：7d >= 24h）
+    $wFrom = $prevHourEndB - 10079
+    $h7 = Get-StarRequestCount "hour" $wFrom $prevHourEndB
+    $m7 = Get-StarRequestCount "minute" $wFrom $prevHourEndB
+    Assert "近 7d 窗口 小时表 >= 分钟表" ($h7 -ge $m7) "hour=$h7 minute=$m7"
+
     # limit 截断
     $limResp = Invoke-LocalHttp "/inner/sw/metrics/query?endpoint=%2A&limit=1"
     $lim = $null; try { $lim = $limResp.Content | ConvertFrom-Json } catch { $lim = $null }

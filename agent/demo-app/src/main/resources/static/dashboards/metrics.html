@@ -537,9 +537,11 @@ function renderKpis(rows, truncated){
   var req=0,err=0,slow=0;
   globalSeries.req.forEach(function(v,i){req+=v;err+=globalSeries.err[i];slow+=globalSeries.slow[i];});
   var n = globalSeries.labels.length; var i99 = n? n-1 : -1;
+  // 小时分辨率下，最后一个桶是"进行中的当前小时"（滚动部分值，整点收敛）；QPS 分母按满 1h 计，故短时偏低
+  var hourRes = lastResolution==="hour";
   var kpis = [
-    ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 端点已截断":"")],
-    ["QPS", fmtQps(globalQps(rows)), rangeLabel()+" 平均"],
+    ["请求总数", fmtInt(req), rangeLabel()+(truncated?" · 端点已截断":"")+(hourRes?" · 含进行中的当前小时":"")],
+    ["QPS", fmtQps(globalQps(rows)), rangeLabel()+" 平均"+(hourRes?" · 当前小时按满 1h 计分母":"")],
     ["错误率", pct(req?err/req:0), fmtInt(err)+" 次错误"],
     ["P95", i99>=0?fmtMs(globalSeries.p95[i99]):"-", "P99 "+(i99>=0?fmtMs(globalSeries.p99[i99]):"-")],
     ["慢调用", fmtInt(slow), pct(req?slow/req:0)+" 占比"],
@@ -619,6 +621,7 @@ function renderDetail(name, rows){
     "数据说明：本行取自该 endpoint 在 <b>"+rangeLabel()+"</b> 范围内的逐桶序列（来源 <span class='mono'>/inner/sw/metrics/query?endpoint=…</span>）。"
     + "计数（请求/错误/慢）与最大耗时为<b>精确合并</b>；P50/P90/P95/P99 为各桶分位按请求数<b>加权平均</b>（≤24h 用分钟分位，7d/30d 用小时分位，小时分位本身为分钟分位的加权近似）。"
     + "样本不足的桶分位为空、不参与加权（<span class='mono'>sampleCount ≤ requestCount</span>）。"
+    + "7d/30d 的最后一个桶是<b>进行中的当前小时</b>：每 30s 滚动重算、整点后收敛为真值，最多落后最近一次翻转，因此「近 7d/30d」总量可能<b>略小于</b>「近 24h」——上界＝一个翻转周期（30s）的流量。"
     + "口径为<b>入口段</b>（段内含 Entry span 即一次事务），慢判定用默认阈值，normal 也计入请求与耗时。"
     + "「极端值 traceId」为进程内该 endpoint 最大耗时那一次的链路入口（内存记录、随进程；来源 <span class='mono'>/inner/sw/metrics/extremes</span>，点击经 <span class='mono'>/inner/sw/trace-query</span> 取回）。";
 
