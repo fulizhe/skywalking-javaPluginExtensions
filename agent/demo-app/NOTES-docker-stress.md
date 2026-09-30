@@ -83,38 +83,19 @@ docker compose down
 
 ## 踩坑与约定
 
-1. **聚合 pom 的 module 目录必须存在**：`agent/pom.xml` 的 `<modules>` 列了全部同级插件，
-   Maven 解析聚合 pom 时要求目录存在，哪怕 `-pl` 只构建一个 → 所以 `plugin-build`
-   阶段是 `COPY agent agent`，不是只拷插件目录。
-2. **构建/运行 mirror 要一致**：镜像内 `.m2` 是用 `agent/settings.xml`(aliyun) 预热的；
-   运行时 `mvn` 必须也带 `-s`，否则会因 `_remote.repositories` 仓库 id 不匹配而整包重下。
-   compose 里以 bind mount `../settings.xml:/opt/demo-app/settings.xml:ro` 提供。
-3. **远端无构建上下文**：`deploy_remote.py` 生成部署版 compose——删掉 `build:` 段、
-   把 settings 挂载由 `../settings.xml` 改成 `./settings.xml`。本地仓库那份仍保留 `build:`。
-4. **镜像已内置 settings.xml**：`COPY agent/settings.xml` 早已在 Dockerfile 里，
-   重建也曾被本机代理阻过、现已能通过；compose 里对 `../settings.xml` 的 bind mount
-   变成冗余但无害，远端部署版仍需要它（远端无构建上下文）。
-5. **偶发 `BUILD FAILURE` 是环境问题**：Windows 宿主代理 `127.0.0.1:7897` 套接字耗尽
-   会让 aliyun 返回 500（`Only one usage of each socket address`），与 Dockerfile 无关，重试即可。
-5b. **拉 agent 发行包不要用 `ADD https://…`**：远端 ADD 经代理易 flaky
-   （`unexpected EOF`），已改为 `curl --retry 5 --retry-all-errors`（同 `verify/Dockerfile`）。
-   同理刻意不写 `# syntax=docker/dockerfile:1`——该指令会强制拉前端镜像，受限网络下易失败。
-   另：插件 jar 用通配符 `logfile-reporter-plugin-*.jar` 拷入，不再写死版本号，
-   避免升版后静默失效（通配符不会误中 `original-logfile-reporter-plugin-*.jar`）。
-6. **资源上限**：demo-app `-Xms512m -Xmx512m` + `mem_limit: 1g`，用固定堆更容易看出内存趋势。
-7. **H2 需要显式开启**：`-Dskywalking.plugin.logfilereporter.h2.enabled=true`，
-   否则 `status/storage` 相关读口可能为空。
-8. **H2 Web Console 远程访问受 Host 白名单限制**：compose 已开插件内置控制台
-   （`h2.console_enabled=true`，端口 8092）。本地 `http://127.0.0.1:8092` 正常，
-   但用宿主 IP（如 `http://172.16.1.108:8092`）会返回 `HTTP 404` + 响应体
-   `Host 172.16.1.108 not found`。原因是 H2 2.1.212 的 `WebThread.checkHost` 只放行
-   server 自身地址、`localhost`/`127.0.0.1` 与 `webExternalNames` 列表；插件传的
-   `-webAllowOthers` 只管 socket 层是否接受非本机连接，并**不**解除该 Host 校验
-   （容器内自身地址是容器 IP，故宿主 IP 不在白名单）。
-   - **临时绕过（无需重建）**：SSH 本地端口转发
-     `ssh -L 8092:127.0.0.1:8092 root@172.16.1.108`，浏览器访问
-     `http://localhost:8092`（Host 为 localhost，放行）；命令行验证可用
-     `curl -H 'Host: localhost' http://172.16.1.108:8092`（应 200）。
-   - **根治**：给控制台传 `-webExternalNames=<host>[,<host>...]`。当前插件
-     `startConsole` 写死参数、未暴露该项，需新增配置（如
-     `h2.console_external_names`）后重建镜像。
+编号沿用历史列表（5b/5c/5d 是 5 的子条目），便于回溯。
+
+| # | 坑 / 约定 | 原因（Why） | 做法（Do） |
+| --- | --- | --- | --- |
+| 1 | 聚合 pom 的 module 目录必须存在 | `agent/pom.xml` 的 `<modules>` 列了全部同级插件，Maven 解析聚合 pom 时要求目录存在，哪怕 `-pl` 只构建一个 | `plugin-build` 阶段 `COPY agent agent`，不要只拷插件目录 |
+| 2 | 构建/运行 mirror 要一致 | 镜像内 `.m2` 用 `agent/settings.xml`(aliyun) 预热；运行时 `mvn` 不带 `-s` 会因 `_remote.repositories` 仓库 id 不匹配而整包重下 | compose 里 bind mount `../settings.xml:/opt/demo-app/settings.xml:ro`，运行 `mvn` 必须也带 `-s` |
+| 3 | 远端无构建上下文 | 远端只有镜像 tar + compose，没有源码树 | `deploy_remote.py` 生成**部署版** compose：删掉 `build:` 段、settings 挂载由 `../settings.xml` 改成 `./settings.xml`；仓库里那份仍保留 `build:` |
+| 4 | 镜像已内置 settings.xml | `COPY agent/settings.xml` 早已在 Dockerfile 里；重建曾被本机代理阻过、现已能通过 | compose 里对 `../settings.xml` 的 bind mount 变成冗余但无害；远端部署版仍需要它（见 3） |
+| 5 | 偶发 `BUILD FAILURE` 是环境问题 | Windows 宿主代理 `127.0.0.1:7897` 套接字耗尽 → aliyun 返回 500（`Only one usage of each socket address`），与 Dockerfile 无关 | 重试即可，别改 Dockerfile |
+| 5b | 拉 agent 发行包不要用 `ADD https://…` | 远端 ADD 经代理易 flaky（`unexpected EOF`） | 改用 `curl --retry 5 --retry-all-errors`（同 `verify/Dockerfile`） |
+| 5c | 刻意不写 `# syntax=docker/dockerfile:1` | 该指令会强制拉前端镜像，受限网络下易失败 | 保持 Dockerfile 无 syntax 指令 |
+| 5d | 插件 jar 用通配符拷入 | 写死版本号会在升版后静默失效 | `logfile-reporter-plugin-*.jar`（不会误中 `original-logfile-reporter-plugin-*.jar`） |
+| 6 | 资源上限 | 固定堆更容易看出内存趋势 | demo-app `-Xms512m -Xmx512m` + `mem_limit: 1g` |
+| 7 | H2 需要显式开启 | 否则 `status/storage` 相关读口可能为空 | `-Dskywalking.plugin.logfilereporter.h2.enabled=true` |
+| 8 | H2 Web Console 远程访问受 Host 白名单限制 | compose 已开内置控制台（`h2.console_enabled=true`，端口 8092），本地 `http://127.0.0.1:8092` 正常；用宿主 IP（如 `http://172.16.1.108:8092`）返回 `HTTP 404` + 响应体 `Host 172.16.1.108 not found`。根因：H2 2.1.212 的 `WebThread.checkHost` 只放行 server 自身地址、`localhost`/`127.0.0.1` 与 `webExternalNames` 列表；插件传的 `-webAllowOthers` 只管 socket 层是否接受非本机连接，**不**解除该 Host 校验（容器内自身地址是容器 IP，故宿主 IP 不在白名单） | **临时绕过（无需重建）**：SSH 本地端口转发 `ssh -L 8092:127.0.0.1:8092 root@172.16.1.108`，浏览器访问 `http://localhost:8092`（Host 为 localhost，放行）；命令行验证用 `curl -H 'Host: localhost' http://172.16.1.108:8092`（应 200）。<br>**根治**：给控制台传 `-webExternalNames=<host>[,<host>...]`；当前插件 `startConsole` 写死参数、未暴露该项，需新增配置（如 `h2.console_external_names`）后重建镜像 |
+| 8b | 影子库 JDBC URL / 控制台登录凭据 | 影子库地址是 `H2TraceSegmentStorage.java:62` 的 `JDBC_URL` **写死常量**，没有对应的 `h2.*` 配置项（`h2.*` 只管 `enabled` / `shadow_max_rows` / `payload_capped_size_mb` / `console_enabled`）；`DB_CLOSE_DELAY=-1` 表示"最后一条连接断了也保留内存库"，进程退出才丢，所以控制台断开重连还能查到数据 | 8092 控制台登录填 URL `jdbc:h2:mem:sw_trace_segment;DB_CLOSE_DELAY=-1`、User `sa`、Password **留空**（H2 建库时给的是空密码）。<br>别和 demo-app 自己的库混淆：`jdbc:h2:mem:dbtest`（9600 的 `/h2` 控制台）密码是 `123456` |
