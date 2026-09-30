@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>术语表 · SkyWalking `test/` 与可移植集成测试模式</title>
+<link rel="stylesheet" href="../../assets/course.css">
+<style>
+  /* 术语表专用：左侧词条锚点导航 */
+  .toc { columns: 2; column-gap: 2rem; font-size: 0.85rem; }
+  .toc li { break-inside: avoid; }
+  dl { margin: 0; }
+  dt {
+    font-family: "SFMono-Regular", Consolas, "Cascadia Mono", Menlo, monospace;
+    font-size: 0.86rem; font-weight: 700; color: var(--ink);
+    margin-top: 1.3rem; padding-bottom: 0.15rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  dt .zh { font-family: Charter, "Bitstream Charter", Georgia, "Songti SC", serif; font-weight: 400; color: var(--ink-faint); }
+  dd { margin: 0.45rem 0 0; color: var(--ink-soft); }
+  dd p { margin: 0 0 0.5rem; }
+  .also { font-size: 0.82rem; color: var(--ink-faint); }
+  .also b { color: var(--ink-soft); }
+</style>
+</head>
+<body>
+
+<h1>术语表</h1>
+<p class="subtitle">SkyWalking Java <code>test/</code> 模块词汇 + 可移植集成测试模式词汇。课程全程以本表为准。</p>
+
+<div class="callout">
+  <strong>怎么用这张表。</strong> 分两部分：<b>A 部分</b>是读上游源码时必须认得的专有名词
+  （不认得就看不懂代码）；<b>B 部分</b>是这套设计背后的<b>可迁移模式</b>，带「在别处叫什么」一栏——
+  迁移到自己的 Java / Go 项目时靠这一栏对上号。代码、字段名、路径一律保留英文原样。
+</div>
+
+<div class="meta">
+  基准版本：apache/skywalking-java @ <code>ea2fb09</code>（main）。<br>
+  一手来源见 <a href="../../RESOURCES.md"><code>RESOURCES.md</code></a>。
+</div>
+
+<h2>速查：A · 上游专有名词</h2>
+
+<h3>结构与运行</h3>
+<dl>
+
+<dt>scenario <span class="zh">· 场景</span></dt>
+<dd>
+  <p><code>test/plugin/scenarios/</code> 下的一个独立 Maven 项目，是这套框架的<b>测试单元</b>。
+  它自带一个被测应用（fat-jar 或 WAR）、一份配置、一份预期数据、一个版本矩阵。</p>
+  <p class="also">读法：scenario 不是「一个测试方法」，而是<b>一整套可独立运行、可独立判定成败的验证装置</b>。</p>
+</dd>
+
+<dt>configuration.yml <span class="zh">· 场景配置</span></dt>
+<dd>
+  <p>声明<b>怎么跑</b>这个场景。由 <code>runner-helper</code> 翻译成实际的 <code>docker run</code>
+  或 <code>docker-compose</code> 调用。字段：<code>type</code>（<code>jvm</code> / <code>tomcat</code>）、
+  <code>entryService</code>、<code>healthCheck</code>、<code>startScript</code>、<code>runningMode</code>、
+  <code>withPlugins</code>、<code>environment</code>、<code>dependencies</code>。</p>
+  <p class="also">POJO 定义见
+  <a href="https://github.com/apache/skywalking-java/blob/main/test/plugin/runner-helper/src/main/java/org/apache/skywalking/plugin/test/helper/vo/CaseConfiguration.java"><code>…/vo/CaseConfiguration.java</code></a>。</p>
+</dd>
+
+<dt>expectedData.yaml <span class="zh">· 预期数据</span></dt>
+<dd>
+  <p>声明<b>必须产生什么</b>。整套框架的心脏：一份描述期望上报内容的 YAML，由通用匹配引擎
+  （<code>skywalking-validator</code>）与实际抓到的数据逐字段比对。三大类：
+  <code>segmentItems</code>（链路）、<code>meterItems</code>（指标）、<code>logItems</code>（日志）。</p>
+  <p class="also">这是本课程<b>最可迁移</b>的一个概念。计划在第 2 课《声明式预言》展开。</p>
+</dd>
+
+<dt>actualData.yaml <span class="zh">· 实际数据</span></dt>
+<dd>
+  <p>容器内 mock collector 抓到的真实上报内容，<b>由框架生成而非手写</b>。
+  校验通过会被删除；要看它得加 <code>--debug</code>。这是「声明式预言」能自我纠错的关键：
+  失败时把预言和现实并排摆给你看。</p>
+</dd>
+
+<dt>mock collector <span class="zh">· 模拟收集端</span></dt>
+<dd>
+  <p>容器内监听 <b>19876</b> 端口的 gRPC 服务，冒充 OAP 接收 agent 上报的 span / meter / log，
+  并落成 <code>actualData.yaml</code>。它的存在让 plugin 测试<b>不需要真的跑 OAP</b>——
+  这是「快」这一节的全部秘密。</p>
+</dd>
+
+<dt>validator <span class="zh">· 校验器</span></dt>
+<dd>
+  <p><code>skywalking-validator.jar</code>，容器内最后一步。读 <code>expectedData.yaml</code> 与
+  <code>actualData.yaml</code>，按规则引擎逐项比对，退出码即 scenario 成败。</p>
+  <p class="also">关键点：<b>断言逻辑是通用的、与被测插件无关的一份代码</b>。所以新增 scenario
+  只需写 YAML，不用写 Java —— 这是「声明式」带来的直接收益。</p>
+</dd>
+
+<dt>entryService <span class="zh">· 入口服务</span></dt>
+<dd>
+  <p>触发场景的 URL。容器 <code>run.sh</code> 用 <code>curl -s --max-time 3</code> 打它，<b>且没有预热</b>。
+  所以第一个冷请求必须在 3 秒内完成，否则整场失败。这是本框架最著名的坑。</p>
+  <p class="also">别和 e2e 的 <code>trigger</code> 混起来：<code>trigger</code> 是 YAML 里的一个阶段，
+  <code>entryService</code> 是 plugin 容器的硬编码单次请求。</p>
+</dd>
+
+<dt>healthCheck <span class="zh">· 健康检查</span></dt>
+<dd>
+  <p>就绪探测 URL，用 HTTP <b>HEAD</b>（不是 GET）访问。自写的健康检查端点必须处理 HEAD 请求。</p>
+</dd>
+
+<dt>agent_opts <span class="zh">· agent 启动参数</span></dt>
+<dd>
+  <p><code>type: jvm</code> 场景里，<code>bin/startup.sh</code> <b>必须</b>包含
+  <code>java -jar ${agent_opts} …</code>。框架通过这个占位符注入 <code>-javaagent:</code> 行。
+  漏掉它 → agent 根本没挂上 → 场景必然失败，且失败信息会误导你去查插件逻辑。</p>
+</dd>
+
+<dt>support-version.list <span class="zh">· 版本矩阵</span></dt>
+<dd>
+  <p>纯文本，一行一个版本，<code>#</code> 注释。<code>run.sh</code> 逐行遍历，每版构建并跑一遍场景。
+  规则：<b>每个 minor 取最新补丁</b>，不是每个补丁都测。支持行尾附加 Maven 属性
+  （<code>2.7.14,spring.boot.version=2.5.15</code>）。</p>
+</dd>
+
+<dt>base image <span class="zh">· 基础镜像</span></dt>
+<dd>
+  <p><code>--base_image_java</code> / <code>--base_image_tomcat</code> 指定。
+  <b>版本钉在 CI 泳道里，不在 <code>configuration.yml</code> 里</b>——
+  <code>configuration.yml</code> 只说 <code>type: tomcat</code>，用哪个 Tomcat 版本由所在泳道决定，
+  同泳道所有 scenario 共享一个镜像。</p>
+  <p class="also">这是「测试声明需要什么，流水线决定怎么满足」的分离思想。见下方
+  <code>test ladder</code> 相关条目。</p>
+</dd>
+
+<dt>CI lane <span class="zh">· 泳道</span></dt>
+<dd>
+  <p><code>.github/workflows/plugins-&lt;jdk&gt;-test.&lt;n&gt;.yaml</code>，一个文件一条泳道。
+  它的 <code>build</code> job 钉 <code>base_image_java</code> + <code>base_image_tomcat</code>，
+  <code>test</code> job 的 <code>matrix.case</code> 列出本泳道跑哪些 scenario。
+  尾号 <code>.0</code> / <code>.1</code> 只是分桶限流。新增 scenario 用
+  <code>tools/select-group.py</code> 找最闲的桶。</p>
+  <p class="also">硬约束：jakarta 系的 WAR（Struts 7 / Jetty 12 / Spring 6）<b>必须</b>挂到
+  JDK-17 泳道（Tomcat 10.1 基座），javax 系的挂老泳道。挂错池子 = 部署不上去。</p>
+</dd>
+
+<dt>workspace <span class="zh">· 运行工作区</span></dt>
+<dd>
+  <p><code>test/plugin/workspace/&lt;scenario&gt;/&lt;version&gt;/</code>，每次运行的产物落点，
+  含 <code>logs/</code> 与 <code>data/actualData.yaml</code>。<code>--cleanup</code> 清除。</p>
+</dd>
+
+</dl>
+
+<h3>领域数据（SkyWalking 自己的词汇）</h3>
+<dl>
+
+<dt>segment <span class="zh">· 链路片段</span></dt>
+<dd>一次「进程内的一组 span」的单位，SkyWalking 特有的中间层（trace → segment → span 三级）。
+  对应 OpenTelemetry 的 span 本身，少了一层聚合。</dd>
+
+<dt>span</dt>
+<dd>最小工作单元。<code>spanType</code>：<code>Entry</code>（入站，被调用方）/
+  <code>Exit</code>（出站，调用方）/ <code>Local</code>。<code>spanLayer</code>：
+  <code>Http</code> / <code>DB</code> / <code>RPC_FRAMEWORK</code> / <code>MQ</code> / <code>CACHE</code>。
+  <code>parentSpanId: -1</code> 表示根 span。</dd>
+
+<dt>refs <span class="zh">· 跨进程引用</span></dt>
+<dd>
+  <p>一个 segment 携带的「我被谁调过来的」上下文。关键字段
+  <code>refType: CrossProcess</code>、<code>parentEndpoint</code>、<code>parentSpanId</code>、
+  <code>parentTraceSegmentId</code>、<code>parentService</code>、<code>traceId</code>。
+  <b>它是「跨进程传播是否生效」的唯一证据</b>，也是最常被漏断言的字段。</p>
+  <p class="also">要区分两个 span：<code>spanId</code> 是 segment 内序号（0,1,2…）；
+  <code>parentSpanId</code> 指向同 segment 内的父；跨进程则靠 <code>refs</code>，不靠
+  <code>parentSpanId</code>。</p>
+</dd>
+
+<dt>componentId <span class="zh">· 组件 ID</span></dt>
+<dd>插桩点标识。断言 <code>componentId</code> 等于断言「这个请求确实是被<b>这个</b>插件插的桩」，
+  比断言 <code>operationName</code> 更能防张冠李戴。</dd>
+
+<dt>tags</dt>
+<dd>span 上的键值对：<code>url</code>、<code>http.method</code>、<code>http.status_code</code>、
+<code>http.params</code>、<code>http.headers</code>、<code>db.*</code>。
+插件的「取数据逻辑」就体现在这里，所以<b>断言 tags 是断言插件真的读到了字段</b>。</dd>
+
+</dl>
+
+<h3>匹配算子（宽松匹配语义）</h3>
+<dl>
+
+<dt>rule / 匹配算子</dt>
+<dd>
+  <p><code>expectedData.yaml</code> 里每个值都可以不是字面量，而是一条规则。
+  数字：<code>eq</code>（默认）<code>ne</code> <code>gt</code> <code>ge</code>；
+  字符串：<code>eq</code>（默认）<code>not null</code> <code>not blank</code> <code>null</code>
+  <code>start with</code> <code>end with</code>；还有 <code>nq</code>（not equal，用于时间戳）。</p>
+  <p class="also">为什么必须宽松：traceId、segmentId、耗时都是运行时生成的，不可能写死。
+  宽松是<b>被迫</b>的，不是偷懒——但它有代价（会漏掉「值变了但仍满足规则」这类回归）。
+  这条取舍值得单独想清楚。</p>
+</dd>
+
+</dl>
+
+<h3>B 部分 · test/e2e 的词汇</h3>
+<dl>
+
+<dt>e2e.yaml</dt>
+<dd>全栈测试的编排文件，三段式：<code>setup</code>（env / compose 文件 / timeout / init 步骤）→
+  <code>trigger</code>（发流量）→ <code>verify</code>（带重试的查询 + 期望文件比对）。
+  <code>verify.retry</code> 是必需的，因为 OAP 写入是最终一致的。</dd>
+
+<dt>swctl</dt>
+<dd>SkyWalking CLI。<code>verify</code> 段用它发 GraphQL 查询并 <code>--display yaml</code> 输出，
+  再与 <code>expected/*.yml</code> 比对。<b>断言对象从「agent 上报了啥」变成「OAP 存进去啥」</b>。</dd>
+
+<dt>base-compose.yml</dt>
+<dd><code>test/e2e/base/</code> 里的模板：OAP + BanyanDB + provider + consumer。
+具体 case 的 compose 继承它再加自己的东西——<b>整套环境是模板化的，不手写</b>。</dd>
+
+<dt>BanyanDB</dt>
+<dd>SkyWalking 的原生存储后端。e2e 之所以重，就是因为它要把真实 OAP + 真实存储整套拉起来。</dd>
+
+</dl>
+
+<h2>速查：B · 可迁移模式词汇</h2>
+
+<p>这一栏是本课程的<strong>真正交付物</strong>。「在别处叫什么」列用于迁移到别的项目/生态时对上号。</p>
+
+<table class="compare">
+<thead>
+<tr><th>模式</th><th>含义</th><th>在别处叫什么</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>场景即测试<br><span class="tag key">scenario-as-test</span></td>
+  <td>当代码的风险来自「与真实第三方框架交互」时，跑真框架的集成场景<b>就是</b>充分测试；
+      mock 单元测试在结构上无法覆盖该风险。上游明确劝退为插件堆 mock 单测。</td>
+  <td>Testing on the Boundary（Michael Feathers）；Google 的「小/中/大」测试分级里只允许少量
+      mock 掉自己的代码</td>
+</tr>
+<tr>
+  <td>声明式预言<br><span class="tag key">declarative oracle</span></td>
+  <td>把「期望」写成<b>数据</b>（YAML），交给一份通用引擎比对，而不是散落在代码里的
+      <code>assertEquals</code>。好处：新增测试只写数据；失败时预言与现实并排可比对。</td>
+  <td>Approval Tests、Jest snapshot、golden file、Pact、k6 threshold、Terraform plan test</td>
+</tr>
+<tr>
+  <td>宽松匹配<br><span class="tag key">loose matching</span></td>
+  <td>对无法预测的字段（ID、时间戳、耗时）用算子而非字面量。被迫之举，但必须<b>显式</b>：
+      哪些字段放宽、为什么放宽，都是要写在文件里的决定。</td>
+  <td>容差断言 / property-based testing 的 matcher；OpenAPI 的 schema 级校验</td>
+</tr>
+<tr>
+  <td>假通过<br><span class="tag key">vacuous pass</span></td>
+  <td>测试通过但其实没测到东西。最常见的两种：只断言了「有 span」而不断言
+      <code>refs</code>（等于没测传播）；<code>segmentSize</code> 用 <code>ge</code> 却没想清楚下限。</td>
+  <td>mutation testing（变异测试）专门用来暴露它；覆盖率工具的盲区</td>
+</tr>
+<tr>
+  <td>密闭环境<br><span class="tag key">hermetic environment</span></td>
+  <td>测试自带完整依赖，不依赖开发机状态。代价是慢，所以只对需要真实依赖的部分用。</td>
+  <td>Testcontainers、docker-compose 测试、WireMock、Go 的 <code>httptest</code></td>
+</tr>
+<tr>
+  <td>测试阶梯<br><span class="tag key">test ladder</span></td>
+  <td>单测（快、窄）/ 场景测试（中、验证组件对真实框架的行为）/ 全栈 e2e（慢、验证组件<b>之间</b>的接线）。
+      每一级回答<b>不同的问题</b>，不是同一件事的重复三遍。</td>
+  <td>Google Test Sizes（小/中/大）；测试金字塔的修正版——关键差别在「各级回答不同问题」</td>
+</tr>
+<tr>
+  <td>版本即矩阵<br><span class="tag key">version matrix</span></td>
+  <td>把「兼容哪些版本」写成可执行的数据（<code>support-version.list</code>），
+      由 runner 遍历——文档与测试合一，不会腐烂。</td>
+  <td>CI 的 version matrix（GitHub Actions）、测试容器的 image tag 矩阵、
+      Renovate/Dependabot 的 version range</td>
+</tr>
+<tr>
+  <td>声明需要 ≠ 决定如何满足<br><span class="tag key">declare vs provide</span></td>
+  <td>scenario 只说 <code>type: tomcat</code>，不选 Tomcat 版本；版本由 CI 泳道注入。
+      测试声明需求，流水线决定供给，从而同一份测试能在不同环境复用。</td>
+  <td>依赖注入、12-factor 的 config、Terraform 的 variable vs provider、
+      Testcontainers 的 <code>ImageFromDockerfile</code> 抽象</td>
+</tr>
+<tr>
+  <td>脚手架即框架的一部分<br><span class="tag key">scaffold</span></td>
+  <td>框架自带「30 秒新建一个测试」的命令（<code>generator.sh</code> + Maven archetype）。
+      没有它，框架的采纳率会被「不知道从哪抄一个」卡死。</td>
+  <td><code>go test</code> 脚手架、Spring Initializr、<code>cargo new</code>、
+      Django 的 <code>startapp</code>、Testcontainers 的 <code>ryuk</code> 之类自举工具</td>
+</tr>
+<tr>
+  <td>变异检验<br><span class="tag key">mutation check</span></td>
+  <td>故意把被测代码改坏，验证测试<b>会变红</b>。绿色的测试如果改坏代码后还绿，它什么都没测。
+      这是唯一能证明「我的测试有效」的手段。</td>
+  <td>PIT / mutation testing 工具；「characterization test」的验证方式；
+      混沌工程（把依赖搞坏看系统是否发现）</td>
+</tr>
+<tr>
+  <td>非确定性是资源问题<br><span class="tag key">cold start budget</span></td>
+  <td>密闭测试仍是真实系统：3 秒冷启动超时、JIT 预热、JSP 冷编译、覆盖率插桩开销。
+      失败常是<b>环境预算</b>不足，不是代码 bug。诊断顺序：先怀疑环境，再怀疑代码。</td>
+  <td>Fowler 的 non-determinism 分类；测试的 time budget / retry 策略；
+      Go 的 <code>-race</code> 与 <code>-count</code> 放大</td>
+</tr>
+</tbody>
+</table>
+
+<h2>速查：本仓库对照面</h2>
+<dl>
+<dt>verify/</dt>
+<dd>本仓库手写的 <code>test/plugin</code> 简化版：bash + jq + Docker Compose，
+  <code>verify/README.md</code> 开篇写明参考自 apache/skywalking-java 的 <code>test/plugin</code>。
+  与上游的逐项差异见 <code>NOTES.md</code> 的对照表。</dd>
+</dl>
+
+<p class="foot">
+  返回 <a href="../../index.html">课程目录</a> ·
+  继续 <a href="../lessons/0001-two-ladders-one-doctrine.html">第 1 课 · 两个测试台，一条信条</a><br>
+  样式由 <code>../assets/course.css</code> 统一提供 · 打印友好
+</p>
+
+</body>
+</html>
