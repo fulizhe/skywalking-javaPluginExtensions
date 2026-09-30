@@ -19,6 +19,7 @@
 - **Build & demo runtime convention (adr-01)** — 何时读：构建工具链 / 演示运行时约定。→ `docs/adr/index.md`
 - **Known TODOs** — 何时读：规划 demo-app 验证范围时。→ `docs/repo/index.md`
 - **Code style / 纯重构规范** — 何时读：写新 Java 代码、改既有代码、拆分大方法、对齐代码风格时。→ `docs/repo/index.md`
+- **教学空间页面格式** — 何时读：新增或修改 `docs/tutorial/` 下的教学页面（入口页 / 课程 / 参考）。→ `docs/tutorial/index.html`
 
 ## Task routing
 
@@ -44,6 +45,37 @@
 - 命令、配置片段、原样输出（报错、`[progress]` 字段）进代码块，不塞进表格。
 - 图与表重复时留图、细节回落到表；两者都别在正文里再复述一遍。
 - 改既有文档时顺手把已成清单的段落改成表格 —— 这条对旧文档同样生效。
+
+## 教学空间页面格式（docs/tutorial）
+
+教学页面（`docs/tutorial/`）的 HTML 有固定骨架。**照 `docs/tutorial/index.html` 抄，不要另起炉灶。**
+
+| 页面类型 | 骨架 | 必须有 |
+| --- | --- | --- |
+| 入口页 / hub | `<body class="hub">` → `.hub-grid` → `nav.outline` + `main` | **左侧大纲目录树**（见下）—— 唯一能一眼掌控全貌的地方 |
+| 课程页 lesson | 单栏 `<body>` → 正文 → `.foot` | 底部返回 hub 链接 + 一手资料链接 + 「有疑问问 agent」 |
+| 参考页 reference | 同 lesson | 返回 hub 链接（速查/避坑页还要能被 `AGENTS.md` 直接指向） |
+
+### 左侧大纲目录树（入口页强制）
+
+- 左栏 `nav.outline` 放**整个教学空间的完整树**：所有课程线 → 每条线的知识线 / 参考 / 教学档案 → 具体页面。用嵌套 `<ul>`，主干线由 `border-left` 画，**不要用字符拼**。
+- **新增页面或新增课程线时必须同步更新大纲** —— 大纲里没有的页面等于不存在。
+- 语义标记：`.branch` 课程线名、`.group` 分组标题（LESSONS / REFERENCE / 教学档案）、`.cur` 当前页、`.todo` 尚未产出（斜体）。首次出现的词汇给出中英对照。
+- 窄屏自动降级为单栏、打印时隐藏 —— `.outline` 组件已实现，**不要在页面里重写这套行为**。
+
+### 组件复用
+
+- 样式**一律**链接 `assets/course.css`。已内置：`.callout(.tip/.warn)`、`.quiz`（配 `assets/quiz.js`，即时判分 + 重答）、`.tree`、`.compare`、`.path`、`.tag`、`.hub-grid` + `.outline`。
+- **可复用的不许内联**：第二页要用的样式/脚本，先落成 `assets/` 里的组件再链接；内联是最后手段。
+- 页面只允许内联**该页独有**的规则（如某页特有的卡片网格），并在该 `<style>` 上注明「仅本页特有」。
+- `assets/omo.css` 是 `course.css` 的 `@import` 薄壳，保留只为旧链接不失效；**新页面直接链 `course.css`**。
+- 每页 `.foot` 声明样式与组件来源。
+
+### 硬性要求
+
+- 中文回退字体保留 `Songti SC` / `Noto Serif SC`，正文衬线 —— 与本仓 Tufte 风格一致。
+- `@media print` 下：大纲隐藏、`pre` / `.tree` 允许换行、`h2` 避免分页断开。
+- quiz 各选项**长度尽量一致**（同字数），不得用排版或措辞暗示答案；答错要亮出正确项并解释**为什么**。
 
 ## Agent tooling quirks (OpenCode + OMO)
 
