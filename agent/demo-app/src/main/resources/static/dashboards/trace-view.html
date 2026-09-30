@@ -170,7 +170,7 @@
       <header class="source-header">
         <div class="source-heading">
           <h2 id="memoryTitle">trace 内存热层</h2>
-          <code>/statistic</code>
+          <code>/inner/sw/trace-memory?traceId=…</code>
         </div>
         <span id="memoryState" class="source-state">待查询</span>
       </header>
@@ -448,11 +448,8 @@ function fetchJson(url) {
 }
 
 function queryMemory(traceId) {
-  return fetchJson("/statistic").then(function (snapshot) {
-    var data = snapshot && snapshot.data;
-    var entry = data && Object.prototype.hasOwnProperty.call(data, traceId) ? data[traceId] : null;
-    var logs = entry && Array.isArray(entry.logs) ? entry.logs : Array.isArray(entry) ? entry : [];
-    return { logs: logs, payloadExpired: false };
+  return fetchJson("/inner/sw/trace-memory?traceId=" + encodeURIComponent(traceId)).then(function (data) {
+    return { logs: data && Array.isArray(data.logs) ? data.logs : [], payloadExpired: false };
   });
 }
 
