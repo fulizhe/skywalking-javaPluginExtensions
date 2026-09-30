@@ -214,6 +214,43 @@ public class DepsDemoController {
     }
 
     /**
+     * <b>一次打穿全部四层依赖</b>（Cache / Database / MQ / 外呼）——演示与截图用的单一入口。
+     *
+     * <p>为什么单独有这个端点,而不是把三层调用塞进 {@code /fullSample}:
+     * {@code /fullSample} 是**迁移自旧 sb-skywalking demo 工程**的初学者样例(README 有明写),
+     * 它的价值在于"与旧工程一致";把监控专用的造数端点混进去会让它既不像样例、也不再一致。
+     * 于是职责分开:{@code /fullSample} 演示注解/链路,本端点演示**依赖面**。
+     *
+     * <p><b>耗时叠加</b>:四层顺序各调一次,中间件未起时约 8s(1+2+3+0.3+2),
+     * 中间件都在时约 1s。这是**有界**的(每层各自有超时),不是挂住。
+     *
+     * @param sleepMs 传给 MySQL 那层,用来造一条明显慢的边
+     * @param site    传给外呼那层(白名单内)
+     */
+    @GetMapping("/all")
+    public Object all(@RequestParam(value = "sleepMs", defaultValue = "0") int sleepMs,
+            @RequestParam(value = "site", defaultValue = "httpbin") String site) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("note", "四层顺序各调一次;耗时叠加但每层有超时,不会挂住");
+        long begin = start();
+        out.put("cache", redis("set"));
+        out.put("database", mysql(sleepMs));
+        out.put("mq", kafka("produce"));
+        out.put("http", http(site));
+        int ok = 0;
+        for (String layer : new String[] {"cache", "database", "mq", "http"}) {
+            Object part = out.get(layer);
+            if (part instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) part).get("ok"))) {
+                ok++;
+            }
+        }
+        out.put("layersTotal", 4);
+        out.put("layersOk", ok);
+        out.put("latencyMs", (System.nanoTime() - begin) / 1_000_000L);
+        return out;
+    }
+
+    /**
      * 真实站点外呼:{@code site=httpbin|baidu|google}。
      * **白名单枚举**——演示端点不接受任意 URL(否则就是个 SSRF 口子)。
      * 三个站点同属 HTTP 组件,拓扑图上仍是同一个节点(节点只到组件类型)。

@@ -15,6 +15,9 @@
 #   - -NormalOnly:本脚本只压正常端点(排除 /error 与 /http500,含 /longTimeTask) -> 压"纯指标聚合"
 #   - -WithDeps:只压依赖拓扑造数端点(Redis/MySQL/Kafka/外呼) -> 看依赖边的分位与错误率走势;
 #     与 run-with-agent.ps1 -WithDeps 同名同义(那一个管中间件在不在,这一个管压哪些路径)
+#   - -AllEndpoints:压**全部页面接口**(各仪表盘数据源 + 全部演示端点,含慢/错) -> 覆盖度优先。
+#     三者互斥。它会打到告警演示端点,错误请求会触发插件**同步 webhook 回打自身**形成放大回路,
+#     建议配 run-with-agent.ps1 -NoAlert 起的纯指标实例一起用。
 #   - 告警开关属于"应用启动"这一层,由 run-with-agent.ps1 控制:
 #       run-with-agent.ps1 -NoAlert  起"纯指标"实例(alert off)
 #       run-with-agent.ps1           起"带告警"实例(默认 alert on,含 webhook 自环)
@@ -60,8 +63,10 @@ param(
     # 纳入依赖三层(Redis/MySQL/Kafka/外呼):压测路径切到依赖造数端点。
     # 与 run-with-agent.ps1 -WithDeps **同名同义** —— 那一个管"中间件在不在",这一个管"压哪些路径";
     # 两条命令连起来是依赖面的完整闭环(起应用 + 造数)。
-    # 与 -NormalOnly 互斥(一个压业务正常端点,一个压依赖造数端点)。
     [switch]$WithDeps,
+    # **全部页面接口**:把各仪表盘/演示页的数据源与演示端点一次压全(清单见 $ALL_PATHS)。
+    # 与 -NormalOnly / -WithDeps 三者互斥。
+    [switch]$AllEndpoints,
     # 跳过压测后的指标摘要
     [switch]$SkipMetrics,
     # 指标摘要前等待秒数(给翻转线程一点时间)
@@ -94,14 +99,58 @@ $NORMAL_PATHS = "/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTa
 # 那条边照样会被记下来(kafka-producer),只是 errorCount 可能仍是 0
 # (出口 span 不由 send 的超时异常置 isError,见探针笔记)。
 $DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin"
-if ($NormalOnly -and $WithDeps) {
-    Write-Host "[FAIL] -NormalOnly 与 -WithDeps 互斥:前者压业务正常端点(排除 error),后者压依赖造数端点。"
-    Write-Host "       只保留一个,重跑。"
+
+# 全部页面接口(-AllEndpoints):按"页"分组铺开,便于看出漏了哪一页。
+# 清单是**显式枚举**而不是从代码里反射 —— 反射要处理注解/参数/副作用,反而更不可控;
+# 显式清单还有一个好处:新增页面时"要不要进压测"变成一次显式决定。
+$ALL_GROUPS = [ordered]@{
+    # 初学者演示页(/9527.html)与官方 sample
+    "hello"      = "/hello,/helloAsync,/helloAsync2,/helloAsync3,/helloAsyncServlet,/helloBlock,/helloException"
+    "trace"      = "/debug,/log,/logError,/traceInvokePrivateMethod,/traceServiceMethodWithAnnotation,/traceServiceMethod2WithApi"
+    "sql"        = "/queryDbByMybatis,/queryDbByJdbc"
+    # fullSample 是"全貌入口"(每种监控组件各一次),默认**带三层依赖**;压测里用 ?deps=false 关掉:
+    # 中间件未起时那四层约 8s(每层有超时、有界),否则单个请求就把吞吐拖垮。
+    # 想压三层,用 -WithDeps —— 那里有专门的三层单层端点(还能分别造慢边/失败)。
+    "fullSample" = "/fullSample?deps=false,/fullSample"
+    # profile 采样页
+    "profile"    = "/profileData,/profileData2,/longTimeTask"
+    # 各仪表盘的数据源读口(有界,不回全量)
+    "readout"    = "/statisticJVM,/statisticMeter,/statisticLogs,/statisticInstanceProperties,/statisticTraceAlert"
+    "metrics"    = "/inner/sw/metrics,/inner/sw/metrics/query,/inner/sw/metrics/extremes"
+    "topology"   = "/inner/sw/topology"
+    "traceq"     = "/inner/sw/trace-recent,/inner/sw/trace-parity,/inner/sw/trace-alert/recent"
+    "httpclient" = "/httpclient/collect/status,/httpclient/collect/statistic"
+    # 告警演示页(慢 / 错 / 豁免 / 真实外呼)
+    "alert"      = "/api/trace-alert-demo/ok,/api/trace-alert-demo/error,/api/trace-alert-demo/http500,/api/trace-alert-demo/slow?ms=4000,/api/trace-alert-demo/self-call,/api/trace-alert-demo/httpclient-post?value=x,/api/trace-alert-demo/httpclient-httpbin"
+    "alertslow"  = "/api/order/1,/api/export/report,/api/exists/1,/status/500"
+    # hutool override 插件演示(全部回环自调)
+    "hutool"     = "/api/hutool-demo/get-query?marker=m,/api/hutool-demo/post-form?value=v&phase=P,/api/hutool-demo/post-json?value=v&phase=P,/api/hutool-demo/post-multipart?value=v,/api/hutool-demo/error-call,/api/hutool-demo/status/500"
+    # 依赖面三层(单层端点;/api/deps-demo/all 不进压测:它是演示入口,四层耗时叠加)
+    "deps"       = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/redis?op=del,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/kafka?op=consume,/api/deps-demo/http?site=httpbin"
+}
+# **故意排除**的端点(附理由)—— 全量不等于无脑全打,这三类打了会把压测毁掉:
+#   1) 改状态:POST /toggle(关插件写入)、POST /httpclient/collect/toggle、POST /profile(启采样)、
+#      POST /inner/sw/trace-alert/clear(清事件) —— 一旦被压到,压测中途插件就停止记录了。
+#   2) webhook 回打口:POST /inner/sw/trace-alert —— 那是插件回调的**入口**,不是业务流量。
+#   3) 无界/参数依赖:GET /statistic(返回**全部** trace 快照,随压测膨胀)、GET /profile(见 1)、
+#      /inner/sw/trace-query、/inner/sw/trace-memory、/inner/sw/trace-slow(都要 traceId/endpoint 参数)。
+$ALL_PATHS = ($ALL_GROUPS.Values | ForEach-Object { $_ }) -join ","
+
+$modeCount = 0
+if ($NormalOnly) { $modeCount++ }
+if ($WithDeps) { $modeCount++ }
+if ($AllEndpoints) { $modeCount++ }
+if ($modeCount -gt 1) {
+    Write-Host "[FAIL] -NormalOnly / -WithDeps / -AllEndpoints 三者互斥,只能给一个:"
+    Write-Host "       -NormalOnly    业务正常端点(排除 error),压指标聚合"
+    Write-Host "       -WithDeps      依赖造数端点,压依赖边"
+    Write-Host "       -AllEndpoints  全部页面接口(含慢/错,会刷告警)"
     exit 1
 }
 $effectivePaths = $Paths
 if (-not $effectivePaths -and $NormalOnly) { $effectivePaths = $NORMAL_PATHS }
 if (-not $effectivePaths -and $WithDeps) { $effectivePaths = $DEPS_PATHS }
+if (-not $effectivePaths -and $AllEndpoints) { $effectivePaths = $ALL_PATHS }
 $pathsText = if ($effectivePaths) { $effectivePaths } else { "(HttpLoadTest 内置默认:混合,含 error)" }
 
 function Get-DriveRoot { return 'D:' }

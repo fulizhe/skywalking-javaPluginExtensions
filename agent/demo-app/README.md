@@ -195,10 +195,16 @@ pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 
 | 造数端点 | 层 | 说明 |
 | --- | --- | --- |
+| **`/api/deps-demo/all`** | **四层一次** | **演示与截图的单一入口**：顺序打 Cache/Database/MQ/外呼，逐层回成败与耗时。`?sleepMs=` 传给 MySQL 造慢边、`?site=` 选外呼站点。中间件未起约 8s、都在时约 1s（**每层有超时，是有界不是挂住**） |
 | `/api/deps-demo/redis?op=get\|set\|del` | Cache | 三种 op 在明细档落成三个节点（节点身份 = 组件 + 出口操作名） |
 | `/api/deps-demo/mysql?sleepMs=0` | Database | 只 `SELECT 1` / `SELECT SLEEP(?)`，**不建表**；`sleepMs` 上限 3000，用来看分位与四档着色 |
 | `/api/deps-demo/kafka?op=produce\|consume` | MQ | KRaft 单节点；topic 由端点内 AdminClient 首次调用时建 |
 | `/api/deps-demo/http?site=httpbin\|baidu\|google` | 外呼 | **白名单枚举**（不接受任意 URL）；三个站点同属 Http 组件 → 仍是**一个**节点 |
+
+> **与 `/fullSample` 的分工**：`/fullSample` 是**全貌入口** —— 一条请求把**所有被监控的组件类型各打一次**
+> （tomcat Entry + `@Trace` + MyBatis + JDBC + HttpClient 自调用 + Redis / MySQL / Kafka / 真实外呼），
+> 用来看"全貌"；`?deps=false` 可关掉最后四层。`/api/deps-demo/*` 是依赖面的**专用**入口
+> （能分别造慢边、失败、分档），压测走 `stress.ps1 -WithDeps`。两者刻意分开：全貌入口求覆盖度，专用入口求可控。
 
 读图口径（页内 caveats 同款）：
 

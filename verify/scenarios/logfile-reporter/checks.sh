@@ -227,6 +227,24 @@ run_checks() {
   assert_jq "白名单拒绝时立刻返回(没有真去连)" "$(http_get_or_empty '/api/deps-demo/http?site=evil.example.com')" \
     '(.latencyMs != null) and (.latencyMs < 1000)'
 
+  # /api/deps-demo/all:一次打穿四层(演示与截图的单一入口)。四层顺序各调一次,
+  # **耗时叠加**(每层各自有超时,所以是有界而非挂住):中间件未起约 8s,都在时约 1s。
+  # 故它用独立预算 15s,不跟上面单层端点的 5s 混在一起。
+  local depAll
+  depAll=$(http_get_or_empty "/api/deps-demo/all")
+  assert_jq "all 端点一次覆盖四层(cache/database/mq/http)" "$depAll" \
+    'has("cache") and has("database") and has("mq") and has("http") and (.layersTotal == 4)'
+  assert_jq "all 端点逐层给出成败与耗时(不是总的一个布尔)" "$depAll" \
+    '[.cache, .database, .mq, .http] | all(has("ok") and has("latencyMs"))'
+  local tAll; tAll=$(date +%s)
+  http_get_or_empty "/api/deps-demo/all" >/dev/null
+  elapsed=$(( $(date +%s) - tAll ))
+  if (( elapsed >= 15 )); then
+    log "FAIL: /api/deps-demo/all 耗时 ${elapsed}s(>= 15s)—— 每层超时没兜住?"
+  else
+    log "PASS: /api/deps-demo/all ${elapsed}s(< 15s,四层叠加但每层有超时)"
+  fi
+
   sleep 3
   depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
 
