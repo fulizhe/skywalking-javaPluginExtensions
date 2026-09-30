@@ -1,6 +1,6 @@
 # 容器化场景验证回路（Linux/Docker + bash 为主，pwsh 退居二线）
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
@@ -64,3 +64,14 @@ Status: ready-for-agent
 - 与 ADR-01 的构建/运行 JDK 解耦一致：容器内插件构建 JDK17、demo-app 构建与运行 JDK8。
 - 术语沿用 `CONTEXT.md` 的「验证回路」。
 - 首个范围 = `logfile-reporter-plugin`（与 `docs/repo/known-todos.md` 一致）；override-httpclient 作为版本矩阵试点。
+
+## Acceptance
+
+- **插件单测**（JDK17，同 CI 命令）：`logfile-reporter-plugin` 169、`override-httpclient-4.x-plugin` 15、`override-hutool-http-5.x-plugin` 13，`BUILD SUCCESS`。
+- **demo-app 打包**：`mvn -f agent/demo-app/pom.xml clean package -DskipTests` → exit 0（含 `httpclient-post` / `echo` 新端点）。
+- **bash 语法**：`bash -n` 对 `verify/*.sh` 与两个 `checks.sh` 全部通过；`scenario.conf` source 正确。
+- **jq 断言离线校验**：用契约样例 JSON 跑通 `checks.sh` 全部正向断言（含 `http.request.params` tag 断言）；`support-version.list` 读取正常。
+- **容器端到端实跑**（2026-09-29 晚，本机 Docker/WSL，代理恢复后）：`--scenario logfile-reporter` → `PASS=24 (exit 0)`；`--scenario override-httpclient` → `PASS=5 (exit 0)`；`--scenario override-httpclient --matrix` → `4.5.13` / `4.5.14` 均 `PASS=5 (exit 0)`；无参全场景 → 全绿。
+- **两轴 code-review（Standards + Spec）+ 随后的实跑**：共发现并修正 5 个"不修就跑不起来/跑挂"级缺陷 —— `Dockerfile` 对不存在目录 `mv`、override 开关断言取错字段（`effectiveCollectHttpParams` → `.raw.overrideCollectHttpParams`）、`wait_ready` 二次拼 URL、插件 jar 名/加载正则（`override-apm-` 前缀）、冷启动首个 SLOW 告警 webhook 丢失（改轮询窗口内按需补发）。
+- 工单 01~04 全部 done，逐条证据见各 issue 的 `## Comments`。交接与排障见 `docs/handoff/2026-09-29-verify-container-scenarios.md`。
+- **遗留（不属本 spec 的 Out of Scope）**：demo 控制器 `extractEnabled` 找 `effectiveCollectHttpParams` 与插件实际键不符（既有读口瑕疵，另开 task）；`checks.sh` 慢机器时序余量偏紧；mock collector 对账、override-hutool 场景、移除 pwsh 三项后续见 spec 的 Out of Scope 与 handoff §10。
