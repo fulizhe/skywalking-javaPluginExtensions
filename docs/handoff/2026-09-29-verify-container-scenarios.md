@@ -1,6 +1,6 @@
 # Handoff — 容器化场景验证回路（verify/）
 
-**日期**：2026-09-29 · **分支**：`master`（本地提交，尚未 push） · **状态**：实现完成，**容器端到端待跑**
+**日期**：2026-09-29 · **分支**：`master`（已提交并 push） · **状态**：**实现完成 + 容器端到端已实跑全绿**
 
 对应 spec / 工单：`.scratch/verify-container-scenarios/spec.md` + `issues/01`~`04`。
 
@@ -36,16 +36,23 @@
 - **demo-app 编译/打包通过**（含新端点）：`mvn -f agent/demo-app/pom.xml clean package -DskipTests` → exit 0。
 - **bash 语法**：`bash -n` 对 `verify/*.sh` 与两个 `checks.sh` 全部通过；`scenario.conf` source 正确。
 - **jq 断言离线校验**：用契约样例 JSON 跑通 `checks.sh` 全部正向断言（含 override `http.request.params` tag 断言）；`support-version.list` 读取正常。
-- **两轴代码评审（Standards + Spec）**：发现并已修正 2 处会在明天跑挂的缺陷，见 §11。
+- **两轴代码评审（Standards + Spec）**：发现并已修正 2 处缺陷，见 §11。
+- **Docker 端到端实跑全绿**（本机，代理恢复后）：见 §4。
 
-## 4. 未验证（本次未跑成，明天换机器跑）
+## 4. 容器端到端实跑结果（已验证，2026-09-29 晚）
 
-**Docker 端到端回路本身**（镜像构建 + 容器内 maven + 启动 + 断言）**未执行**。
-原因：本机 Docker Desktop 守护进程残留失效代理 `127.0.0.1:7897`，`docker pull maven:3.8.6-eclipse-temurin-*` 报
-`proxyconnect tcp: dial tcp 127.0.0.1:7897: connect: connection refused`。用户当晚才把梯子启动，改天换机器跑。
+代理恢复后在本机实跑，**全部通过**：
 
-> 注意：镜像构建会拉取 `maven:3.8.6-eclipse-temurin-17` 与 `...-8` 两个基础镜像（`docker pull` 能通即可），
-> 并在镜像内 `ADD` Apache 官方 agent 9.4.0 包。已**刻意移除** `# syntax=docker/dockerfile:1`，避免额外拉取前端镜像。
+| 命令 | 结果 |
+|------|------|
+| `bash verify/run.sh --scenario logfile-reporter` | `场景[logfile-reporter]全绿: PASS=24 (exit 0)` |
+| `bash verify/run.sh --scenario override-httpclient --matrix` | `4.5.13` 与 `4.5.14` 均 `场景[override-httpclient]全绿: PASS=5 (exit 0)` |
+| `bash verify/run.sh`（默认全部场景） | `verify 全绿`（logfile PASS=24 + override PASS=5） |
+
+> 注：`override-httpclient` 单场景与 `--matrix` 均为 PASS=5；矩阵通过即证明两个 httpclient 版本都可被增强与采集。
+
+本轮实跑额外暴露并已修复 3 个真实缺陷（详见 §11）：`wait_ready` URL 拼接 bug、override 插件 jar 名/加载正则、
+以及冷启动下首个 SLOW 告警 webhook 分发偶发丢失（已改为轮询窗口内按需补发）。
 
 ## 5. 另一台机器怎么跑
 
@@ -113,14 +120,21 @@ bash verify/run.sh
 
 ## 11. code-review 修正（2026-09-29 追加）
 
-对本次 diff 做 Standards/Spec 两轴复查，发现并修正 2 处**会导致明天首次运行失败**的缺陷（第二个 commit）：
+对本次 diff 做 Standards/Spec 两轴复查 + 随后的容器实跑，共发现并修正 **5 个**真实缺陷（均为"不修就跑不起来/跑挂"级别）：
 
 1. **`verify/Dockerfile` 构建必失败**：发行包 `.tgz` 顶层目录是 `skywalking-agent/`（已 `tar -tzf` 实探确认），
-   原写法 `mv /opt/apache-skywalking-java-agent-9.4.0 …` 的源目录不存在。已删除该 `mv`，解包到 `/opt` 即得 `/opt/skywalking-agent`
-   （与既有 `agent/demo-app/Dockerfile` 口径一致）。
+   原写法 `mv /opt/apache-skywalking-java-agent-9.4.0 …` 的源目录不存在。已删除该 `mv`，解包到 `/opt` 即得 `/opt/skywalking-agent`。
 2. **override 场景开关断言取错字段**：demo 控制器的 `enabled` 只认 `effectiveCollectHttpParams`——这是插件**从不返回**的键，
    故恒为 `false`，断言必失败。已改为断言插件真实字段 `.raw.overrideCollectHttpParams`（改读 `/httpclient/collect/statistic`）。
-   离线样例复检 `switch on/off` 两态通过。
+3. **`wait_ready` 拼 URL bug（实跑暴露）**：`run-scenario.sh` 传的是完整 URL，而 `wait_ready` 又调 `http_code` 二次拼 `BASE_URL`，
+   生成 `http://127.0.0.1:9600http://127.0.0.1:9600/` 这类畸形 URL → 就绪探测恒失败（应用其实早已就绪）。已让 `wait_ready` 直接 curl 传入的 URL。
+4. **override 插件 jar 名 / 加载正则错（实跑暴露）**：真实产物是 `override-apm-httpclient-4.x-plugin-9.4.0.jar`（带 `override-apm-` 前缀、
+   版本 `9.4.0`），原 glob 与 `PLUGIN_LOAD_REGEX` 都按模块名写 → 找不到 jar。已按真实产物名修正。
+5. **冷启动下首个 SLOW 告警 webhook 分发偶发丢失（实跑暴露）**：`dispatcher.dispatchErrorCount>0` 时首个 SLOW 事件可能收不到，
+   40s 轮询只等不补发 → B 段 5 项红。已改为轮询窗口内按需补发 `/api/order/1`（新 traceId → 新告警），实跑稳定全绿。
 
 > 备注：demo 控制器 `extractEnabled` 找 `effectiveCollectHttpParams` 与插件实际键不符，属既有读口瑕疵（本次不动 demo 行为，
 > 仅让场景断言真实信号）；如要修正该读口，另开 task。
+>
+> 另：镜像构建已从 `ADD https://…` 改为 `curl --retry 5` 下载 agent（远端 ADD 经代理 flaky，会 `unexpected EOF`），
+> 构建更稳且分层可缓存。

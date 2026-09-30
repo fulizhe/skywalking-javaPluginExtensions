@@ -47,10 +47,11 @@ http_get_or_empty() { curl -sS --max-time 30 "$BASE_URL$1" 2>/dev/null || true; 
 http_post() { curl -sS --max-time 30 -X POST "$BASE_URL$1" 2>/dev/null || true; }
 http_code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE_URL$1" 2>/dev/null || true; }
 
+# wait_ready <url> <seconds> —— 传入的是完整 URL(不是 path),故直接 curl,不再经 http_code 拼 BASE_URL。
 wait_ready() {
   local url=$1 seconds=${2:-120} i code
   for ((i = 0; i < seconds; i++)); do
-    code=$(http_code "$url")
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || true)
     [[ "$code" == "200" ]] && return 0
     sleep 1
   done

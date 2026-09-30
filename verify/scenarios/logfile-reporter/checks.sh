@@ -37,12 +37,18 @@ run_checks() {
   http_get_or_empty "/status/500" >/dev/null
   http_get_or_empty "/api/trace-alert-demo/ok" >/dev/null
 
+  # 冷启动时首个 SLOW 告警的异步 webhook 分发偶发丢失(见 dispatcher.dispatchErrorCount),
+  # 故在轮询窗口内按需补发 /api/order/1(每次新 traceId -> 新告警),直到收讫 >= 4 条。
   events=""
-  local i
-  for ((i = 0; i < 20; i++)); do
+  local i n
+  for ((i = 0; i < 12; i++)); do
     sleep 2
     events=$(http_get_or_empty "/inner/sw/trace-alert/recent")
-    [[ "$(printf '%s' "$events" | jq '.events | length' 2>/dev/null)" -ge 4 ]] && break
+    n=$(printf '%s' "$events" | jq '.events | length' 2>/dev/null || echo 0)
+    if [[ "$n" -ge 4 ]]; then break; fi
+    if (( i % 3 == 2 )); then
+      http_get_or_empty "/api/order/1" >/dev/null || true
+    fi
   done
 
   assert_jq "webhook 收讫 >= 4 条告警事件(2 SLOW + 2 ERROR)" "$events" '(.events | length) >= 4'

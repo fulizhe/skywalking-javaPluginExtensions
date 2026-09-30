@@ -13,14 +13,18 @@ FROM maven:3.8.6-eclipse-temurin-8 AS runner
 COPY --from=jdk17 /opt/java/openjdk /opt/jdk17
 
 # SkyWalking Java Agent 发行包(与插件锁定一致;口径同 agent/demo-app/Dockerfile)。
+# 刻意用 curl + 重试而非 `ADD https://...`:ADD 的远端拉取经代理时易 flaky(unexpected EOF),
+# curl 可重试/可诊断。tar 顶层目录即 skywalking-agent/(发行包内命名),解到 /opt 即得 /opt/skywalking-agent。
 ARG SKYWALKING_AGENT_VERSION=9.4.0
-ADD https://archive.apache.org/dist/skywalking/java-agent/${SKYWALKING_AGENT_VERSION}/apache-skywalking-java-agent-${SKYWALKING_AGENT_VERSION}.tgz /tmp/skywalking-agent.tgz
-# tar 顶层目录即 skywalking-agent/(发行包内命名),直接解到 /opt 即可,勿再改名。
-RUN tar -xzf /tmp/skywalking-agent.tgz -C /opt \
- && rm /tmp/skywalking-agent.tgz \
- && apt-get update \
+RUN apt-get update \
  && apt-get install -y --no-install-recommends curl jq ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL --retry 5 --retry-all-errors --connect-timeout 20 \
+      -o /tmp/skywalking-agent.tgz \
+      "https://archive.apache.org/dist/skywalking/java-agent/${SKYWALKING_AGENT_VERSION}/apache-skywalking-java-agent-${SKYWALKING_AGENT_VERSION}.tgz" \
+ && tar -xzf /tmp/skywalking-agent.tgz -C /opt \
+ && rm /tmp/skywalking-agent.tgz
 
 COPY verify/lib.sh /opt/verify/lib.sh
 COPY verify/run-scenario.sh /opt/verify/run-scenario.sh
