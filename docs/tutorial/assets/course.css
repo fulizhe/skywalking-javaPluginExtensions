@@ -211,42 +211,31 @@ body.hub { max-width: 70rem; }
   padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule);
 }
 
-/* 树：嵌套 ul 用左边框当主干线，li::before 当横向枝丫 */
-.outline ul { list-style: none; margin: 0; padding: 0 0 0 0.8rem; border-left: 1px solid var(--rule); }
-.outline > ul { padding-left: 0; border-left: 0; }
-.outline li { position: relative; margin: 0 0 0.25rem; }
-.outline li::before {
-  content: ""; position: absolute; left: -0.8rem; top: 0.82em;
-  width: 0.55rem; border-top: 1px solid var(--rule);
-}
-.outline > ul > li { margin-bottom: 0.9rem; }
-.outline > ul > li::before { display: none; }
+/* 课程线清单：扁平一层，只到「有哪几条线」这一层 —— 页面清单归右栏正文。
+   语义标记：.branch 课程线名 / .kind 定位句 / .cur 当前页。约定见 AGENTS.md。 */
+.outline ul { list-style: none; margin: 0; padding: 0; }
+.outline li { margin: 0 0 1rem; }
+.outline li:last-child { margin-bottom: 0; }
 
-.outline a { color: var(--ink-soft); border-bottom: 1px solid transparent; display: inline-block; }
+.outline a { color: var(--ink-soft); border-bottom: 1px solid transparent; }
 .outline a:hover { color: var(--accent); border-bottom-color: var(--accent); }
 
-/* 分支名（一条课程线） */
+/* 课程线名 */
 .outline .branch {
-  font-weight: 700; color: var(--ink); font-size: 0.85rem;
-  letter-spacing: -0.005em;
+  display: block; font-weight: 700; color: var(--ink);
+  font-size: 0.88rem; line-height: 1.35; letter-spacing: -0.005em;
 }
-.outline .branch .kind {
-  display: block; font-weight: 400; font-size: 0.72rem;
-  color: var(--ink-faint); letter-spacing: 0.02em; margin-top: 0.1rem;
-}
+a.branch:hover { color: var(--accent); }
 
-/* 分组标题（LESSONS / REFERENCE / 档案） */
-.outline .group {
-  font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--ink-faint); font-weight: 700; margin: 0.8rem 0 0.3rem;
+/* 定位句：这行线是干什么的、方法论是什么 */
+.outline .kind {
+  display: block; font-weight: 400; font-size: 0.74rem;
+  color: var(--ink-faint); letter-spacing: 0.01em; margin-top: 0.15rem;
 }
 
 /* 当前页 */
 .outline .cur { color: var(--accent); font-weight: 700; }
 .outline .cur::after { content: " ← 当前页"; font-weight: 400; font-size: 0.72rem; color: var(--ink-faint); }
-
-/* 尚未产出的条目 */
-.outline .todo { color: var(--ink-faint); font-style: italic; }
 
 .outline-foot {
   margin: 1.2rem 0 0; padding-top: 0.7rem; border-top: 1px solid var(--rule);
