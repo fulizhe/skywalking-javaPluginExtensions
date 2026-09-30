@@ -22,7 +22,8 @@
 # 依赖拓扑演示(-WithDeps):起 redis / mysql / kafka(docker compose --profile deps up -d)。
 #   中间件端口映射到宿主机(6379/3306/9092),本机跑的应用走 application.yml 的
 #   localhost 默认值即可,**不需要**设 DEPS_* 环境变量。不起也能用——依赖边照样出现,
-#   只是 errorCount > 0(红边),见 NOTES-docker-stress.md 第 15 条。
+#   Cache/Database 两层会**没有依赖边**(连接都没建起来,不产生出口 span),MQ 与外呼仍有边;
+#   详见 NOTES-docker-stress.md 第 15 条。
 # H2 Web Console:本脚本默认开启(可对内存库 jdbc:h2:mem:sw_trace_segment 执行任意 SQL,仅本机调试用),
 #                启动后访问 http://127.0.0.1:<ConsolePort>(User: sa,密码空)。
 #
@@ -116,13 +117,16 @@ function Test-HttpOnce($url) {
 }
 
 # ---- 0. 可选:先拉起 deps profile 中间件(依赖拓扑演示)----
-# 放在最前面,是为了"起应用前中间件已在" —— 反过来的话,应用起来后造的数会先撞上一批红边。
-# Docker 缺席**只警告不失败**:中间件不在场时依赖边照样出现(红边),见 NOTES 第 15 条。
+# 放在最前面,是为了"起应用前中间件已在" —— 反过来的话,应用起来后造的数会先撞上一批失败边。
+# Docker 缺席**只警告不失败**:Cache/Database 两层没有边(连接未建立),MQ/外呼仍有边,见 NOTES 第 15 条。
 if ($WithDeps) {
     Write-Host "[..] -WithDeps:拉起 deps profile 中间件(redis / mysql / kafka)"
     & pwsh -NoProfile -File (Join-Path $PSScriptRoot "deps.ps1") -Up
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[WARN] deps 中间件未就绪(exit=$LASTEXITCODE)。继续起应用 —— 依赖边会表现为红边。"
+        Write-Host "[WARN] deps 中间件未就绪(exit=$LASTEXITCODE)。继续起应用 ——"
+        Write-Host "       Cache/Database 两层会**没有依赖边**(连接都没建起来,不产生出口 span);"
+        Write-Host "       MQ 与外呼仍有边(调用本身被观测到),但 errorCount 可能仍是 0。"
+        Write-Host "       详见 NOTES-docker-stress.md 第 15 条。"
     }
 }
 

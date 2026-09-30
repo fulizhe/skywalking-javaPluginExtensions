@@ -4,8 +4,8 @@
 # 本脚本是**同一条路径的 Windows 包装**(不另立中间件实现),补三件 compose 之外的事:
 #   1) 一条命令起/停/看状态,不用记 compose 参数
 #   2) -Smoke 直接打四组造数端点并打表(ok / 耗时 / 失败原因),人工看图前先跑一次
-#   3) Docker 不可用时**不失败**:直接提示"仍可打 -Smoke 看红边" —— 中间件不在场
-#      照样出依赖边(红边),这是该页的既定口径,不是故障
+#   3) Docker 不可用时**不失败**:提示仍可打 -Smoke —— Kafka/外呼照样出边,Cache/Database 两层无边
+#      (Cache/Database 两层没有边:连接未建立不产生出口 span),不是故障
 #
 # 用法(pwsh / PowerShell 7;Windows PowerShell 5.1 控制台可能把中文输出按 GBK 解码):
 #   pwsh ./scripts/deps.ps1 -Up                 # 起 redis / mysql / kafka(docker)
@@ -33,7 +33,7 @@ param(
     [switch]$All,
     # 演示应用地址(Smoke 用)
     [string]$BaseUrl = "http://127.0.0.1:9600",
-    # 外呼站点(白名单:httpbin / baidu / google);外网不通属预期,会显示为红边
+    # 外呼站点(白名单:httpbin / baidu / google);外网不通属预期,表现为失败边或没有边
     [string]$Site = "httpbin",
     # 造慢边的 sleepMs(MySQL 专用,上限 3000)
     [int]$SleepMs = 300
@@ -100,7 +100,7 @@ function Show-DepsStatus {
     }
     foreach ($svc in $DEPS_SERVICES) {
         $hit = $running | Where-Object { $_ -match $svc.Name }
-        $state = if ($hit) { ($hit -join "; ") } else { "未运行(该层将表现为红边)" }
+        $state = if ($hit) { ($hit -join "; ") } else { "未运行(该层将**没有**依赖边)" }
         Write-Host ("  {0,-6} {1,-9} 宿主端口 {2,-5} 组件 {3,-6} {4}" -f `
             $svc.Name, $svc.Layer, $svc.Port, $svc.Component, $state)
     }
@@ -183,7 +183,7 @@ $doStatus = $Status -or (-not ($Up -or $Down -or $Smoke -or $All))
 if ($Up -or $All -or $Down) {
     if (-not (Test-DockerAvailable)) {
         if ($All -or $Smoke) {
-            # 不因为 Docker 缺席而挡住冒烟:红边本身就是可验的产物
+            # 不因为 Docker 缺席而挡住冒烟:Kafka/外呼的边本身就是可验的产物
             $null = Invoke-Smoke
             exit 1
         }
