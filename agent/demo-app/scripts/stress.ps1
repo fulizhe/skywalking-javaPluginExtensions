@@ -91,8 +91,10 @@ $base = $BaseUrl.TrimEnd('/')
 $port = ([uri]$base).Port
 $script:startedProc = $null
 
-# 正常端点集(排除 /error 与 /http500);用于 -NormalOnly 的"纯指标"压测
-$NORMAL_PATHS = "/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask"
+# 正常端点集(排除 /error 与 /http500);用于 -NormalOnly 的"纯指标"压测。
+# /fullSample 用 ?deps=false:它是"全貌入口",默认会带 Redis/MySQL/Kafka/外呼各一次,
+# 中间件未起时约 8s/请求会把吞吐拖垮(要压三层请用 -WithDeps)。
+$NORMAL_PATHS = "/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask"
 # 依赖拓扑造数端点集;用于 -WithDeps。
 # mysql 那条带 sleepMs=30:造一条明显慢于其余的边,压测中能看出分位差异。
 # 注意 Kafka 不可达时单次 produce 会等到 max.block.ms(3s)超时 —— 这是**有界的**,

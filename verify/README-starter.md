@@ -146,17 +146,86 @@ curl -s -X POST http://127.0.0.1:9600/inner/sw/trace-alert/clear
 
 ### 2.6 压测(可选,想看长期稳定性时才用)
 
+压测有**两条路**:本机 `pwsh` 脚本(Windows 上最常用,自己控制节奏)与容器 `stress` profile(跨平台、能长跑)。
+两条打的是同一个东西——demo-app 的接口 —— 只是编排方式不同。
+
+#### 2.6.1 先选压测档位(三个开关**互斥**,同时给会直接报错退出)
+
+| 开关 | 压什么 | 什么时候选它 |
+|---|---|---|
+| `-AllEndpoints` | **全部页面接口**:各仪表盘数据源 + 全部演示端点(含慢端点与错误端点) | 想知道"覆盖面"—— 每个页面读口都被打到 |
+| `-NormalOnly` | 只压业务正常端点(排除 `/error`、`/http500`) | 压**指标聚合**本身(端点级 QPS / 分位) |
+| `-WithDeps` | 只压依赖造数端点(Redis / MySQL / Kafka / 外呼) | 看**依赖拓扑**的边与分位怎么随压力变 |
+| 都不给 | HttpLoadTest 内置混合集(正常 + 错误 + 慢) | 想连告警链路一起压(**会**触发 webhook 自环,见下) |
+
+#### 2.6.2 本机压测(Windows / pwsh)
+
+```powershell
+cd <仓库根>\agent\demo-app
+
+# 起应用(带 agent)。要连三层依赖就加 -WithDeps(会先拉起 redis/mysql/kafka)
+pwsh .\scripts\run-with-agent.ps1
+pwsh .\scripts\run-with-agent.ps1 -WithDeps
+
+# 压测:在另一个窗口
+pwsh .\scripts\stress.ps1 -AllEndpoints -Requests 2000 -Threads 16   # 全页面接口
+pwsh .\scripts\stress.ps1 -NormalOnly  -Requests 2000 -Threads 16   # 只压指标聚合
+pwsh .\scripts\stress.ps1 -WithDeps    -Requests 200  -Threads 8    # 只压依赖三层
+pwsh .\scripts\stress.ps1 -AllEndpoints -Continuous -Threads 16      # 无限模式,10s 一行 [progress]
+```
+
+`-Continuous` 下每行 `[progress]` 里的 `plugin=` 段就是插件自己的计数
+(`rowsUpserted` / `lateDropped` / `sampleOverflow` / `persistErrors` / `aggregateErrors`),
+`heap=` 看堆。**判断长跑稳不稳**:只看 `persistErrors` / `aggregateErrors` / `endpointOverflow`
+是否恒 0,以及 `heap=` 是否在 GC 回落区间震荡。`sampleOverflow` 增长是正常的(蓄水池抽样,见 NOTES 第 11 条)。
+
+常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-Paths`
+(自己给逗号分隔路径集,给了就覆盖上面三个开关)、`-DurationSec`(按时长)、
+`-SkipAppBuild`(复用已有 jar)、`-SkipMetrics`(不打印指标摘要)。
+
+#### 2.6.3 容器压测(跨平台 / 能长跑)
+
 ```bash
+cd agent/demo-app
 docker compose --profile stress up --build -d
 docker compose logs -f stress      # 每 10s 一行 [progress]
 ```
 
-`stress` 是一个持续打负载的容器,收在可选 profile 里,**默认不启动**。
-观察它日志里的 `plugin=` 计数(`lateDropped` / `persistErrors` / `aggregateErrors`)
-是否异常增长、`heap=` 是否持续攀升。
+`stress` 是一个持续打负载的容器,收在可选 profile 里,**默认不启动**。它只打正常端点
+(所以不和告警耦合——错误请求会触发插件**同步 webhook 回打自身**形成放大回路,
+恰好污染这里要看的计数)。要连依赖面一起压,加 `--profile deps` 并把
+`/api/deps-demo/*` 加进 compose 里 `stress.command` 的 `loadtest.paths`。
 
-> 压测只打正常端点,不和告警耦合——因为错误请求会触发插件**同步 webhook 回打自身**
-> 形成放大回路,恰好污染这里要看的计数。
+#### 2.6.4 压测之外,手动造数(截图/演示用)
+
+```bash
+curl -s "http://127.0.0.1:9600/fullSample"          # 全貌入口:每种被监控的组件各打一次
+curl -s "http://127.0.0.1:9600/api/deps-demo/all"   # 依赖面四层一次(Cache/Database/MQ/外呼)
+```
+
+```powershell
+pwsh .\scripts\deps.ps1 -Smoke        # 打八个造数端点 + 打印每层耗时/失败原因
+pwsh .\scripts\deps.ps1 -Status        # 看 redis/mysql/kafka 状态
+```
+
+`/fullSample` 默认**带**依赖三层(约 8s/请求,中间件未起时),压测里用 `?deps=false` 关掉。
+
+#### 2.6.5 压测中看什么
+
+| 看什么 | 打开 |
+|---|---|
+| 插件内部计数是否健康 | <http://127.0.0.1:9600/inner/sw/metrics>(`counters` 段,应该全是 0,`rowsUpserted` 除外) |
+| 端点级指标 / 分位 | `/dashboards/metrics.html`、排障视角 `/dashboards/metrics-troubleshoot.html` |
+| 依赖拓扑(self 单点 + 组件节点) | `/dashboards/topology.html`(先点「停止刷新」再截图,否则 5s 轮询会把图刷掉) |
+| 告警事件 | `/dashboards/dashboard.html?p=alert` |
+
+> **三个必须知道的坑**:
+> 1. **依赖边是纯内存、分钟级窗口、重启即失** —— 压测停了或应用重启后,图会空,重新造数再看。
+> 2. **中间件缺席 = 没有边,不是红边** —— Redis / MySQL 连不上时图上**没有**这两个节点
+>    (连接都没建起来,不产生出口 span);Kafka / 外呼则有边但 `errorCount` 可能仍是 0。
+>    详见 [`agent/demo-app/NOTES-docker-stress.md`](../agent/demo-app/NOTES-docker-stress.md) 第 15 条。
+> 3. **默认混合路径集会触发告警自环** —— 错误请求 → 插件同步 webhook 回打自身,负载会放大。
+>    压"纯指标"时用 `-NormalOnly`,或者用 `run-with-agent.ps1 -NoAlert` 起一个关告警的实例。
 
 ---
 
@@ -194,6 +263,8 @@ bash verify/run.sh --matrix                        # 附带跑各场景的依赖
 | 你在做什么 | 用哪条 |
 |---|---|
 | 第一次来 / 想搞懂它 / 给别人演示 | 路线 A |
+| 想看覆盖面(每个页面读口都被压到) | 路线 A + `stress.ps1 -AllEndpoints` |
+| 压测中怀疑插件计数不对 | `stress.ps1 -Continuous` + 看 `/inner/sw/metrics` 的 `counters` |
 | 只改了插件里的 Java 代码 | 路线 B(快,够用) |
 | 只改了 `agent/demo-app` 里的页面或端点 | 路线 A(断言不覆盖页面) |
 | 改了 Docker 构建、启动参数、agent 装配 | 两条都跑 |
@@ -212,6 +283,8 @@ bash verify/run.sh --matrix                        # 附带跑各场景的依赖
 | 构建报 `unexpected EOF` | 拉 agent 发行包时网络抖 | 直接重跑 `docker compose up --build -d demo-app`(下载已带重试) |
 | `docker compose ps` 一直 `starting`,或变 `unhealthy` | 应用没起来 | `docker compose logs demo-app` 看最后 30 行;最常见是 9600 端口被占 |
 | 页面打得开但图表全空 | 还没造数据 | 回 §2.3;仪表盘 3~6 秒轮询一次,稍等 |
+| 压测跑起来了但依赖拓扑图上只有两三个节点 | 中间件没起 / 或本机端口上是别的服务 | `pwsh .\agent\demo-app\scripts\deps.ps1 -Status`;中间件缺席时 Redis / MySQL **没有边**(不是红边),见 §2.6 的坑 2 |
+| 压测吞吐低得离谱、每行 `[progress]` 间隔很久 | 路径集里混进了慢端点 | 慢端点有 `/api/order/1`(8.5s)、`/api/trace-alert-demo/slow`、`/longTimeTask`、`/api/deps-demo/kafka`(broker 不可达时 3s);压"纯指标"用 `-NormalOnly`,压测里 `/fullSample` 要带 `?deps=false` |
 | 告警面板永远是空的 | 没造告警事件 | 回 §2.5 打开 `/api/trace-alert-demo/error` |
 | **告警面板里有莫名其妙的 ERROR** | 多半是你手打错路径导致 404 / 405 | 看事件里的 `url` 字段。任何 ≥500 的响应(含 404 路径不存在、405 方法不对)都会被判为错误并真的发一条告警。仪表盘入口要用 `/dashboards/index.html`;清空告警要用 `POST /inner/sw/trace-alert/clear`(GET 会 405) |
 | 本机 `curl` 返回 502 而浏览器正常 | 请求被代理带走 | 加 `--noproxy "*"`(见 §2.3) |

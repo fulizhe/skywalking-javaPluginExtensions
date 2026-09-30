@@ -184,7 +184,9 @@ services:
       # persistErrors/aggregateErrors 计数与 heap 趋势。
       # 要压"指标+告警耦合",把本行换成含错误端点的路径集即可(如在末尾追加
       # ,/api/trace-alert-demo/error,/api/trace-alert-demo/http500)。
-      - -Dloadtest.paths=/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
+      # /fullSample?deps=false:全貌入口默认带三层依赖,中间件未起时约 8s/请求会把吞吐拖垮。
+      # 要连依赖面一起压,加 --profile deps 并把 /api/deps-demo/* 路径加进下面这行。
+      - -Dloadtest.paths=/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
       - -DargLine=-Xmx512m
     mem_limit: 2g
     logging:
