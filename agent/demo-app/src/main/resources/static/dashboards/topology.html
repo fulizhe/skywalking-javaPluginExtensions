@@ -221,100 +221,80 @@
     return e.componentName || ("component-" + e.componentId);
   }
 
-  // 节点图标:按组件名优先、层分类兜底。**内联 SVG**(零网络请求、无新依赖)。
-  // 为什么不用"逐个组件的官方 svg":SkyWalking UI 的 icon 目录是几百个带版权头的文件,
-  // 拷进 demo-app 属于另一条线;这里只保证**常见组件一眼能认**,认出层次而不是背组件表。
-  // 若哪天要官方图标,改这里的 map 即可(ECharts symbol 支持 image:// 路径)。
+  /**
+   * 组件图标：**SkyWalking 官方的品牌图标**（与官方拓扑图同一套读法），取自
+   * `skywalking-booster-ui` 的 `src/assets/img/technologies/`（Apache-2.0，见同目录 NOTICE）。
+   * 官方图标集里没有"本服务"和"其它"，这两个仍用内联 SVG。
+   * 换图标只改这张表 —— 页面其余逻辑不认识图标名。
+   */
+  var ICON_FILES = {
+    database: "H2.png",      // 进程内 H2(实测组件名 h2-jdbc-driver)
+    mysql: "MYSQL.png",      // 真 MySQL(实测组件名 mysql-connector-java)
+    cache: "REDIS.png",      // Jedis(实测组件名 Jedis)
+    mq: "KAFKA.png",         // 实测组件名 kafka-producer
+    http: "HTTPCLIENT.png",  // HttpClient 与 Hutool(#128)共用
+    rpc: "GRPC.png"          // 实测组件名大写 GRPC、层 RPCFramework
+  };
+
   var ICON_SVG = {
-    // 数据库:圆柱(经典 DB 符号)
-    database: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
-      + '<ellipse cx="20" cy="9" rx="12" ry="4.5" fill="none" stroke="#7fd1ff" stroke-width="2.4"/>'
-      + '<path d="M8 9v22c0 2.5 5.4 4.5 12 4.5s12-2 12-4.5V9" fill="none" stroke="#7fd1ff" stroke-width="2.4"/>'
-      + '<path d="M8 20c0 2.5 5.4 4.5 12 4.5s12-2 12-4.5" fill="none" stroke="#7fd1ff" stroke-width="2"/>'
-      + '</svg>',
-    // 缓存:三片堆叠的盘(ECharts 的 Cache 类默认形状)
-    cache: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
-      + '<rect x="7" y="8" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
-      + '<rect x="7" y="16.8" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
-      + '<rect x="7" y="25.6" width="26" height="6.5" rx="2" fill="none" stroke="#ff9f6e" stroke-width="2.3"/>'
-      + '</svg>',
-    // 消息队列:六边形 + 三个点(Kafka 三节点)
-    mq: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
-      + '<polygon points="20,4 34,12 34,28 20,36 6,28 6,12" fill="none" stroke="#c3e88d" stroke-width="2.4"/>'
-      + '<circle cx="14" cy="25" r="2.7" fill="#c3e88d"/><circle cx="20" cy="16" r="2.7" fill="#c3e88d"/>'
-      + '<circle cx="26" cy="25" r="2.7" fill="#c3e88d"/>'
-      + '</svg>',
-    // HTTP 出网:云 + 双向箭头
-    http: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
-      + '<path d="M14 30a7.5 7.5 0 0 1 .5-14.5A9.5 9.5 0 0 1 32 18.5 5.8 5.8 0 0 1 31.5 30z" fill="none"'
-      + ' stroke="#e6c07b" stroke-width="2.4"/>'
-      + '<path d="M11 20h11m-3.5-3.5L22 20l-3.5 3.5" fill="none" stroke="#e6c07b" stroke-width="2.2"/>'
-      + '</svg>',
-    // gRPC:中心点 + 三向辐射(与 SkyWalking 拓扑图里 gRPC 的读法一致)
-    grpc: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
-      + '<path d="M20 20L20 7M20 20L10.5 26.5M20 20L29.5 26.5" stroke="#5ec8d8" stroke-width="2.2"'
-      + ' fill="none"/>'
-      + '<circle cx="20" cy="20" r="3.4" fill="#5ec8d8"/>'
-      + '<circle cx="20" cy="6.5" r="3.6" fill="none" stroke="#5ec8d8" stroke-width="2.2"/>'
-      + '<rect x="6" y="23" width="8.5" height="8.5" rx="1.8" fill="none" stroke="#5ec8d8" stroke-width="2.2"/>'
-      + '<rect x="25.5" y="23" width="8.5" height="8.5" rx="1.8" fill="none" stroke="#5ec8d8" stroke-width="2.2"/>'
-      + '</svg>',
-    // 兜底:圆环
     generic: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
       + '<circle cx="20" cy="20" r="12" fill="none" stroke="#9aa4b2" stroke-width="2.4"/>'
       + '</svg>',
-    // 本服务:实心圆 + 环(中心节点只有它,不该和外部依赖同形)
     self: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
       + '<circle cx="20" cy="20" r="7" fill="#7fd1ff"/><circle cx="20" cy="20" r="12.5" fill="none"'
       + ' stroke="#7fd1ff" stroke-width="2.2"/>'
       + '</svg>'
   };
 
-  function svgSymbol(svg) {
-    return "image://" + dataUri(svg);
-  }
-
-  /** 纯 data URI：既能喂 ECharts 的 symbol（加 image:// 前缀），也能直接塞进&lt;img&gt; 的 src。 */
-  function dataUri(svg) {
-    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-  }
+  /** 官方 png 图标（相对页面 URL）。 */
+  function iconFile(name) { return "icons/" + ICON_FILES[name]; }
+  /** 给 ECharts 用（image:// + 相对路径）。 */
+  function fileSymbol(name) { return "image://" + iconFile(name); }
+  /** 内联 SVG 给 ECharts 用。 */
+  function svgSymbol(svg) { return "image://" + dataUri(svg); }
+  /** 纯 data URI：既能喂 ECharts 的 symbol，也能塞进&lt;img src>。 */
+  function dataUri(svg) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); }
+  /** 图例/图标行用的一项：png 走相对路径，SVG 走 data URI。 */
+  function iconSrc(name) { return ICON_FILES[name] ? iconFile(name) : dataUri(ICON_SVG[name]); }
 
   /**
-   * 图下方那行「图标 = 组件类型」：**画真图标**（而不是文字描述"圆柱/堆叠盘"），
-   * 否则读者要靠想象把文字对上图里的形状 —— 这正是图例与图上对不上的根因。
+   * 图下方那行「图标 = 组件类型」：**画真图标**，与图上完全一致。
+   * （之前是文字描述"圆柱/堆叠盘"，读者得靠想象把文字对图形。）
    */
   function renderIconKey() {
     var el = document.getElementById("icon-key");
     if (!el) { return; }
-    var items = [["数据库", ICON_SVG.database], ["缓存", ICON_SVG.cache], ["消息队列", ICON_SVG.mq],
-                 ["HTTP 出网", ICON_SVG.http], ["gRPC", ICON_SVG.grpc], ["其它", ICON_SVG.generic],
-                 ["本服务", ICON_SVG.self]];
-    el.innerHTML = "<b>节点图标 = 组件类型</b>（与 SkyWalking 拓扑图同一套读法）："
+    var items = [["数据库 H2", "database"], ["MySQL", "mysql"], ["缓存 Redis", "cache"],
+                 ["消息队列 Kafka", "mq"], ["HTTP 出网", "http"], ["gRPC", "rpc"],
+                 ["其它", "generic"], ["本服务", "self"]];
+    el.innerHTML = "<b>节点图标 = 组件类型</b>（官方品牌图标，同 SkyWalking 拓扑图）："
       + items.map(function (it) {
-          return '<span class="ki"><img src="' + dataUri(it[1]) + '" alt="">' + it[0] + "</span>";
+          return '<span class="ki"><img src="' + iconSrc(it[1]) + '" alt="">' + it[0] + "</span>";
         }).join("");
   }
 
+  // 组件名 → 图标。按**实测组件名**匹配，层分类兜底(组件名会随组件库措辞变，层稳定)。
   function iconFor(componentName, spanLayer) {
     var n = String(componentName || "").toLowerCase();
-    // 组件名按**实测值**匹配：组件库里 gRPC 的键是大写 `GRPC`，而 spanLayer 给的是
-    // `RPCFramework`（不是 "gRPC"）。两条都留着，改组件库也不会失配。
     if (n.indexOf("grpc") >= 0 || spanLayer === "gRPC" || spanLayer === "RPCFramework") {
-      return svgSymbol(ICON_SVG.grpc);
+      return fileSymbol("rpc");
     }
     if (n.indexOf("jedis") >= 0 || n.indexOf("redis") >= 0
         || n === "cache" || spanLayer === "Cache") {
-      return svgSymbol(ICON_SVG.cache);
+      return fileSymbol("cache");
     }
     if (n.indexOf("kafka") >= 0 || n.indexOf("mq") >= 0 || spanLayer === "MQ") {
-      return svgSymbol(ICON_SVG.mq);
+      return fileSymbol("mq");
     }
     if (spanLayer === "Http" || n.indexOf("http") >= 0 || n.indexOf("hutool") >= 0) {
-      return svgSymbol(ICON_SVG.http);
+      return fileSymbol("http");
     }
-    if (spanLayer === "Database" || n.indexOf("jdbc") >= 0 || n.indexOf("mysql") >= 0
-        || n.indexOf("h2") >= 0 || n.indexOf("postgres") >= 0) {
-      return svgSymbol(ICON_SVG.database);
+    if (n.indexOf("mysql") >= 0 || n === "mariadb") {
+      return fileSymbol("mysql");
+    }
+    if (spanLayer === "Database" || n.indexOf("jdbc") >= 0 || n.indexOf("h2") >= 0
+        || n.indexOf("postgres") >= 0) {
+      return fileSymbol("database");
     }
     return svgSymbol(ICON_SVG.generic);
   }

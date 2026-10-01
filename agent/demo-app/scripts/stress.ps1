@@ -314,7 +314,7 @@ $mvnArgs = @(
 if ($Continuous) { $mvnArgs += "-Dloadtest.durationSec=-1" }
 elseif ($DurationSec -gt 0) { $mvnArgs += "-Dloadtest.durationSec=$DurationSec" }
 else { $mvnArgs += "-Dloadtest.requests=$Requests" }
-if ($Paths) { $mvnArgs += "-Dloadtest.paths=$Paths" }
+if ($effectivePaths) { $mvnArgs += "-Dloadtest.paths=$effectivePaths" }
 Write-Host ""
 Write-Host "[..] 运行压测: mvn -f $demoAppPom test -Dtest=HttpLoadTest -Dloadtest=true ..."
 Write-Host ""

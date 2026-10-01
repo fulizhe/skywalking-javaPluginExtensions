@@ -1,0 +1,26 @@
+# 第三方图标来源（NOTICE）
+
+本目录下的图标文件来自 **Apache SkyWalking 官方 UI 仓库**：
+
+- 仓库：`https://github.com/apache/skywalking-booster-ui`
+- 路径：`src/assets/img/technologies/`
+- 分支：`main`（核实日期 2026-10-01）
+- 许可：**Apache License 2.0**（该仓库根目录 `LICENSE`）
+- https://github.com/apache/skywalking-booster-ui/blob/main/src/assets/img/technologies/
+
+| 文件 | 对应组件（本仓实测的 componentName） |
+| --- | --- |
+| `H2.png` | 进程内 H2（`h2-jdbc-driver`），Database 层兜底 |
+| `MYSQL.png` | 真 MySQL（`mysql-connector-java`） |
+| `REDIS.png` | Jedis / Redis（`Jedis`） |
+| `KAFKA.png` | Kafka（`kafka-producer`） |
+| `HTTPCLIENT.png` | Apache HttpClient 与 Hutool HTTP（`HttpClient` / `Http(#128)`） |
+| `GRPC.png` | gRPC（`GRPC`，spanLayer 为 `RPCFramework`） |
+
+用途：让 `dashboards/topology.html` 的依赖拓扑页用**与官方拓扑图同一套图标**，
+扫一眼就能分清组件类型。选用是按本仓实际出现的组件名挑的，未做二次修改（未裁剪、未重绘）。
+
+"本服务"与"其它"两个图标**不在本目录** —— 官方图标集里没有对应物，由页面内联 SVG 绘制。
+
+Apache-2.0 允许复制、分发与修改，条件是保留版权与许可声明（本文件即为其一）。
+若上游变更或删除这些文件，请同步更新本说明。
