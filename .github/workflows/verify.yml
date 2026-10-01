@@ -8,7 +8,10 @@ on:
       - 'verify/**'
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/demo-app/**'
+      # 带自身路径:否则改 workflow 永远不触发它自己,验证逻辑改动得不到验证
+      - '.github/workflows/verify.yml'
   pull_request:
     branches:
       - master
@@ -16,7 +19,9 @@ on:
       - 'verify/**'
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/demo-app/**'
+      - '.github/workflows/verify.yml'
 
 jobs:
   verify:
