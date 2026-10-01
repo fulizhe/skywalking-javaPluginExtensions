@@ -25,10 +25,23 @@ on:
 
 jobs:
   verify:
+    name: verify (${{ matrix.scenario }})
     # 钉住 24.04:ubuntu-latest 将于 2026-10-19 迁到 Ubuntu 26。本回路整条链
     # (buildx driver / compose / 基础镜像拉取)对 docker 与 buildx 版本敏感,
     # 不想在一个无人值守的凌晨被发行版大版本改动打挂。同 major 的镜像周更照收。
     runs-on: ubuntu-24.04
+    strategy:
+      # 三个场景并行,墙钟取最慢那个。fail-fast 关掉:一个场景挂了不该掐掉
+      # 另两个 —— 全跑完才知道是"只坏一个"还是"全坏"。
+      fail-fast: false
+      matrix:
+        # 与 verify/scenarios/*/ 一一对应;新增场景在这里加一行。
+        # 只跑各场景的默认依赖版本 —— 版本矩阵(`--matrix`)留本地按需触发,
+        # 全放进 CI 会变成 7 个并发重容器 job,收益不抵成本。
+        scenario:
+          - logfile-reporter
+          - override-httpclient
+          - override-hutool
     env:
       # compose 把这个路径挂到容器的 /root/.m2;放在 workspace 内便于 actions/cache 取存
       VERIFY_M2_VOLUME: ${{ github.workspace }}/.m2-verify
@@ -71,7 +84,10 @@ jobs:
           cache-from: type=gha,scope=verify-runner
           cache-to: type=gha,scope=verify-runner,mode=max,ignore-error=true
 
-      - name: Run logfile-reporter scenario (containerized bash loop)
+      # 场景名走 env 传,不内插进脚本文本 —— matrix 值虽是我们自己写死的,
+      # 但别给这个页面留一个"以后有人加了外部输入"的坑。
+      - name: Run scenario
         env:
           VERIFY_SKIP_BUILD: '1'
-        run: bash verify/run.sh --scenario logfile-reporter
+          VERIFY_SCENARIO: ${{ matrix.scenario }}
+        run: bash verify/run.sh --scenario "$VERIFY_SCENARIO"

@@ -43,6 +43,11 @@ workflow 改用 `docker/build-push-action` 预先 build 并挂 `cache-from/to: t
 - `VERIFY_SKIP_BUILD=1` 是「镜像已备好」的显式承诺:若镜像陈旧,场景会静默跑旧代码。
   本地调试照常用默认路径,让 `run.sh` 自己 build。
 
+三个场景在 CI 上是**三个并行 job**(matrix + `fail-fast: false`),墙钟取最慢那个,而不是串行。
+新增场景记得往 workflow 的 `matrix.scenario` 加一行。CI 只跑各场景的默认依赖版本 ——
+`--matrix` 版本矩阵留本地按需触发。三个 job 抢同一个 m2 缓存 key 时,`actions/cache` 与 buildkit
+层缓存都只会「保存失败告警」而不 fail job(前者的只读降级是文档保证,后者靠 `ignore-error=true`)。
+
 ## 退出码
 
 | 码 | 含义 |
