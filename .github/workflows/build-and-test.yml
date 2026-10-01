@@ -9,6 +9,8 @@ on:
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/pom.xml'
+      # 带自身路径:否则改这个 workflow 永远不触发它自己(与 verify.yml 同理)
+      - '.github/workflows/build-and-test.yml'
   pull_request:
     branches:
       - master
@@ -17,6 +19,7 @@ on:
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/pom.xml'
+      - '.github/workflows/build-and-test.yml'
 
 jobs:
   build-and-test:
@@ -28,10 +31,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
+          # 每次 runner 都是全新的,不然每次都要重下 plugins + agent 的依赖树。
+          # key 随 **/pom.xml 变(见 setup-java 的 maven 缓存约定),pom 没动就整份复用。
+          cache: maven
 
       - name: Build and test active plugins (release 8 bytecode)
         working-directory: ./agent
