@@ -44,8 +44,7 @@ const nodes = {};
 // 页面用到的全部 id 都得有桩 —— 少一个就会在 render 里抛 "Cannot read properties of null"，
 // 那正是这套测试要抓的失败模式（漏一个 id 就等于测试自己先崩，测不到东西）。
 ['hint', 'note', 'empty', 'scope-chip', 'rows', 'familyRows', 'familyHost', 'endpointHost',
- 'mainTitle', 'rankLegend', 'familyChips', 'trendSummary', 'trendCharts', 'trendLegend',
- 'trendNote', 'rankChart', 'p95Chart'].forEach((id) => { nodes[id] = stubNode(); });
+ 'mainTitle', 'rankLegend', 'familyChips'].forEach((id) => { nodes[id] = stubNode(); });
 // 视图切换要读写 display，族展开要读 dataset
 nodes.familyHost.style.display = '';
 nodes.endpointHost.style.display = 'none';
@@ -75,6 +74,7 @@ const body = [
   '  setRange: function(r){ currentRange = r; },',
   '  setView: function(v){ viewMode = v; },',
   '  setSearch: function(s){ searchText = s; },',
+  '  __isSelfRead: isSelfRead,',
   '  setTruncated: function(v){ aggTruncated = v; },',
   '  resetRanks: function(){ lastRanks = null; }',
   '};',
@@ -232,6 +232,28 @@ ok('"*" 行也没把行数撑多（仍是 3 行）',
   'rows=' + (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length);
 ok('hint 的"共 N 个"按剔 "*" 后的真实端点数算',
   nodes.hint.textContent.indexOf('共 3 个') >= 0, nodes.hint.textContent);
+
+console.log('== 仪表盘自己的读口调用必须剔除（否则它排进业务榜还被自己扰动）==');
+// 这个页面每 10s 查一次 /inner/sw/metrics/query，那些调用同样被采集进指标 ——
+// 实测 GET:/inner/sw 曾排到第 2、3 名。不剔的话榜里混的不是业务东西。
+ok('识别 GET:/inner/sw/...', M.__isSelfRead('GET:/inner/sw/metrics/query') === true);
+ok('识别无动词前缀的 /inner/sw/...', M.__isSelfRead('/inner/sw/topology') === true);
+ok('业务端点不算自身读口', M.__isSelfRead('GET:/api/order/1') === false);
+M.setView('endpoint'); M.resetRanks();
+M.render(ROWS.concat([
+  { endpoint: 'GET:/inner/sw/metrics/query', requestCount: 274, errorCount: 0, slowCount: 0,
+    errorRate: 0, slowRate: 0, p50: 20, p95: 182, p99: 200, worstP95: 200, bucketCount: 9 },
+  { endpoint: 'POST:/inner/sw/trace-alert', requestCount: 681, errorCount: 0, slowCount: 0,
+    errorRate: 0, slowRate: 0, p50: 30, p95: 114, p99: 130, worstP95: 130, bucketCount: 9 }
+]));
+ok('自身读口不落进行表', nodes.rows.innerHTML.indexOf('%2Finner%2Fsw') < 0,
+  'got: ' + nodes.rows.innerHTML.slice(0, 240));
+ok('剔掉后仍是 3 行', (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length === 3,
+  'rows=' + (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length);
+ok('note 写明剔了几行、为什么（不静默隐藏）',
+  nodes.note.innerHTML.indexOf('已剔除 2 行') >= 0
+  && nodes.note.innerHTML.indexOf('/inner/sw/*') >= 0,
+  'got: ' + nodes.note.innerHTML.slice(0, 300));
 
 console.log('== 族视图（默认视角：端点很多时先收敛）==');
 // 5 个端点，其中 3 个同族 —— 与真实 demo 的 deps-demo 形状一致

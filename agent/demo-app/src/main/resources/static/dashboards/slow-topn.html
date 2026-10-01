@@ -84,25 +84,6 @@
   .fm-m .num{text-align:right;font-family:var(--mono);color:#7d8db3}
   .fm-m a{font-size:11px}
 
-  /* 趋势收尾：两张图共用颜色，图例带判定标签 */
-  .trend-head{font-size:13.5px;line-height:1.8;margin-bottom:12px;color:#c7cff0}
-  .trend-head b.worse{color:#fb7185}
-  .trend-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-  @media (max-width: 1100px){ .trend-charts{grid-template-columns:1fr} }
-  .trend-charts figure{margin:0}
-  .trend-charts figcaption{font-size:11.5px;color:var(--mut);margin-bottom:6px}
-  .trend-charts svg{width:100%;height:auto;background:#0c1526;border:1px solid var(--bd);border-radius:10px}
-  .trend-legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px}
-  .tl-item{display:flex;align-items:center;gap:7px;font-size:11.5px}
-  .tl-dot{width:9px;height:9px;border-radius:50%;flex:none}
-  .tl-ep{font-family:var(--mono);color:#c7cff0;max-width:230px;overflow:hidden;
-         text-overflow:ellipsis;white-space:nowrap}
-  .tl-v{padding:1px 7px;border-radius:999px;font-size:10.5px;font-weight:700}
-  .tl-v.worse{background:rgba(251,113,133,.2);color:#fb7185}
-  .tl-v.split{background:rgba(251,191,36,.2);color:#fbbf24}
-  .tl-v.flat{background:rgba(125,141,179,.18);color:#7d8db3}
-  .tl-n{color:#7d8db3;font-family:var(--mono);font-size:10.5px}
-
 </style>
 </head>
 <body>
@@ -167,11 +148,6 @@
           <code>endpoint / 分位 / 计数</code>，<b>没有 layer 字段</b>（Cache/Database/MQ 那种）。
           所以族 = 取路径前两段（如 <code>/api/deps-demo/*</code>），它<b>回答不了"哪一层慢"</b> ——
           层归类要看<a href="topology.html">依赖拓扑</a>。</li>
-      <li><b>底部趋势图的「名次上升」不能单独当证据</b>：5 个时间窗是<b>嵌套</b>的
-          （1h ⊂ 6h ⊂ 24h），名次上升也可能来自<b>别的端点</b>在更长的窗口里进出或变快。
-          所以它<b>同时画绝对 P95</b>，并标出「同向恶化」（名次与 P95 同时变差）还是
-          「背离」（只有名次动）—— <b>只有同向的那几条才是真证据</b>。</li>
-    </ul>
 
   <section class="card">
     <h3 class="card-h" id="mainTitle">按前缀族看（端点很多时先收敛）</h3>
@@ -213,24 +189,6 @@
     </div>
   </section>
 
-  <section class="card" id="trendCard">
-    <h3 class="card-h">收尾：谁在恶化（名次 + 绝对 P95 双线）</h3>
-    <div class="trend-head" id="trendSummary">加载中…</div>
-    <div class="trend-charts" id="trendCharts">
-      <figure>
-        <figcaption>名次（越靠上越慢）</figcaption>
-        <svg id="rankChart" viewBox="0 0 900 230" preserveAspectRatio="xMidYMid meet"></svg>
-      </figure>
-      <figure>
-        <figcaption>绝对 P95（越靠上越慢）</figcaption>
-        <svg id="p95Chart" viewBox="0 0 900 230" preserveAspectRatio="xMidYMid meet"></svg>
-      </figure>
-    </div>
-    <div class="trend-legend" id="trendLegend"></div>
-    <div class="note" id="trendNote"></div>
-  </section>
-</div>
-
 <script>
 "use strict";
 var currentRange = SWRanges.DEFAULT_RANGE;
@@ -239,7 +197,6 @@ var topN = 10;
 var viewMode = "family";     // family（默认，收敛） | endpoint（逐端点明细）
 var searchText = "";
 var expandedFamily = null;
-var tickTrend = 0;
 var lastRanks = null;      // { w: 窗口标签, s: 排序依据, ranks: {ep:名次} }
 var aggTruncated = false;
 
@@ -320,13 +277,27 @@ function bySearch(list){
   return list.filter(function(r){ return String(r.endpoint).toLowerCase().indexOf(q) >= 0; });
 }
 
+/**
+ * 是不是"仪表盘自己"发出来的读口调用（`GET:/inner/sw/...`）。
+ *
+ * <p><b>为什么必须剔掉</b>：这个页面每 10s 自己发一次聚合查询，那些调用**同样被采集进指标**，
+ * 于是 `GET:/inner/sw/metrics/query` 会作为一个"端点"排进榜里 —— 实测排到过第 2、3 名。
+ * 后果三层：榜里混进根本不是业务的东西；点它跳慢查询页必然查不到；
+ * 而且它的数字**被自己的轮询持续扰动**，让"哪个最慢"这个结论不稳定。
+ *
+ * <p>剔掉的数量会在页内 note 里写出来 —— 不静默隐藏。
+ */
+function isSelfRead(ep){
+  return String(ep == null ? "" : ep).replace(/^[A-Z]+:/, "").indexOf("/inner/sw/") === 0;
+}
+
 function ranked(rows){
   var get = SORTS[sortKey].get;
   return rows.slice()
-    // 剔掉 "*"：它是全站合计行（指标聚合把全局桶也放进同一张表），**不是端点**。
-    // 不剔的话它会作为一个"端点"排进榜里 —— 真实数据下必然发生，而夹具里没有这行，
-    // 排第几还会随窗口乱跳（全局 P95 跟谁比都不成比例）。
+    // "*" 是全站合计行（指标聚合把全局桶也放进同一张表），不是端点；
+    // "/inner/sw/*" 是这个页面自己的查询（见 isSelfRead）。两者都不是业务端点。
     .filter(function(r){ return r.endpoint != null && r.endpoint !== "*"
+                         && !isSelfRead(r.endpoint)
                          && Number(r.requestCount) > 0 && get(r) != null; })
     .sort(function(a,b){
       var d = (Number(get(b)) || 0) - (Number(get(a)) || 0);
@@ -395,10 +366,10 @@ function render(rows){
   } else {
     renderEndpoints(list, all);
   }
-  renderNotes(all);
+  renderNotes(list.length, (rows && rows.length ? rows.length : 0) - all.length);
 }
 
-function renderNotes(all){
+function renderNotes(rowsKept, dropped){
   var notes = [];
   notes.push("<b>榜 = 窗口内全量调用的分位</b>，不是「慢调用次数榜」。次数是插件 slowCount 的口径，"
     + "与逐条慢段不是一回事，两页数字<b>不要相加</b>。");
@@ -408,229 +379,18 @@ function renderNotes(all){
     notes.push("<b>前缀族 = 按 endpoint 名推的</b>（取路径前两段），指标读口<b>没有 layer 字段</b>，"
       + "所以它<b>不是层归类</b>、回答不了「哪一层慢」。要看层，去<a href=\"topology.html\">依赖拓扑</a>。");
   }
+  // 剔掉的行要说清是多少、为什么 —— 不静默隐藏
+  if (dropped > 0) {
+    notes.push("<b>已剔除 " + dropped + " 行</b>：全站合计行（<code>endpoint=*</code>）"
+      + "与<b>仪表盘自己的读口调用</b>（<code>/inner/sw/*</code> —— 这个页面每 10s 查一次，"
+      + "那些调用同样会被采集进指标；不剔它就会混进业务榜，还会被自己的轮询持续扰动）。");
+  }
   if (aggTruncated) {
     notes.push("<b>[已截断]</b>服务端聚合行数达 limit（1000），本页基于这批返回，"
       + "不是全量 endpoint。");
   }
   document.getElementById("note").innerHTML = notes.map(function(t){ return "· " + t; }).join("<br>");
 }
-
-// ============================================================ 趋势收尾（双线）
-//
-// 目标：把前面所有静态数字收成一句"它在恶化"。**但名次本身不能当证据** ——
-// 5 个时间窗是嵌套的（1h ⊂ 6h ⊂ 24h），名次上升也可能来自别的端点进出或变快。
-// 所以每个端点画两条线：名次（方向）+ 绝对 P95（幅度），并判定同向/背离。
-// 只有「同向恶化」（名次升且 P95 也升）才是能拿去汇报的那几条。
-var TREND_RANGES = ["1h", "6h", "24h", "7d", "30d"];
-var trendCache = null;   // { at, sortKey, byRange:{range:{ranks:{}, p95:{}}}, order:[ep] }
-var TREND_EVERY = 6;    // 趋势是慢信号：每 6 轮轮询（约 60s）才重拉一次，不跟主查询同频
-
-function trendEndpointPick(byRange){
-  // 取「当前窗口里最慢的 N 个」作为观察对象 —— 榜上文谈的就是它们
-  var cur = byRange[currentRange] || { ranks: {}, p95: {} };
-  return Object.keys(cur.ranks).sort(function(a,b){
-    return cur.ranks[a] - cur.ranks[b];
-  }).slice(0, 6);
-}
-
-/**
- * 真正要画的：**名次或 P95 真的动了**的端点。
- *
- * <p>为什么不直接画头部 N 个：全都在动的端点画出来是六条重合的直线 —— 一张什么都看不出
- * 的图比没有图更糟（观众只会问"这图在说什么"）。所以这里<b>先按变化过滤</b>，
- * 一个都不动就明确说"当前窗口内没有端点在恶化"，别拿图凑数。
- */
-function trendMovers(byRange){
-  var pick = trendEndpointPick(byRange);
-  return pick.map(function(ep){ return { ep: ep, v: trendVerdict(ep) }; })
-             .filter(function(x){
-               return x.v && (x.v.rankUp !== 0 || x.v.p95Up !== 0);
-             });
-}
-
-function loadTrend(force){
-  if (!force && trendCache && trendCache.sortKey === sortKey) { return Promise.resolve(trendCache); }
-  var jobs = TREND_RANGES.map(function(r){
-    var b = SWRanges.buckets(r);
-    return fetch("/inner/sw/metrics/query?aggregate=true&fromBucket=" + b.from
-      + "&toBucket=" + b.to + "&resolution=" + b.res + "&limit=1000")
-      .then(function(x){ return x.json(); })
-      .then(function(d){
-        var byEp = {};
-        ((d && d.rows) || []).forEach(function(row){
-          if (row && row.endpoint != null && row.endpoint !== "*") { byEp[row.endpoint] = row; }
-        });
-        var list = ranked(Object.keys(byEp).map(function(k){ return byEp[k]; }));
-        var ranks = {}, p95 = {};
-        list.forEach(function(x, i){ ranks[x.endpoint] = i + 1; p95[x.endpoint] = Number(x.p95) || 0; });
-        return { range: r, ranks: ranks, p95: p95 };
-      });
-  });
-  return Promise.all(jobs).then(function(parts){
-    var byRange = {};
-    parts.forEach(function(p){ byRange[p.range] = { ranks: p.ranks, p95: p.p95 }; });
-    trendCache = { at: Date.now(), sortKey: sortKey, byRange: byRange };
-    renderTrend();
-    return trendCache;
-  }).catch(function(e){
-    var s = document.getElementById("trendSummary");
-    if (s) { s.textContent = "趋势数据拉取失败：" + e; }
-  });
-}
-
-/** 同向 / 背离判定：把"名次动了"和"P95 也动了"分开看。 */
-function trendVerdict(ep){
-  var md = trendCache;
-  if (!md) { return null; }
-  var byR = md.byRange;
-  var first = TREND_RANGES[0], last = currentRange;
-  // 以「最短窗 → 当前档」两端比：两端都存在才谈得上
-  var r0 = byR[first] && byR[first].ranks[ep];
-  var r1 = byR[last] && byR[last].ranks[ep];
-  var p0 = byR[first] && byR[first].p95[ep];
-  var p1 = byR[last] && byR[last].p95[ep];
-  if (r0 == null || r1 == null || p0 == null || p1 == null) { return null; }
-  var rankUp = r0 - r1;          // >0 = 名次前进（数字变小）
-  var p95Up = p1 - p0;            // >0 = 变慢
-  var cls, text;
-  if (rankUp > 0 && p95Up > 0) { cls = "worse"; text = "同向恶化"; }
-  else if (rankUp > 0 && p95Up <= 0) { cls = "split"; text = "背离·名次升但 P95 未升"; }
-  else if (rankUp <= 0 && p95Up > 0) { cls = "split"; text = "背离·P95 升但名次未升"; }
-  else { cls = "flat"; text = "未恶化"; }
-  return { cls: cls, text: text, rankUp: rankUp, p95Up: p95Up, p0: p0, p1: p1 };
-}
-
-function renderTrend(){
-  var md = trendCache;
-  var sum = document.getElementById("trendSummary");
-  if (!md) { sum.textContent = "加载中…"; return; }
-  var vs = trendMovers(md.byRange);
-  var worse = vs.filter(function(x){ return x.v.cls === "worse"; });
-  if (!vs.length) {
-    sum.innerHTML = "从 <b>" + SWRanges.label(TREND_RANGES[0]) + "</b> 到 <b>"
-      + SWRanges.label(currentRange) + "</b>：当前窗口内<b>没有端点在恶化</b>"
-      + "（头部 " + trendEndpointPick(md.byRange).length + " 个端点的名次与 P95 都没动）。"
-      + "<br>这时候不画图 —— 六条重合的直线说明不了任何事。";
-    document.getElementById("rankChart").innerHTML = "";
-    document.getElementById("p95Chart").innerHTML = "";
-    document.getElementById("trendLegend").innerHTML = "";
-    document.getElementById("trendNote").innerHTML =
-      "· 读口：每个时间窗各一次 <span class='mono'>/inner/sw/metrics/query?aggregate=true</span>，"
-      + "共 " + TREND_RANGES.length + " 次，<b>每 " + TREND_EVERY + " 轮轮询（约 "
-      + (TREND_EVERY * 10) + "s）才重拉一次</b> —— 趋势是慢信号，不跟主查询同频。<br>"
-      + "· <b>时间窗嵌套</b>（1h ⊂ 6h ⊂ 24h）：名次变化含「别的端点进出」的影响，"
-      + "所以必须与绝对 P95 同看，只有<b>同向恶化</b>可作为论据。";
-    return;
-  }
-  var pick = vs.map(function(x){ return x.ep; });
-  sum.innerHTML = "从 <b>" + SWRanges.label(TREND_RANGES[0]) + "</b> 到 <b>"
-    + SWRanges.label(currentRange) + "</b>："
-    + (worse.length
-        ? "<b class='worse'>" + worse.length + " 个端点同向恶化</b>（名次上升且 P95 同时变差）—— "
-          + worse.map(function(x){ return esc(x.ep); }).join("、")
-        : "<b>没有同向恶化的端点</b>")
-    + "。名次升但 P95 没升的（背离）多半是别的端点在更长的窗口里变了，"
-    + "<b>不能当它变慢的证据</b>。";
-
-  drawTrendChart("rankChart", pick, md, true);
-  drawTrendChart("p95Chart", pick, md, false);
-
-  document.getElementById("trendLegend").innerHTML = pick.map(function(ep, i){
-    var v = trendVerdict(ep) || { cls: "flat", text: "样本不足" };
-    var col = TREND_COLORS[i % TREND_COLORS.length];
-    var md2 = md.byRange[currentRange];
-    return "<span class='tl-item'><span class='tl-dot' style='background:" + col + "'></span>"
-      + "<span class='tl-ep' title='" + esc(ep) + "'>" + esc(ep) + "</span>"
-      + "<span class='tl-v " + v.cls + "'>" + v.text + "</span>"
-      + "<span class='tl-n'>名次 " + (md2 ? md2.ranks[ep] : "-") + " · P95 "
-      + fmtMs(md2 ? md2.p95[ep] : null) + "</span></span>";
-  }).join("");
-
-  document.getElementById("trendNote").innerHTML =
-    "· 读口：每个时间窗各一次 <span class='mono'>/inner/sw/metrics/query?aggregate=true</span>，"
-    + "共 " + TREND_RANGES.length + " 次，<b>每 " + TREND_EVERY + " 轮轮询（约 "
-    + (TREND_EVERY * 10) + "s）才重拉一次</b> —— 趋势是慢信号，不跟主查询同频。<br>"
-    + "· <b>时间窗嵌套</b>（1h ⊂ 6h ⊂ 24h）：名次变化含「别的端点进出」的影响，"
-    + "所以必须与绝对 P95 同看，只有<b>同向恶化</b>可作为论据。<br>"
-    + "· 两图共用同一批端点与同一条颜色：左图看方向，右图看幅度。";
-}
-
-var TREND_COLORS = ["#38bdf8","#fbbf24","#fb7185","#34d399","#a78bfa","#f472b6"];
-
-function drawTrendChart(id, pick, md, isRank){
-  var W = 900, H = 230, padL = 52, padR = 116, padT = 14, padB = 34;
-  var svg = document.getElementById(id);
-  if (!svg) { return; }
-  var xs = TREND_RANGES.map(function(_, i){
-    return padL + i * (W - padL - padR) / (TREND_RANGES.length - 1);
-  });
-  // 纵轴：名次用「名次值」，P95 用对数刻度（端点耗时跨量级，线性轴会把小的压成一条线）
-  var vals = [];
-  pick.forEach(function(ep){
-    TREND_RANGES.forEach(function(r){
-      var v = isRank ? (md.byRange[r] && md.byRange[r].ranks[ep]) : (md.byRange[r] && md.byRange[r].p95[ep]);
-      if (v != null) { vals.push(v); }
-    });
-  });
-  if (!vals.length) { svg.innerHTML = ""; return; }
-  var vmax = Math.max.apply(null, vals);
-  var vmin = isRank ? 1 : Math.max.apply(null, vals.filter(function(v){ return v > 0; }).concat([1]));
-  function yOf(v){
-    if (isRank) {
-      var maxRank = Math.max(5, vmax);
-      return padT + (v - 1) * (H - padT - padB) / (maxRank - 1);
-    }
-    // P95 对数轴：log10 映射，1ms..10s 量级都能看清
-    var lo = Math.log10(Math.max(1, vmin)), hi = Math.log10(Math.max(10, vmax));
-    var k = (Math.log10(Math.max(1, v)) - lo) / Math.max(0.0001, hi - lo);
-    return H - padB - k * (H - padT - padB);
-  }
-  var g = "";
-  // 横向参考线
-  var ticks = isRank ? [1, 2, 3, 5, 8, 12, 20] : null;
-  if (ticks) {
-    ticks.forEach(function(t){
-      if (t > vmax) { return; }
-      g += '<line x1="' + padL + '" y1="' + yOf(t) + '" x2="' + (W - padR) + '" y2="' + yOf(t)
-        + '" stroke="#1d2a49" stroke-width="1"/>'
-        + '<text x="' + (padL - 8) + '" y="' + (yOf(t) + 4) + '" fill="#7d8db3" font-size="10" text-anchor="end">#' + t + "</text>";
-    });
-  } else {
-    [1, 10, 100, 1000, 10000].forEach(function(t){
-      if (t < vmin || t > vmax) { return; }
-      g += '<line x1="' + padL + '" y1="' + yOf(t) + '" x2="' + (W - padR) + '" y2="' + yOf(t)
-        + '" stroke="#1d2a49" stroke-width="1"/>'
-        + '<text x="' + (padL - 8) + '" y="' + (yOf(t) + 4) + '" fill="#7d8db3" font-size="10" text-anchor="end">'
-        + (t >= 1000 ? (t / 1000) + "s" : t + "ms") + "</text>";
-    });
-  }
-  TREND_RANGES.forEach(function(r, i){
-    g += '<text x="' + xs[i] + '" y="' + (H - padB + 20) + '" fill="#7d8db3" font-size="11" text-anchor="middle">'
-      + SWRanges.label(r) + "</text>";
-  });
-  pick.forEach(function(ep, i){
-    var col = TREND_COLORS[i % TREND_COLORS.length];
-    var pts = [];
-    TREND_RANGES.forEach(function(r, k){
-      var byR = md.byRange[r];
-      var v = byR ? (isRank ? byR.ranks[ep] : byR.p95[ep]) : null;
-      if (v != null) { pts.push(xs[k] + "," + yOf(v)); }
-    });
-    if (pts.length < 2) { return; }
-    g += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + col
-      + '" stroke-width="2" stroke-linejoin="round"/>';
-    pts.forEach(function(p){
-      var xy = p.split(",");
-      g += '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="3" fill="' + col + '"/>';
-    });
-    var last = pts[pts.length - 1].split(",");
-    var lab = isRank ? ("#" + md.byRange[currentRange].ranks[ep]) : fmtMs(md.byRange[currentRange].p95[ep]);
-    g += '<text x="' + (+last[0] + 8) + '" y="' + (+last[1] + 4) + '" fill="' + col
-      + '" font-size="11">' + esc(lab) + "</text>";
-  });
-  svg.innerHTML = g;
-}
-
 
 /** 族榜：收敛视图。族序 = 族内最差 P95；点行展开成员端点。 */
 function renderFamilies(list, all){
@@ -775,11 +535,6 @@ function load(){
     window.__lastRows = list;      // 族行展开要重渲染，保留原始行
     presenterConclusion(byEp);
     render(list);
-    // 趋势：首次或换档时立刻拉；同档内每 TREND_EVERY 轮才重拉（慢信号，不跟主查询同频）
-    tickTrend++;
-    if (!trendCache || trendCache.sortKey !== sortKey || tickTrend % TREND_EVERY === 1) {
-      loadTrend(true);
-    }
     var chip = document.getElementById("scope-chip");
     if (chip) { chip.textContent = rankLabel() + " · " + SORTS[sortKey].label; }
   }).catch(function(e){
