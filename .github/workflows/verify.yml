@@ -67,11 +67,14 @@ jobs:
                 for v in "${versions[@]}"; do printf '%s\t%s\n' "$scenario" "$v"; done
               fi
             done
-          } | jq -Rn '[inputs | split("\t") | {scenario: .[0], version: (.[1] // "")}]' \
+          # 注意形状:strategy.matrix 必须是映射,不能直接给数组 ——
+          # 实测给 `[...]` 会报 "Error when evaluating 'strategy' … A sequence was not expected"。
+          # 所以外面裹一层 { "include": [...] }。
+          } | jq -Rn '{include: [inputs | split("\t") | {scenario: .[0], version: (.[1] // "")}]}' \
             | jq -c '.' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           echo "[..] 计划出的 job 矩阵:"
-          jq -r '.[] | "    \(.scenario)\(if .version == "" then "" else "  v" + .version end)"' matrix.json
+          jq -r '.include[] | "    \(.scenario)\(if .version == "" then "" else "  v" + .version end)"' matrix.json
 
   build-runner:
     name: build runner image
