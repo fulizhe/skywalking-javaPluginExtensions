@@ -17,7 +17,7 @@
  *
  * <p>用法（各页）：
  * <pre>
- *   SWPresenter.mount({ page: "topology", theme: "dark", slot: "#pz-slot" });
+ *   SWPresenter.mount({ page: "topology", theme: "dark", slot: "#presenter-slot" });
  *   SWPresenter.conclusion([{ label: "依赖类型", value: "6", sub: "自启动以来" }, ...]);
  * </pre>
  */
