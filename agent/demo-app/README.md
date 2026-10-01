@@ -207,6 +207,7 @@ pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 | `/api/deps-demo/redis?op=get\|set\|del` | Cache | 三种 op 在明细档落成三个节点（节点身份 = 组件 + 出口操作名） |
 | `/api/deps-demo/mysql?sleepMs=0` | Database | 只 `SELECT 1` / `SELECT SLEEP(?)`，**不建表**；`sleepMs` 上限 3000，用来看分位与四档着色 |
 | `/api/deps-demo/kafka?op=produce\|consume` | MQ | KRaft 单节点；topic 由端点内 AdminClient 首次调用时建 |
+| `/api/deps-demo/grpc` | RPC | 进程内起一个最小 gRPC server 并自调用（**不引外部中间件**），组件名 `GRPC`、层 `RPCFramework`，客户端 2s deadline |
 | `/api/deps-demo/http?site=httpbin\|baidu\|google` | 外呼 | **白名单枚举**（不接受任意 URL）；三个站点同属 Http 组件 → 仍是**一个**节点 |
 
 > **与 `/fullSample` 的分工**：`/fullSample` 是**全貌入口** —— 一条请求把**所有被监控的组件类型各打一次**

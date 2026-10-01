@@ -273,7 +273,9 @@
 
   function iconFor(componentName, spanLayer) {
     var n = String(componentName || "").toLowerCase();
-    if (n.indexOf("grpc") >= 0 || spanLayer === "gRPC") {
+    // 组件名按**实测值**匹配：组件库里 gRPC 的键是大写 `GRPC`，而 spanLayer 给的是
+    // `RPCFramework`（不是 "gRPC"）。两条都留着，改组件库也不会失配。
+    if (n.indexOf("grpc") >= 0 || spanLayer === "gRPC" || spanLayer === "RPCFramework") {
       return svgSymbol(ICON_SVG.grpc);
     }
     if (n.indexOf("jedis") >= 0 || n.indexOf("redis") >= 0

@@ -46,6 +46,9 @@ deps:
   kafka:
     bootstrap: ${DEPS_KAFKA_BOOTSTRAP:localhost:19092}
     topic: ${DEPS_KAFKA_TOPIC:sw-demo}
+  grpc:
+    # RPC 样例:进程内 gRPC server 的端口(不引外部中间件,只占一个本机端口)
+    port: ${DEPS_GRPC_PORT:9099}
   http:
     # 外呼白名单:演示端点不接受任意 URL(避免变成 SSRF 口子)。
     # 可达性取决于宿主网络 —— 不通就是红边,是预期不是故障。

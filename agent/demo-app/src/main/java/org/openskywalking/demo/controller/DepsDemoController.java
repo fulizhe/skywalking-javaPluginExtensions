@@ -73,6 +73,12 @@ public class DepsDemoController {
         return deps.http(site);
     }
 
+    /** RPC 造数:调一次进程内 gRPC echo（补上 gRPC 这类依赖，客户端 2s deadline）。 */
+    @GetMapping("/grpc")
+    public Object grpc() {
+        return deps.grpc();
+    }
+
     /** 一次打穿四层(依赖面演示与截图的单一入口)。四层耗时叠加但每层有超时,不会挂住。 */
     @GetMapping("/all")
     public Object all(@RequestParam(value = "sleepMs", defaultValue = "0") int sleepMs,

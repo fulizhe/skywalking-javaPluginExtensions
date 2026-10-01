@@ -100,7 +100,7 @@ $NORMAL_PATHS = "/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,
 # 注意 Kafka 不可达时单次 produce 会等到 max.block.ms(3s)超时 —— 这是**有界的**,
 # 那条边照样会被记下来(kafka-producer),只是 errorCount 可能仍是 0
 # (出口 span 不由 send 的超时异常置 isError,见探针笔记)。
-$DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin"
+$DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc"
 
 # 全部页面接口(-AllEndpoints):按"页"分组铺开,便于看出漏了哪一页。
 # 清单是**显式枚举**而不是从代码里反射 —— 反射要处理注解/参数/副作用,反而更不可控;

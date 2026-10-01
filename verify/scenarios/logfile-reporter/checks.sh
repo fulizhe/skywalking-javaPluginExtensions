@@ -201,6 +201,7 @@ run_checks() {
     "/api/deps-demo/kafka?op=produce"
     "/api/deps-demo/kafka?op=consume"
     "/api/deps-demo/http?site=httpbin"
+    "/api/deps-demo/grpc"
   )
 
   # 断言 1:造数端点**不挂住**。超时未生效时这一条就会红 —— 它是"超时是硬要求"的守卫。
@@ -278,6 +279,11 @@ run_checks() {
   assert_jq "组件名不是宿主侧兜底 component-<id>" "$depTopology" \
     '[.edges[]? | select(.componentName | test("^component-[0-9]+$"))] | length == 0'
   # 样本与分位:三层造数端点打完后,至少这些边要有样本(证明"调用发生了、边记下来了")
+  # RPC 层(gRPC)必测:它是唯一**不依赖任何外部中间件**就能产出的组件边 —— 进程内起一个
+  # 最小 gRPC server(DepsDemoService.grpc),所以这条在任何机器上都能钉死。
+  # 组件名按**实测值**断言:组件库里的键是大写 GRPC(不是 gRPC),spanLayer 是 RPCFramework。
+  assert_jq "RPC 样例产出 gRPC 边(组件名 GRPC / 层 RPCFramework,不引外部中间件)" "$depTopology" \
+    '[.edges[]? | select(.componentName == "GRPC" and .spanLayer == "RPCFramework")] | length >= 1'
   assert_jq "造数端点产出的边有样本(不是空壳行)" "$depTopology" \
     '[.edges[]? | select(.endpoint | test("/api/deps-demo/")) | select(.sampleCount > 0)] | length >= 1'
 

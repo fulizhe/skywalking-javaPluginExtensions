@@ -49,6 +49,8 @@
              (jedis-2.x-3.x / mysql-8.x / kafka-0.11.x~2.x),超范围会静默不生效。见 pom 里的注释。 -->
         <jedis.version>3.8.0</jedis.version>
         <kafka.version>2.8.2</kafka.version>
+        <!-- RPC 样例的 gRPC 客户端版本;必须落在 agent apm-grpc-1.x 插件的 support 范围内(1.x),超范围静默不生效 -->
+        <grpc.version>1.58.0</grpc.version>
     </properties>
 
     <dependencies>
@@ -165,6 +167,22 @@
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
             <version>${kafka.version}</version>
+        </dependency>
+
+                <!-- RPC 样例(依赖拓扑的 gRPC 节点):进程内起一个最小 gRPC server 并自调用,补上此前
+             Database/Cache/MQ/Http 之外的第四类。刻意不引外部中间件,也不写 .proto ——
+             手工 MethodDescriptor + byte[] 直通即可(见 GrpcDemoServer 的类注释)。
+             版本必须落在 agent 9.4.0 `apm-grpc-1.x` 插件的 support 范围(grpc 1.x),
+             超范围会**静默不生效** —— 图上就是没有 gRPC 节点。Spring Boot 2.7 不代管 grpc 版本,故显式钉。 -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty-shaded</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>${grpc.version}</version>
         </dependency>
 
         <!-- @Slf4j/@Getter 等 -->

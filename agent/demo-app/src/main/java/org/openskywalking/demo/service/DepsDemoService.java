@@ -41,6 +41,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import redis.clients.jedis.Jedis;
@@ -117,6 +119,10 @@ public class DepsDemoService {
     private String kafkaBootstrap;
     @Value("${deps.kafka.topic:sw-demo}")
     private String kafkaTopic;
+
+    /** 进程内 gRPC server(懒启动),RPC 层造数用。 */
+    @Autowired
+    private GrpcDemoServer grpcDemo;
 
     /** 惰性建一次:KafkaProducer 自带后台线程与元数据缓存,每次请求新建太慢。 */
     private volatile KafkaProducer<String, String> producer;
@@ -251,6 +257,22 @@ public class DepsDemoService {
         out.put("layersOk", ok);
         out.put("latencyMs", (System.nanoTime() - begin) / 1_000_000L);
         return out;
+    }
+
+    /**
+     * RPC 造数：调一次进程内的 gRPC echo（{@link GrpcDemoServer}），补上 Database/Cache/MQ/Http
+     * 之外的第四类依赖。客户端有 2s deadline，故这一层最坏 2s，不会把造数端点拖挂。
+     */
+    public Map<String, Object> grpc() {
+        Map<String, Object> out = newResult("grpc://127.0.0.1/demo.DepsDemo/Echo");
+        long begin = start();
+        try {
+            final byte[] payload = ("sw-demo-" + System.currentTimeMillis()).getBytes("UTF-8");
+            out.put("detail", String.valueOf(grpcDemo.echo(payload).length) + " bytes echoed");
+        } catch (Exception e) {
+            markFailed(out, e);
+        }
+        return stamp(out, begin);
     }
 
     // ---------------------------------------------------------------- 内部
