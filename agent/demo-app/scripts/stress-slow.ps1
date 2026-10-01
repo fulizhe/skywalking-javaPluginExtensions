@@ -11,12 +11,18 @@
 #   pwsh .\scripts\stress-slow.ps1                      # 默认：25 次 / 4 线程
 #   pwsh .\scripts\stress-slow.ps1 -Requests 10         # 只打 10 次（演示够了）
 #   pwsh .\scripts\stress-slow.ps1 -Threads 1 -Requests 8 # 串行慢放，适合边讲边看
+#   pwsh .\scripts\stress-slow.ps1 -DurationSec 300      # 打 5 分钟（让分位/趋势积累出形状）
+#   pwsh .\scripts\stress-slow.ps1 -Continuous            # 无限模式，Ctrl+C 停（默认 10s 打一次进度）
+#   pwsh .\scripts\stress-slow.ps1 -Continuous -ProgressSec 30
 #   pwsh .\scripts\stress-slow.ps1 -SkipAlertDemo        # 不含告警演示端点（避免告警自环）
 #   pwsh .\scripts\stress-slow.ps1 -All                 # 含告警演示端点（**会触发告警自环**）
 #
 # ⚠️ **告警自环**：`/api/trace-alert-demo/error`、`/http500` 这类端点会真的报错，
 #    插件识别后经 webhook **同步回打本机**，而回打本身又是一次请求 —— 于是负载自我放大。
 #    所以本脚本**默认不含**告警端点；要演示告警请显式加 `-All`（并预期吞吐下降、告警面板出现事件）。
+#
+# ⚠️ **无限模式看的是"数据在积累"，不是吞吐**：这一档单请求 0.3s~8.5s，req/s 天花板就很低
+#    （8 线程约 1~2 req/s）。想看吞吐/堆/插件计数是否健康，用 stress.ps1 的 -Continuous。
 param(
     [int]$Requests = 25,
     [int]$Threads = 4,
@@ -24,6 +30,16 @@ param(
     [string]$BaseUrl = "http://127.0.0.1:9600",
     # 包含告警演示端点 → **会触发告警自环**
     [switch]$All,
+    # 无限模式：死循环慢压，Ctrl+C 停（对齐 stress.ps1 -Continuous）
+    [switch]$Continuous,
+    # 时长模式：按秒压（>0 有效；被 -Continuous 覆盖）
+    [int]$DurationSec = 0,
+    # 进度打印间隔（默认 10s）
+    [int]$ProgressSec = 10,
+    # 单请求超时。**默认给到 30s**：本档最慢端点 8.5s（/api/order/1），并发下尾延迟会超过
+    # stress.ps1 的 10s 默认值 —— 那样会攒出"网络异常"并让断言非零退出，而超时在慢端点压测里
+    # 是预期现象，不是缺陷。
+    [int]$TimeoutMs = 30000,
     # 跳过 demo-app 重新构建（复用已有 jar）
     [switch]$SkipAppBuild,
     # 跳过压测后的指标摘要
@@ -51,7 +67,12 @@ $SLOW_PATHS = [ordered]@{
     # ---- 秒级:业务慢端点,用来触发 SLOW 告警 ----
     "/api/trace-alert-demo/slow?ms=4000" = "睡 4s,超过默认 SLOW 阈值 3s → 触发 SLOW 告警"
     "/api/order/1"                        = "睡 8.5s,命中 Ant 规则 /api/order/*=8000 → SLOW"
-    "/api/export/report"                  = "慢导出(秒级)"
+    # 该端点**默认 sleep 65s**（Ant 规则 /api/export/** 用它演示极端慢）。
+    # 这里用 {rand:1000,4000} 让**每个请求随机睡 1~4s**：一条路径就能压出连续的耗时分布，
+    # 而写死 3s 只能压出一条线、塞 4 个变体又会让它在路径列表里占 4 席带偏整体流量。
+    # 占位符由 HttpLoadTest 替换；不替换的话 Spring 绑 int 失败会直接 400（不会悄悄通过）。
+    # 演示要"65s 那一版"就直接开 /api/export/report（不带参数）。
+    "/api/export/report?ms={rand:1000,4000}" = "慢导出(默认 65s;这里每请求随机睡 1~4s,仍命中 Ant /api/export/**)"
     "/longTimeTask"                       = "长任务(约 1s)"
     "/fullSample"                         = "全貌入口:约 5s(中间件未起时),且**会带上三层依赖**"
 }
@@ -68,10 +89,17 @@ if ($All) { foreach ($k in $ALERT_DEMO.Keys) { $groups[$k] = $ALERT_DEMO[$k] } }
 
 $paths = ($groups.Keys -join ",")
 
+$mode = if ($Continuous) { "无限(看数据积累,Ctrl+C 停)" } elseif ($DurationSec -gt 0) { "时长 ${DurationSec}s" } else { "请求数 $Requests" }
 Write-Host ""
 Write-Host "==== 慢端点演示压测 ===="
 Write-Host "目标      : $BaseUrl"
-Write-Host "次数/并发 : $Requests 次 / $Threads 线程"
+Write-Host "模式      : $mode"
+Write-Host "线程      : $Threads"
+Write-Host "单请求超时: ${TimeoutMs}ms"
+if ($Continuous -or $DurationSec -gt 0) {
+    Write-Host "进度打印  : 每 ${ProgressSec}s"
+    Write-Host "[--] 本档单请求 0.3s~8.5s，req/s 天花板极低（看着像'卡住'是正常的 —— 它在等慢端点）"
+}
 Write-Host "端点数    : $($groups.Count)（含告警演示端点: $(if ($All) { '是' } else { '否' })）"
 Write-Host ""
 Write-Host "端点清单（含单请求量级，便于讲解对照）:"
@@ -87,7 +115,12 @@ Write-Host "[--] 这一档看的是'慢在哪、慢到什么量级'；吞吐数�
 Write-Host ""
 
 $args = @("-NoProfile", "-File", (Join-Path $PSScriptRoot "stress.ps1"),
-    "-BaseUrl", $BaseUrl, "-Requests", $Requests, "-Threads", $Threads, "-Paths", $paths)
+    "-BaseUrl", $BaseUrl, "-Requests", $Requests, "-Threads", $Threads, "-Paths", $paths,
+    "-TimeoutMs", $TimeoutMs)
+# 三种模式互斥，与 stress.ps1 同一套语义：无限 > 时长 > 请求数
+if ($Continuous) { $args += "-Continuous" }
+elseif ($DurationSec -gt 0) { $args += "-DurationSec", $DurationSec }
+if ($Continuous -or $DurationSec -gt 0) { $args += "-ProgressSec", $ProgressSec }
 if ($SkipAppBuild) { $args += "-SkipAppBuild" }
 if ($SkipMetrics) { $args += "-SkipMetrics" }
 if ($AgentDir) { $args += @("-AgentDir", $AgentDir) }

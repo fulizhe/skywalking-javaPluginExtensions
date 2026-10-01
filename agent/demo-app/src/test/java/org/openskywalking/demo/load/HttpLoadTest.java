@@ -78,7 +78,10 @@ public class HttpLoadTest {
 
     private static final String[] DEFAULT_PATHS = {
         "/hello",
-        "/fullSample",
+        // 必须带 ?deps=false：fullSample 默认 deps=true，会打 Redis/MySQL/Kafka/外呼四层，
+        // 单请求 5.5s（中间件未全起时约 8s）。混进压测路径集会把均值拉到 ~800ms、
+        // 吞吐掉一个数量级（8 线程 ~10 rps vs ~580 rps）。要压依赖面用 stress.ps1 -WithDeps。
+        "/fullSample?deps=false",
         "/queryDbByMybatis",
         "/queryDbByJdbc",
         "/api/trace-alert-demo/error",
@@ -341,7 +344,8 @@ public class HttpLoadTest {
                     }
                 }
                 final String path = PATHS[ThreadLocalRandom.current().nextInt(PATHS.length)];
-                final String url = BASE_URL + path + (path.contains("?") ? "&" : "?") + "load=" + seq.incrementAndGet();
+                final String url = BASE_URL + randomize(path)
+                    + (path.contains("?") ? "&" : "?") + "load=" + seq.incrementAndGet();
                 final long reqStart = System.nanoTime();
                 try {
                     final HttpGet httpGet = new HttpGet(url);
@@ -384,6 +388,58 @@ public class HttpLoadTest {
             }
             return out;
         }
+    }
+
+    /**
+     * 把路径里的 <code>{rand:min,max}</code> 换成区间内的随机整数，<b>每个请求各换一次</b>。
+     *
+     * <p>为什么需要：像 {@code /api/export/report} 这种端点，时长本身就是它要演示的东西
+     * （默认 sleep 65s）。写死一个值只能压出一条固定耗时的线；写成 4 个变体又会让它在
+     * 路径列表里占 4 席、把整体流量分布带偏。占位符让<b>一条路径</b>产出<b>连续的耗时分布</b>。
+     *
+     * <p>用法：<code>/api/export/report?ms={rand:1000,4000}</code>
+     * （Spring 会把花括号绑成 int 失败 → 400，所以不替换的话压测会直接报非 2xx ——
+     * 这也正好让"忘了替换"不可能悄悄通过。）
+     */
+    private static String randomize(final String path) {
+        if (path == null || path.indexOf("{rand:") < 0) {
+            return path;
+        }
+        final StringBuilder out = new StringBuilder(path.length() + 8);
+        int i = 0;
+        while (i < path.length()) {
+            final int open = path.indexOf("{rand:", i);
+            if (open < 0) {
+                out.append(path, i, path.length());
+                break;
+            }
+            final int close = path.indexOf('}', open);
+            if (close < 0) {
+                out.append(path, i, path.length());
+                break;
+            }
+            out.append(path, i, open);
+            final String[] range = path.substring(open + "{rand:".length(), close).split(",", -1);
+            int min;
+            int max;
+            try {
+                min = Integer.parseInt(range[0].trim());
+                max = range.length > 1 ? Integer.parseInt(range[1].trim()) : min;
+            } catch (final NumberFormatException e) {
+                // 写错了就原样留着：让它 400，比"悄悄用个默认值"更容易发现
+                out.append(path, open, close + 1);
+                i = close + 1;
+                continue;
+            }
+            if (max < min) {
+                final int swap = min;
+                min = max;
+                max = swap;
+            }
+            out.append(min >= max ? min : min + ThreadLocalRandom.current().nextInt(max - min + 1));
+            i = close + 1;
+        }
+        return out.toString();
     }
 
     private static String stripTrailingSlash(final String s) {

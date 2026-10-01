@@ -183,6 +183,9 @@ pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 ```powershell
 pwsh ./scripts/stress-slow.ps1                          # 默认 25 次 / 4 线程
 pwsh ./scripts/stress-slow.ps1 -Requests 10 -Threads 1  # 串行慢放,边讲边看
+pwsh ./scripts/stress-slow.ps1 -DurationSec 300         # 打 5 分钟,让分位/趋势积累出形状
+pwsh ./scripts/stress-slow.ps1 -Continuous              # 无限模式,Ctrl+C 停(默认 10s 一次进度)
+pwsh ./scripts/stress-slow.ps1 -Continuous -ProgressSec 30
 pwsh ./scripts/stress-slow.ps1 -All                    # 加告警演示端点 → 会触发告警自环
 ```
 
@@ -192,9 +195,27 @@ pwsh ./scripts/stress-slow.ps1 -All                    # 加告警演示端点 �
 | 类别 | 端点与量级 |
 | --- | --- |
 | 依赖侧(秒级) | `mysql?sleepMs=1000`(依赖侧造慢边)、`kafka?op=produce`(broker 不可达约 3s)、`http?site=httpbin`(1~2s)、`grpc`(0.3s,首次建链约 4s) |
-| 业务侧(秒级) | `trace-alert-demo/slow?ms=4000`(触发 SLOW)、`/api/order/1`(8.5s,命中 Ant 规则)、`/api/export/report`、`/longTimeTask`(1s)、`/fullSample`(约 5s) |
+| 业务侧(秒级) | `trace-alert-demo/slow?ms=4000`(触发 SLOW)、`/api/order/1`(8.5s,命中 Ant 规则)、`/api/export/report`(**每请求随机 1~4s**,见下)、`/longTimeTask`(1s)、`/fullSample`(约 2~5s) |
 | 毫秒级对照 | `queryDbByMybatis`、hutool 出口自调 —— 同一进程内对比"不同依赖的差距" |
 | 告警演示(默认不含) | `trace-alert-demo/error`、`/http500` → 报错 → webhook 自环,故要显式 `-All` |
+
+**`-Continuous` 无限模式看的是"数据在积累",不是吞吐**:这一档 req/s 天花板极低
+(单请求本身就要等几秒),看着像"卡住"是正常的 —— 它在等慢端点。想看吞吐/堆/插件计数
+是否健康,用 `stress.ps1 -Continuous`。
+
+**`/api/export/report` 为什么用 `{rand:1000,4000}`**:该端点默认 `sleep(65000)`
+(Ant 规则 `/api/export/**` 拿它演示极端慢)。压测里若照搬 65s,单个请求就吃满整个循环、
+必然超时;写死一个值又只能压出一条固定耗时的线。所以路径里放占位符 `{rand:min,max}`,
+由 `HttpLoadTest` **每个请求各替换一次** → 一条路径压出连续的耗时分布。
+(占位符不替换的话 Spring 绑 int 会失败返回 400,压测断言会挂 —— 也就是"忘了替换"不可能悄悄通过。)
+演示要"65s 那一版"就直接开 `/api/export/report`(不带参数)。
+
+> **`-TimeoutMs` 默认给到 30000**(而不是 `stress.ps1` 的 10000):本档最慢端点 8.5s,
+> 并发下尾延迟会超过 10s 而攒出"网络异常"并让断言非零退出 —— 慢端点压测里超时是预期现象,不是缺陷。
+
+> **客户端超时不等于服务端没记**:客户端在 30s 放弃后,服务端仍会睡完并把**完整耗时**记进指标
+> (排查时看到 65s 的孤点,先想想是不是有脚本裸调了该端点)。
+
 
 > 稳定性观测:`-Continuous` 下每轮 `[progress]` 行含 `plugin=` 段,即插件 `/inner/sw/metrics` 的计数
 > (`rowsUpserted`/`lateDropped`/`sampleOverflow`/`endpointOverflow`/`persistErrors`/`aggregateErrors`)——
