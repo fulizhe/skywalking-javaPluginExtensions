@@ -94,7 +94,6 @@
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
     <button class="sec win" data-scope="lifetime" type="button">自启动以来</button>
   </span>
-  <button id="btn-poll" class="on presenter-hide" type="button">停止刷新</button>
   <span class="summary presenter-hide" id="summary">加载中…</span>
   <span class="presenter-only" id="scope-chip" title="演示模式下控件被收起，这一行告诉你当前看的是哪一档"></span>
 </div>
@@ -1011,24 +1010,8 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
     if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
   }
 
-  document.getElementById("btn-poll").addEventListener("click", function () {
-    var btn = document.getElementById("btn-poll");
-    if (SWPoll) {
-      // 交给统一状态：本页按钮与左下角控件是同一份真相，切后台/演示态自动停也能反映到按钮上
-      SWPoll.toggle("topology", 5000);
-      return;
-    }
-    if (pollTimer !== null) {
-      stopPolling();
-      btn.textContent = "恢复刷新";
-      btn.className = "sec";
-    } else {
-      startPolling();
-      btn.textContent = "停止刷新";
-      btn.className = "on";
-      load();
-    }
-  });
+  // 原来工具栏里那个「停止刷新」按钮已删：暂停/间隔统一由左下角控件管，两处控制只会互相打架。
+  // 它的能力没丢 —— 该控件里有「立即刷新」（一次）与「暂停刷新」（持续）。
 
 setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
@@ -1036,18 +1019,14 @@ setView("summary");
   syncViewAffordance();
   renderScopeChip();
   window.SWPresenter.mount({ page: "topology", theme: "dark", slot: "#presenter-slot" });
-  if (SWPoll) {
-    SWPoll.attach({
-      key: "topology", defaultMs: 5000, start: startPolling, stop: stopPolling,
-      onState: function (s) {
-        var btn = document.getElementById("btn-poll");
-        btn.textContent = s.paused ? "恢复刷新" : "停止刷新";
-        btn.className = s.paused ? "sec" : "on";
-      }
-    });
-  } else {
-    startPolling();
-  }
+if (SWPoll) {
+      SWPoll.attach({
+        key: "topology", defaultMs: 5000, start: startPolling, stop: stopPolling,
+        once: load
+      });
+    } else {
+      startPolling();
+    }
 })();
 </script>
 </body>

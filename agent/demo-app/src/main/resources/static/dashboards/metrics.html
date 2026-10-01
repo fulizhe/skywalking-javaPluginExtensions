@@ -153,12 +153,13 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
   <div class="main">
     <div class="head">
       <h2 id="title">Trace 指标</h2>
-      <span class="meta" id="pollStatus"><span class="dot"></span>实时 · 轮询 5s</span>
+      <span class="meta presenter-hide" id="pollStatus"><span class="dot"></span>实时 · 轮询 5s</span>
       <span class="seg presenter-hide" id="ranges">
         <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
       </span>
       <span class="meta" id="updatedAt">-</span>
-      <button class="btn presenter-hide" id="pollToggle" title="暂停 / 继续 5s 自动刷新">⏸ 停止轮询</button>
+      <!-- 原来这里的「⏸ 停止轮询」已删：暂停/间隔统一由左下角控件管，两处控制只会互相打架；
+           能力没丢 —— 该控件里有「立即刷新」（一次）与「暂停刷新」（持续）。 -->
     </div>
     <div class="err-banner" id="errBanner"></div>
     <div class="kpi-row" id="kpis"></div>
@@ -705,23 +706,20 @@ function setPolling(on){
   }
   /** 刷新状态文案只此一处写：统一控件（切后台/演示态）与本页按钮都会调它。 */
   function renderPollState(s){
-    // 只改文案，不动 className —— 本页 .btn 没有 .on 变体（只有 .seg span.on 有）
-    document.getElementById("pollToggle").textContent = s.paused ? "⏵ 开始轮询" : "⏸ 停止轮询";
+    // 只剩状态文案（按钮已删，暂停/间隔在左下角统一控件里）
     document.getElementById("pollStatus").innerHTML = s.paused
       ? '<span class="dot" style="background:var(--warn)"></span>已暂停'
       : '<span class="dot"></span>实时 · 轮询 ' + (s.ms/1000) + 's';
   }
-  $("#pollToggle").on("click", function(){
-    if (SWPoll) { SWPoll.toggle("metrics", 5000); refresh(); return; }
-    var on = !refreshTimer; if(on){ refresh(); } setPolling(on);
-  });
+  // 指标页的「立即刷新」由左下角控件承担（once: refresh），故这里不再绑按钮
   // 指标页的「结论卡」就是上面那条 KPI 行（请求总数/QPS/错误率/P95/慢调用/活跃 Endpoint），
   // 数字本来就读自 /inner/sw/metrics/query，**不另算一份**，故这里只放大、不重复渲染。
   window.SWPresenter.mount({ page: "metrics", theme: "dark" });
   if (SWPoll) {
-    // 统一刷新节奏：间隔可选 / 暂停 / 切后台自动停 / 演示模式冻结。本页按钮与左下角控件同源。
+    // 统一刷新节奏：间隔可选 / 暂停 / 立即刷新 / 切后台自动停 / 演示模式冻结
     SWPoll.attach({ key: "metrics", defaultMs: 5000, start: function(){ setPolling(true); },
-                     stop: function(){ setPolling(false); }, onState: renderPollState });
+                     stop: function(){ setPolling(false); }, once: refresh,
+                     onState: renderPollState });
   }
   refresh();
   if (!SWPoll) { setPolling(true); }

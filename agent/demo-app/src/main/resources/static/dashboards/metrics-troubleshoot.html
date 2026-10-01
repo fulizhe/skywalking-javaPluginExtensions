@@ -95,7 +95,7 @@ tbody tr.sel{background:#1d3a5c}
     <button class="rng" data-r="7d">近 7d</button>
     <button class="rng" data-r="30d">近 30d</button>
     <span style="margin-left:auto"></span>
-    <button id="pause">停止轮询</button>
+    <!-- 原来的「停止轮询」按钮已删：暂停/间隔/立即刷新统一由左下角控件管，避免两处控制打架 -->
     <span class="mut" id="updated" style="font-size:12px"></span>
   </div>
   <div id="err"></div>
@@ -291,15 +291,10 @@ function stopSchedule(){ if(timer){clearInterval(timer); timer=null;} }
 
 $(function(){
   $(".rng").on("click",function(){ setRange($(this).data("r")); });
-  $("#pause").on("click",function(){
-    if (window.SWPoll) { SWPoll.toggle("troubleshoot", 5000); return; }
-    polling=!polling; $(this).text(polling?"停止轮询":"开始轮询").toggleClass("on",!polling);
-  });
   $("#epTable thead th").on("click",function(){ var k=$(this).data("k"); if(!k)return; if(sortKey===k){sortDesc=!sortDesc;}else{sortKey=k;sortDesc=true;} refresh(); });
   refresh();
   if (window.SWPoll) {
-    SWPoll.attach({ key: "troubleshoot", defaultMs: 5000, start: schedule, stop: stopSchedule,
-      onState: function(s){ $("#pause").text(s.paused?"开始轮询":"停止轮询").toggleClass("on", !s.paused); } });
+    SWPoll.attach({ key: "troubleshoot", defaultMs: 5000, start: schedule, stop: stopSchedule, once: refresh });
   } else { schedule(); }
 });
 </script>

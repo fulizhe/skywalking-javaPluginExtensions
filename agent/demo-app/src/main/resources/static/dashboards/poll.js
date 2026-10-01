@@ -150,6 +150,19 @@
         btn.type = "button";
         box.appendChild(dot);
         box.appendChild(sel);
+        if (cfg.once) {
+            // 手动刷一次。页面顶栏那些"刷新/停止刷新"按钮已被本控件取代（避免两处控制打架），
+            // 手动刷一次的能力不能跟着一起没，所以在这里补回来。
+            var onceBtn = global.document.createElement("button");
+            onceBtn.className = "poll-btn";
+            onceBtn.type = "button";
+            onceBtn.textContent = "立即刷新";
+            onceBtn.title = "立刻取一次数据（不影响自动刷新节奏）";
+            onceBtn.addEventListener("click", function () {
+                cfg.once();
+            });
+            box.appendChild(onceBtn);
+        }
         box.appendChild(btn);
         global.document.body.appendChild(box);
         ui = { box: box, dot: dot, sel: sel, btn: btn };

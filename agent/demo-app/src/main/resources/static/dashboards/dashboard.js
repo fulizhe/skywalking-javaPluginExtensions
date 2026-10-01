@@ -845,8 +845,7 @@ function boot() {
 
     var hintBox = document.getElementById("hint");
     var contentBox = document.getElementById("content");
-    var refreshBtn = document.getElementById("refresh-btn");
-    refreshBtn.addEventListener("click", refresh);
+    // 顶栏「刷新」按钮已删（手动刷一次 → 左下角统一控件的「立即刷新」），故这里不再绑它
 
     function refresh() {
         var url = "/" + location.pathname.split("/").pop();
@@ -870,6 +869,7 @@ function boot() {
             key: "dashboard-" + p, defaultMs: page.interval,
             start: function () { pollTimer = setInterval(refresh, SWPoll.intervalMs("dashboard-" + p, page.interval)); },
             stop: function () { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } },
+            once: refresh,
             onState: function (s) {
                 document.getElementById("poll-state").textContent = s.paused
                     ? "已暂停" : ("自动刷新 " + (s.ms / 1000) + "s");
