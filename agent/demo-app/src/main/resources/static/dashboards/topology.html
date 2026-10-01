@@ -55,6 +55,11 @@
   .caveats code { color: var(--blue-soft); }
   .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 12px; align-items: start; }
   @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  /* 「清单」档：关系图收起、表格占满宽度。清单是**汇报视角**（"我伸出去过哪些手"），
+     不是第三种画法 —— 留着半屏图只会让人把累计表的数字和窗口边的图并排读，那正是要避免的混读。 */
+  body.view-list .grid { grid-template-columns: minmax(0, 1fr); }
+  body.view-list #chart-panel { display: none; }
+  body.view-list .table-wrap { max-height: 720px; }
   .panel { min-width: 0; overflow: hidden; background: var(--surface);
            border: 1px solid var(--border); border-radius: 6px; }
   .panel h2 { margin: 0; padding: 8px 12px; font-size: 13px; color: var(--blue-soft);
@@ -77,6 +82,12 @@
   td.num { text-align: right; font-family: monospace; }
   tbody tr:hover { background: var(--surface-raised); cursor: pointer; }
   td .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  /* 清单档的可点列头：排序是这一档唯一的交互，得让它看起来可点 */
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #fff; }
+  th.sortable.on { color: var(--blue-soft); }
+  th .arrow { font-size: 9px; opacity: .85; }
+  td .sub { color: var(--muted); font-size: 11px; }
   .empty { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.8; }
   .foot { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.8; }
   .foot a { color: var(--blue-soft); }
@@ -89,6 +100,7 @@
   <span class="field presenter-hide">视图
     <button id="btn-summary" class="sec" type="button">总览</button>
     <button id="btn-detail" type="button">明细</button>
+    <button id="btn-list" type="button">清单</button>
   </span>
   <span class="field presenter-hide">时间窗
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
@@ -110,6 +122,10 @@
           同理，访问 3 个不同站点的 HTTP 也<b>只是 1 个 Http 节点</b>，不是 3 个依赖）。</li>
       <li><b>总览档左列只有一个「本服务」节点</b>，它是窗口内全部入口端点的<b>聚合</b>
           （合计调用 / 合计错误 / 覆盖端点数），端点维度在<b>明细档</b>与本页<b>边列表</b>里看。</li>
+      <li><b>「清单」档不看时间窗</b>，恒为<b>进程累计</b>（自启动以来，一行一个外部依赖）——
+          它回答的是"<b>这个进程伸出去过哪些手</b>"，用来给资源申请 / 拆单体当论据，与"此刻谁在调谁"是两件事。
+          该档下关系图会收起、表格占满宽度：<b>不并排展示</b>，免得累计表的数字被当成窗口边的图读。
+          点列头可排序，点行回到总览档。</li>
       <li><b>明细档</b>的依赖节点标签取该边上去重后的<b>出口操作名</b>（每边最多 8 个，超出会截断并标 <code>+N</code>；
           完整列表看节点 tooltip）。<b>总览档</b>只显示组件类型。</li>
       <li>节点颜色与标记的判据是<b>边级错误率</b>（取自出口 span 的 <code>isError</code>），
@@ -134,7 +150,7 @@
   </section>
 
   <div class="grid">
-    <div class="panel">
+    <div class="panel" id="chart-panel">
       <h2><span>调用关系图</span><span class="hint" id="chart-hint"></span></h2>
       <div id="chart"></div>
       <div class="legend">
@@ -153,7 +169,7 @@
     </div>
 
     <div class="panel">
-      <h2><span>边列表</span><span class="hint" id="table-hint"></span></h2>
+      <h2><span id="table-title">边列表</span><span class="hint" id="table-hint"></span></h2>
       <div class="table-wrap">
         <table>
           <thead>
@@ -199,7 +215,9 @@
   ];
 
   var state = { view: "summary", minutes: 5, scope: "window", edges: [], dependencies: [],
-    counters: {}, rawEdgeCount: 0, lifetimeSinceMs: 0 };
+    counters: {}, rawEdgeCount: 0, lifetimeSinceMs: 0,
+    // 清单档的排序。默认按累计调用降序 —— 读口本来就这么给，前端只是把它变成可点的。
+    sortKey: "requestCount", sortDir: -1 };
   var chart = null;
 
   function slaColor(rate) {
@@ -424,6 +442,15 @@
     return fetch(path).then(function (r) { return r.json(); });
   }
 
+  /** 顶栏摘要：清单档与「自启动以来」档讲的同一件事（依赖清单），故共用一份措辞。 */
+  function depSummaryText() {
+    var list = state.dependencies || [];
+    var total = list.reduce(function (s, d) { return s + (Number(d.requestCount) || 0); }, 0);
+    var since = state.lifetimeSinceMs ? fmtClock(state.lifetimeSinceMs) : "?";
+    return (state.enabled ? "" : "[聚合未启用] ")
+      + "自启动以来 " + list.length + " 个依赖 · 累计 " + total + " 次调用 · 起点 " + since;
+  }
+
   function load() {
     var summary = document.getElementById("summary");
     summary.textContent = "加载中…";
@@ -446,11 +473,7 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
         state.edges = [];
         state.rawEdgeCount = 0;
         render();
-        var since = state.lifetimeSinceMs ? fmtClock(state.lifetimeSinceMs) : "?";
-        summary.textContent = (state.enabled ? "" : "[聚合未启用] ")
-          + "自启动以来 " + state.dependencies.length + " 个依赖 · 累计 "
-          + (state.dependencies.reduce(function (s, d) { return s + (Number(d.requestCount) || 0); }, 0))
-          + " 次调用 · 起点 " + since;
+        summary.textContent = depSummaryText();
         return;
       }
       var edges = (data && data.edges) ? data.edges : [];
@@ -462,10 +485,13 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
       state.rawEdgeCount = kept.length;
       render();
       var range = fmtClock(fromBucket * 60000) + " – " + fmtClock((nowBucket + 1) * 60000);
-      summary.textContent = (state.enabled ? "" : "[聚合未启用] ")
-        + "边 " + state.edges.length + "（分钟桶 " + (state.rawEdgeCount || 0) + "）"
-        + " · 窗口 " + range
-        + (state.truncated ? " · [已截断]" : "");
+      // 清单档下顶栏也讲依赖清单：这一档的表是累计口径，若顶栏还报"窗口边 N 条"，
+      // 观众会把两个口径的数字并排读 —— 那正是页内 caveats 反复劝阻的混读。
+      summary.textContent = state.view === "list" ? depSummaryText()
+        : (state.enabled ? "" : "[聚合未启用] ")
+          + "边 " + state.edges.length + "（分钟桶 " + (state.rawEdgeCount || 0) + "）"
+          + " · 窗口 " + range
+          + (state.truncated ? " · [已截断]" : "");
       presenterConclusion(data);
     }).catch(function (e) {
       summary.textContent = "加载失败: " + e;
@@ -480,6 +506,11 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
   }
 
   function render() {
+    syncListAffordance();
+    if (state.view === "list") {
+      renderListTable();
+      return;
+    }
     if (state.scope === "lifetime") {
       renderLifetimeChart();
       renderLifetimeTable();
@@ -487,6 +518,19 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
     }
     renderChart();
     renderTable();
+  }
+
+  /**
+   * 清单档的版式开关：收起关系图、表格标题改成"依赖清单"。
+   * 放在 render() 里而不是 setView() 里，是因为每次轮询都会重渲染 —— 口径切换
+   * （时间窗按钮）也要跟着把版式摆对，不能只靠点视图按钮这一条路径。
+   */
+  function syncListAffordance() {
+    var isList = state.view === "list";
+    // 用 classList 而不是改写 className —— presenter.js 也在同一个 body 上切 presenter-on，
+    // 直接重写 className 属于跨模块抢写（今天恰好没事，改一处就可能静默踩掉演示态）。
+    document.body.classList.toggle("view-list", isList);
+    document.getElementById("table-title").textContent = isList ? "依赖清单（谁在调我）" : "边列表";
   }
 
   /**
@@ -594,6 +638,151 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
     }, true);
   }
 
+  /**
+   * 「清单」档：**组件级的进程累计依赖清单**，一行一个外部依赖。
+   *
+   * <p>为什么单独一档而不是并进「总览 / 明细」：那两档回答的是"此刻谁在调谁"（窗口内的边），
+   * 清单回答的是"<b>这个进程伸出去过哪些手</b>"（自启动以来的累计）。后者是给资源申请 / 拆单体
+   * 决策当论据用的 —— "对外依赖 5 类，其中 Cache/MQ 是新引入的" —— 它不该跟着时间窗跳变。
+   *
+   * <p>口径纪律：清单**恒为进程累计**，不看时间窗。所以档位标签写死"自启动以来"，
+   * 也不会和窗口边的图并排出现（那一档里图是收起的）。
+   *
+   * <p>数据源就是读口无条件附带的 {@code dependencies}（{@code EdgeLifetimeRow}）：组件名 / 层 /
+   * 累计调用 / 累计错误 / 错误率 / 首末见分钟桶 / 去重出口操作名。行数 = 该数组长度，
+   * 不分页、不过滤 —— 这一页要能当"清单"用，缺行比多列严重得多。
+   */
+  var LIST_COLS = [
+    { key: "component", label: "依赖" },
+    { key: "spanLayer", label: "层" },
+    { key: "requestCount", label: "累计调用", num: true },
+    { key: "errorCount", label: "累计错误", num: true },
+    { key: "errorRate", label: "错误率", num: true },
+    { key: "firstSeenBucket", label: "首次出现" },
+    { key: "lastSeenBucket", label: "最近出现" },
+    { key: "opCount", label: "出口操作名" }
+  ];
+
+  function depName(d) {
+    return String(d.componentName || ("component-" + d.componentId));
+  }
+
+  function depRate(d) {
+    var n = Number(d.requestCount) || 0;
+    return n > 0 ? (Number(d.errorCount) || 0) / n : 0;
+  }
+
+  /** 「距进程启动多久」—— 用来区分"一直都有"与"压测才开始碰"（清单的完成判据之一）。 */
+  function sinceStart(bucket) {
+    if (!state.lifetimeSinceMs) { return ""; }
+    var ms = (Number(bucket) || 0) * 60000 - state.lifetimeSinceMs;
+    var m = ms <= 30000 ? 0 : Math.round(ms / 60000);
+    if (m < 1) { return " 起点"; }
+    if (m < 60) { return " +" + m + "m"; }
+    return " +" + Math.floor(m / 60) + "h" + ((m % 60) ? (m % 60) + "m" : "");
+  }
+
+  function cmpStr(a, b) {
+    a = String(a); b = String(b);
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }
+
+  /**
+   * 排序：读口已按累计调用降序返回，这里再加一层点列头 ——
+   * 汇报场景经常要换口径（谁最不稳定 / 谁是新引入的），不该只能看一个固定序。
+   * 数值相等时按组件名兜底，否则每次刷新行序会乱跳（读口序只按调用量给）。
+   */
+  function sortDeps(list) {
+    var key = state.sortKey;
+    var dir = state.sortDir;
+    function val(d) {
+      if (key === "component") { return depName(d); }
+      if (key === "spanLayer") { return String(d.spanLayer || ""); }
+      if (key === "errorRate") { return depRate(d); }
+      if (key === "opCount") { return (d.operations && d.operations.length) || 0; }
+      return Number(d[key]) || 0;
+    }
+    return list.slice().sort(function (a, b) {
+      var va = val(a), vb = val(b);
+      var out = (typeof va === "string") ? cmpStr(va, vb) : (va - vb);
+      if (out !== 0) { return dir * out; }
+      return cmpStr(depName(a), depName(b));
+    });
+  }
+
+  function listHead() {
+    var head = document.getElementById("edge-rows").closest("table").querySelector("thead");
+    head.innerHTML = "<tr>" + LIST_COLS.map(function (c) {
+      var on = state.sortKey === c.key;
+      var arrow = on ? "<span class=\"arrow\">" + (state.sortDir < 0 ? "▼" : "▲") + "</span>" : "";
+      var next = on ? (state.sortDir < 0 ? "升序" : "降序") : (c.num ? "降序" : "升序");
+      return "<th class=\"sortable" + (c.num ? " num" : "") + (on ? " on" : "") + "\" data-k=\"" + c.key + "\""
+        + " title=\"点一下按" + c.label + next + "排\">" + c.label + arrow + "</th>";
+    }).join("") + "</tr>";
+    Array.prototype.forEach.call(head.querySelectorAll("th[data-k]"), function (th) {
+      th.addEventListener("click", function () {
+        var k = th.getAttribute("data-k");
+        if (state.sortKey === k) {
+          state.sortDir = -state.sortDir;          // 同一列：翻方向
+        } else {
+          state.sortKey = k;
+          state.sortDir = LIST_COLS.filter(function (c) { return c.key === k; })[0].num ? -1 : 1;
+        }
+        renderListTable();
+      });
+    });
+  }
+
+  function renderListTable() {
+    var tbody = document.getElementById("edge-rows");
+    var empty = document.getElementById("empty");
+    var list = state.dependencies || [];
+    listHead();
+    tbody.innerHTML = "";
+    if (!list.length) {
+      empty.style.display = "";
+      empty.innerHTML = depEmptyHtml();
+      document.getElementById("table-hint").textContent = "";
+      return;
+    }
+    empty.style.display = "none";
+    var rows = sortDeps(list);
+    tbody.innerHTML = rows.map(function (d) {
+      var n = Number(d.requestCount) || 0;
+      var err = Number(d.errorCount) || 0;
+      var rate = depRate(d);
+      var ops = Array.isArray(d.operations) ? d.operations : [];
+      var shown = shorten(ops.slice(0, 3).join(", ") || "-", 44);
+      var more = ops.length > 3 ? " +" + (ops.length - 3) : "";
+      var trunc = d.operationsTruncated ? "<span class=\"sub\"> 已截断(上限 8)</span>" : "";
+      return "<tr title=\"点这行回到总览档看图\">"
+        + "<td><span class=\"dot\" style=\"background:" + slaColor(rate) + "\"></span>"
+        + escapeHtml(shorten(depName(d), 26)) + "</td>"
+        + "<td>" + escapeHtml(d.spanLayer || "-") + "</td>"
+        + "<td class=\"num\">" + n + "</td><td class=\"num\">" + err + "</td>"
+        + "<td class=\"num\">" + (rate > 0 ? fmtPct(rate) : "-") + "</td>"
+        + "<td>" + fmtClock(Number(d.firstSeenBucket) * 60000)
+        + "<span class=\"sub\">" + escapeHtml(sinceStart(d.firstSeenBucket)) + "</span></td>"
+        + "<td>" + fmtClock((Number(d.lastSeenBucket) + 1) * 60000) + "</td>"
+        + "<td title=\"" + escapeAttr(ops.join(", ")) + "\">" + escapeHtml(shown) + more + trunc + "</td>"
+        + "</tr>";
+    }).join("");
+    Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr) {
+      tr.addEventListener("click", function () { setView("summary"); });
+    });
+    var dropped = Number(state.counters.lifetimeDropped) || 0;
+    document.getElementById("table-hint").textContent =
+      rows.length + " 行（= 读口 dependencies 长度）· 进程累计 · 点列头排序 · 点行回总览"
+      + (dropped > 0 ? " · [超出 512 上限的依赖已丢弃 " + dropped + " 个]" : "");
+  }
+
+  /** 清单与累计档共用同一段空态文案：同一份数据，不该有两种解释。 */
+  function depEmptyHtml() {
+    return "本进程还没有调过任何外部依赖。<br>"
+      + "<b>依赖边只存在进程内存里，重启即清零</b>（指标大屏的数字落 H2 跨重启保留，两页口径不同）。<br>"
+      + "先造点流量，例如 <code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
+  }
+
   function renderLifetimeTable() {
     var tbody = document.getElementById("edge-rows");
     var empty = document.getElementById("empty");
@@ -603,9 +792,7 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
       empty.style.display = "";
       // 说清"为什么空"：依赖边只在进程内存里，**重启即清零**，与落 H2 的指标大屏口径不同。
       // 不写这句，演示时"拓扑图空 / 指标图有数据"会被当成页面坏了。
-      empty.innerHTML = "本进程还没有调过任何外部依赖。<br>"
-        + "<b>依赖边只存在进程内存里，重启即清零</b>（指标大屏的数字落 H2 跨重启保留，两页口径不同）。<br>"
-        + "先造点流量，例如 <code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
+      empty.innerHTML = depEmptyHtml();
       document.getElementById("table-hint").textContent = "";
       return;
     }
@@ -935,15 +1122,16 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
 
   /**
    * 「自启动以来」只有一种画法（组件级星图），**没有"明细"这一说**。
-   * 该档下把视图切换置灰并强制回到总览 —— 留着可点的按钮只会让人以为明细档也是累计口径。
+   * 该档下把总览/明细置灰并强制回到总览 —— 留着可点的按钮只会让人以为明细档也是累计口径。
+   * 但**「清单」始终可点**：它本来就是累计口径的表，与时间窗无关，正是那一档该给的视角。
    */
   function syncViewAffordance() {
-    var lifetime = state.scope === "summary-lifetime" || state.scope === "lifetime";
+    var lifetime = state.scope === "lifetime";
     var btnSummary = document.getElementById("btn-summary");
     var btnDetail = document.getElementById("btn-detail");
     btnSummary.disabled = lifetime;
     btnDetail.disabled = lifetime;
-    if (lifetime) {
+    if (lifetime && state.view !== "list") {
       state.view = "summary";
       btnSummary.className = "on";
       btnDetail.className = "sec";
@@ -958,16 +1146,20 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
   function renderScopeChip() {
     var chip = document.getElementById("scope-chip");
     if (!chip) { return; }
-    var view = state.view === "summary" ? "总览" : "明细";
-    var scope = state.scope === "lifetime" ? "自启动以来" : "近 " + state.minutes + " 分钟";
+    var view = state.view === "summary" ? "总览" : (state.view === "detail" ? "明细" : "清单");
+    // 清单恒为进程累计口径，不随时间窗变 —— 标签必须写死，否则会被读成"近 5 分钟的清单"
+    var scope = (state.scope === "lifetime" || state.view === "list")
+      ? "自启动以来" : "近 " + state.minutes + " 分钟";
     chip.textContent = view + " · " + scope;
   }
 
   function setView(v) {
-    if (state.scope === "lifetime") { return; }
+    // 「自启动以来」档下只允许切到清单（累计口径那一档），总览/明细仍按上面的规则挡着
+    if (state.scope === "lifetime" && v !== "list") { return; }
     state.view = v;
     document.getElementById("btn-summary").className = v === "summary" ? "on" : "sec";
     document.getElementById("btn-detail").className = v === "detail" ? "on" : "sec";
+    document.getElementById("btn-list").className = v === "list" ? "on" : "sec";
     // 档位标签跟着视图一起变：否则"先在普通模式切到明细、再进演示模式"会显示旧档位
     renderScopeChip();
     load();
@@ -975,6 +1167,7 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
 
   document.getElementById("btn-summary").addEventListener("click", function () { setView("summary"); });
   document.getElementById("btn-detail").addEventListener("click", function () { setView("detail"); });
+  document.getElementById("btn-list").addEventListener("click", function () { setView("list"); });
 Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (b) {
     b.addEventListener("click", function () {
       Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (x) { x.className = "sec win"; });
