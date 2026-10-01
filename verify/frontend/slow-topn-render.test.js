@@ -41,7 +41,15 @@ function stubNode() {
   };
 }
 const nodes = {};
-['hint', 'note', 'empty', 'scope-chip', 'rows'].forEach((id) => { nodes[id] = stubNode(); });
+// 页面用到的全部 id 都得有桩 —— 少一个就会在 render 里抛 "Cannot read properties of null"，
+// 那正是这套测试要抓的失败模式（漏一个 id 就等于测试自己先崩，测不到东西）。
+['hint', 'note', 'empty', 'scope-chip', 'rows', 'familyRows', 'familyHost', 'endpointHost',
+ 'mainTitle', 'rankLegend', 'familyChips', 'trendSummary', 'trendCharts', 'trendLegend',
+ 'trendNote', 'rankChart', 'p95Chart'].forEach((id) => { nodes[id] = stubNode(); });
+// 视图切换要读写 display，族展开要读 dataset
+nodes.familyHost.style.display = '';
+nodes.endpointHost.style.display = 'none';
+nodes.rankLegend.style.display = '';
 
 // range.js 必须在设置 global.window **之前** require：它是浏览器 IIFE，
 // 检测到 window 就把 SWRanges 挂到 window 上（Node 里则挂到 module.exports），
@@ -58,12 +66,15 @@ global.document = {
 const src = fs.readFileSync(PAGE, 'utf8');
 const body = [
   slice(src, 'var currentRange = SWRanges.DEFAULT_RANGE;', 'function load(){'),  // 状态/SORTS/格式化/ranked/delta/render
-  slice(src, 'function load(){', '/** 演示模式结论卡'),                          // load
-  'function presenterConclusion(){}',                                          // 演示结论不参与本测试
+  slice(src, 'function load(){', 'function presenterConclusion'),                  // load
+  'function presenterConclusion(){}',                                           // 演示结论不参与本测试
   'module.exports = {',
   '  render: render, ranked: ranked, delta: delta, load: load,',
+  '  familyOf: familyOf, familyAgg: familyAgg, bySearch: bySearch,',
   '  setSort: function(k){ sortKey = k; }, setN: function(n){ topN = n; },',
   '  setRange: function(r){ currentRange = r; },',
+  '  setView: function(v){ viewMode = v; },',
+  '  setSearch: function(s){ searchText = s; },',
   '  setTruncated: function(v){ aggTruncated = v; },',
   '  resetRanks: function(){ lastRanks = null; }',
   '};',
@@ -126,7 +137,7 @@ const ROWS = [
 
 console.log('== 首次渲染：不抛，且名次/量级/证据链都进 HTML ==');
 let threw = null;
-try { M.render(ROWS); } catch (e) { threw = e; }
+try { M.setView('endpoint'); M.render(ROWS); } catch (e) { threw = e; }
 ok('render 不抛异常（模板里未定义变量会在这里暴露）', !threw, threw && threw.message);
 if (threw) { console.log('\n渲染抛异常，终止'); process.exit(1); }
 
@@ -149,6 +160,7 @@ ok('首次渲染 hint 不写「名次变化 vs」（没有基准可比）',
 ok('note 写明「不是慢调用次数榜」', nodes.note.innerHTML.indexOf('慢调用次数榜') >= 0);
 
 console.log('== 名次变化只在换档时出现（同档轮询不抖）==');
+M.setView('endpoint');
 M.render(ROWS);
 hasNot('同档再刷不产生 ▲', 'class="up"');
 hasNot('同档再刷不产生 ▼', 'class="down"');
@@ -156,6 +168,7 @@ hasNot('同档再刷不产生「新」', 'class="fresh"');
 
 const SHIFTED = ROWS.map((r) => (r.endpoint === 'GET:/api/export/report'
   ? Object.assign({}, r, { p95: 9000 }) : r));
+M.setView('endpoint');
 M.setRange('1h');
 M.render(SHIFTED);
 ok('切时间窗后 hint 写明 vs 的是哪一档',
@@ -165,6 +178,7 @@ has('order/1 后退一名', 'class="down">▼1<');
 has('queryDbByJdbc 名次不变仍是 3', '<span class="no">3</span>');
 
 console.log('== 换排序依据也算出档 ==');
+M.setView('endpoint');
 M.setSort('requestCount');
 M.render(SHIFTED);
 ok('按请求数降序 → 量最大的 queryDbByJdbc 第一',
@@ -173,26 +187,27 @@ ok('按请求数降序 → 量最大的 queryDbByJdbc 第一',
 ok('hint 跟着更新为「请求数降序」', nodes.hint.textContent.indexOf('请求数降序') >= 0, nodes.hint.textContent);
 
 console.log('== 前 N 截断 ==');
-M.resetRanks(); M.setSort('p95'); M.setN(2);
+M.resetRanks(); M.setView('endpoint'); M.setSort('p95'); M.setN(2);
 M.render(ROWS);
 ok('只渲染前 2 行', (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length === 2,
    'rows=' + (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length);
 ok('hint 写明 前 2 / 共 3', nodes.hint.textContent.indexOf('前 2 / 共 3 个') >= 0, nodes.hint.textContent);
 
 console.log('== 边界 ==');
-M.resetRanks(); M.setN(10); M.setRange('24h');   // 先复位窗口：下面断言写的是近 24h
+M.resetRanks(); M.setView('endpoint'); M.setN(10); M.setRange('24h');   // 先复位窗口：下面断言写的是近 24h
 M.render([]);ok('空数据切到空态（不显示残留行）', nodes.empty.innerHTML.indexOf('还没有 endpoint 指标') >= 0);
 ok('空数据时 hint 说明是哪个窗口', nodes.hint.textContent.indexOf('近 24h') >= 0, nodes.hint.textContent);
+M.setView('endpoint');
 M.render(ROWS);
 M.setTruncated(true);
 M.render(ROWS);
 ok('服务端截断时如实提示（不静默隐藏）', nodes.note.innerHTML.indexOf('已截断') >= 0);
 M.setTruncated(false);
-M.resetRanks(); M.setSort('worstP95');
+M.setView('endpoint'); M.resetRanks(); M.setSort('worstP95');
 M.render([{ endpoint: 'E', requestCount: 5, p95: 2, worstP95: null }]);
 ok('最差 P95 缺失的行不进榜（按该依据排序时无值可排）',
   nodes.empty.innerHTML.indexOf('还没有 endpoint 指标') >= 0);
-M.resetRanks(); M.setSort('p95');
+M.setView('endpoint'); M.resetRanks(); M.setSort('p95');
 M.render([{ endpoint: 'E', requestCount: 5, p95: 2, worstP95: null }]);
 ok('worstP95 为 null 的行照常进榜，但该列显示 - 而不是 0（0 会被读成「分位是 0」）',
   nodes.rows.innerHTML.indexOf('<td class="num">-</td>') >= 0
@@ -201,6 +216,7 @@ ok('worstP95 为 null 的行照常进榜，但该列显示 - 而不是 0（0 会
 console.log('== 全站合计行 "*" 必须被剔除（真实数据下它必然在返回里）==');
 // 指标聚合把全局桶也放进同一张表，endpoint = "*"。它不是端点 ——
 // 不剔的话它会作为一个"端点"排进榜里，而夹具里没有这行，所以只能在这里补。
+M.setView('endpoint');
 M.resetRanks();
 M.render(ROWS.concat([{
   endpoint: '*', requestCount: 47052, errorCount: 5009, slowCount: 3146,
@@ -216,6 +232,64 @@ ok('"*" 行也没把行数撑多（仍是 3 行）',
   'rows=' + (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length);
 ok('hint 的"共 N 个"按剔 "*" 后的真实端点数算',
   nodes.hint.textContent.indexOf('共 3 个') >= 0, nodes.hint.textContent);
+
+console.log('== 族视图（默认视角：端点很多时先收敛）==');
+// 5 个端点，其中 3 个同族 —— 与真实 demo 的 deps-demo 形状一致
+const FAM = ROWS.concat([
+  { endpoint: 'GET:/api/deps-demo/redis', requestCount: 880, errorCount: 4, slowCount: 9,
+    errorRate: 0.004, slowRate: 0.01, p50: 3, p95: 9, p99: 22, worstP95: 60, bucketCount: 70 },
+  { endpoint: 'GET:/api/deps-demo/kafka', requestCount: 210, errorCount: 10, slowCount: 46,
+    errorRate: 0.05, slowRate: 0.22, p50: 3000, p95: 3050, p99: 3200, worstP95: 3200, bucketCount: 33 },
+  { endpoint: 'GET:/api/deps-demo/mysql', requestCount: 300, errorCount: 99, slowCount: 30,
+    errorRate: 0.33, slowRate: 0.10, p50: 30, p95: 60, p99: 900, worstP95: 3000, bucketCount: 41 }
+]);
+M.setView('family'); M.resetRanks(); M.setRange('24h');
+M.render(FAM);
+ok('族视图不把端点写进行表（单端点表隐藏）', nodes.endpointHost.style.display === 'none');
+ok('族视图显示族表', nodes.familyHost.style.display === '');
+ok('端点名次图例在族视图下隐藏（族不排端点名次）', nodes.rankLegend.style.display === 'none');
+ok('deps-demo 的 3 个端点收敛成 1 个族',
+  nodes.familyRows.innerHTML.indexOf('GET:/api/deps-demo') >= 0
+  && (nodes.familyRows.innerHTML.match(/data-fam='GET:\/api\/deps-demo'/g) || []).length === 1,
+  'got: ' + nodes.familyRows.innerHTML.slice(0, 300));
+ok('6 个端点收敛成 4 个族（3 个 deps-demo 并成 1 个）',
+  (nodes.familyRows.innerHTML.match(/data-fam=/g) || []).length === 4,
+  'families=' + (nodes.familyRows.innerHTML.match(/data-fam=/g) || []).length);
+ok('族行给出该族的端点数（deps-demo = 3）',
+  nodes.familyRows.innerHTML.indexOf(">3</td>") >= 0,
+  'got: ' + nodes.familyRows.innerHTML.slice(0, 400));
+ok('顶部有按名次排的族脉冲条（chips）',
+  (nodes.familyChips.innerHTML.match(/class='fm-chip'/g) || []).length === 4,
+  'chips=' + (nodes.familyChips.innerHTML.match(/class='fm-chip'/g) || []).length);
+ok('脉冲条按名次排序（#1 是最慢的族）',
+  nodes.familyChips.innerHTML.indexOf("#1") < nodes.familyChips.innerHTML.indexOf("#2"));
+ok('脉冲条带条宽（相对榜首的占比）',
+  /fm-cb'><i style='width:\d+%'/.test(nodes.familyChips.innerHTML),
+  'got: ' + nodes.familyChips.innerHTML.slice(0, 220));
+ok('hint 报「N 个前缀族 / M 个端点」',
+  /(\d+) 个前缀族 \/ (\d+) 个端点/.test(nodes.hint.textContent), nodes.hint.textContent);
+ok('note 在族视图下点明「不是层归类」', nodes.note.innerHTML.indexOf('没有 layer 字段') >= 0);
+
+console.log('== 族名推导规则 ==');
+ok('取路径前两段', M.familyOf('GET:/api/deps-demo/mysql') === 'GET:/api/deps-demo',
+   M.familyOf('GET:/api/deps-demo/mysql'));
+ok('单段路径不切碎', M.familyOf('GET:/queryDbByJdbc') === 'GET:/queryDbByJdbc',
+   M.familyOf('GET:/queryDbByJdbc'));
+ok('两段刚好是族', M.familyOf('GET:/api/order') === 'GET:/api/order', M.familyOf('GET:/api/order'));
+ok('无动词前缀也成立', M.familyOf('/api/order/1') === '/api/order', M.familyOf('/api/order/1'));
+ok('query 参数不参与分族', M.familyOf('GET:/api/x/y?a=1') === 'GET:/api/x', M.familyOf('GET:/api/x/y?a=1'));
+
+console.log('== 搜索（本地过滤，不发请求）==');
+M.setSearch('deps-demo');
+M.render(FAM);
+ok('过滤后只留命中的族', (nodes.familyRows.innerHTML.match(/data-fam=/g) || []).length === 1,
+  'families=' + (nodes.familyRows.innerHTML.match(/data-fam=/g) || []).length);
+ok('hint 标明是过滤命中', nodes.hint.textContent.indexOf('过滤命中') >= 0, nodes.hint.textContent);
+M.setSearch('不存在的端点xyz');
+M.render(FAM);
+ok('无命中时给空态而不是空白', nodes.empty.innerHTML.indexOf('没有端点匹配') >= 0);
+ok('无命中时不渲染任何族行', nodes.familyRows.innerHTML === '');
+M.setSearch('');
 
 console.log(fails ? '\n断言失败 ' + fails + ' 条' : '\n全部通过');
 process.exit(fails ? 1 : 0);
