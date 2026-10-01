@@ -13,8 +13,9 @@ services:
     working_dir: /src
     volumes:
       - ..:/src
-      # 依赖缓存:首次下载(经 agent/settings.xml 的 aliyun 镜像),后续复用
-      - verify-m2:/root/.m2
+      # 依赖缓存:首次下载(经 agent/settings.xml 的 aliyun 镜像),后续复用。
+      # 默认命名卷(本地);CI 用 VERIFY_M2_VOLUME 指向宿主目录,好让 actions/cache 存/取。
+      - ${VERIFY_M2_VOLUME:-verify-m2}:/root/.m2
     environment:
       SCENARIO: ${SCENARIO:-logfile-reporter}
       # 版本矩阵:版本号 + 注入的 maven 属性名(由场景 scenario.conf 的 MATRIX_PROPERTY 决定)

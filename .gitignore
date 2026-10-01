@@ -55,6 +55,9 @@ dependency-reduced-pom.xml
 trace-payload.capped.db
 .openchamber/
 
+# CI 上 verify 场景的 maven 仓库缓存目录(见 .github/workflows/verify.yml)
+.m2-verify/
+
 # Python(agent/demo-app/deploy/deploy_remote.py)
 __pycache__/
 *.py[cod]

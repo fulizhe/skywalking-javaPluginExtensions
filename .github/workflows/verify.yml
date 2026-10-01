@@ -21,9 +21,45 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # compose 把这个路径挂到容器的 /root/.m2;放在 workspace 内便于 actions/cache 取存
+      VERIFY_M2_VOLUME: ${{ github.workspace }}/.m2-verify
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # CI 每次是全新 runner:命名卷必然为空,plugins + demo-app(Spring Boot /
+      # jedis / kafka / grpc / hutool …)的全部依赖都要重下。缓存仓库目录后,
+      # maven 只需补拉 pom 变更涉及的部分;pom 变了就换 key,restore-keys 兜底沿用旧的。
+      - name: Prepare Maven cache dir
+        run: mkdir -p "$VERIFY_M2_VOLUME"
+
+      - name: Cache Maven local repo
+        uses: actions/cache@v4
+        with:
+          path: .m2-verify
+          key: m2-${{ runner.os }}-${{ hashFiles('agent/settings.xml', 'agent/**/pom.xml') }}
+          restore-keys: |
+            m2-${{ runner.os }}-
+
+      # 运行器镜像本身也逐层缓存:apt + agent 压缩包 + 两个 Maven 基础镜像
+      # (~1GB 拉取)只在首次付代价,之后命中 gha 层缓存。
+      # 标签必须与 verify/docker-compose.yaml 的 services.verify.image 一致,
+      # 否则下一步的 compose run 找不到本地镜像会回退去现场构建。
+      # ignore-error:缓存导出失败(fork PR 只读、~1GB 导出触发 maximum timeout)
+      # 不该拖垮整个验证 —— 退化成每次重建而已。
+      - name: Build verify runner image (cached layers)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: verify/Dockerfile
+          load: true
+          push: false
+          tags: skywalking-plugin-verify:9.4.0
+          cache-from: type=gha,scope=verify-runner
+          cache-to: type=gha,scope=verify-runner,mode=max,ignore-error=true
+
       - name: Run logfile-reporter scenario (containerized bash loop)
+        env:
+          VERIFY_SKIP_BUILD: '1'
         run: bash verify/run.sh --scenario logfile-reporter

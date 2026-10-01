@@ -9,6 +9,9 @@
 #   bash verify/run.sh --scenario override-httpclient --matrix   # 跑版本矩阵
 #   bash verify/run.sh --list                           # 列出场景
 #
+# 环境变量:
+#   VERIFY_SKIP_BUILD=1  跳过运行器镜像构建(镜像已备好:CI 用 buildx + gha 层缓存预先 build)
+#
 # 版本矩阵:场景的 support-version.list 每行一个版本,--matrix 时以
 # -D<场景声明的 MATRIX_PROPERTY>=<版本> 构建 demo-app(见 scenario.conf)。
 set -uo pipefail
@@ -19,7 +22,7 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yaml"
 SCENARIOS_DIR="$SCRIPT_DIR/scenarios"
 
 usage() {
-  sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 scenario_args=()
@@ -48,10 +51,14 @@ if [[ ${#scenario_args[@]} -eq 0 ]]; then
   exit 2
 fi
 
-echo "[..] 构建 verify 运行器镜像"
-if ! docker compose -f "$COMPOSE_FILE" build verify; then
-  echo "[FAIL] 运行器镜像构建失败"
-  exit 1
+if [[ "${VERIFY_SKIP_BUILD:-0}" == "1" ]]; then
+  echo "[..] VERIFY_SKIP_BUILD=1,跳过运行器镜像构建(镜像应已备好)"
+else
+  echo "[..] 构建 verify 运行器镜像"
+  if ! docker compose -f "$COMPOSE_FILE" build verify; then
+    echo "[FAIL] 运行器镜像构建失败"
+    exit 1
+  fi
 fi
 
 declare -a failed=()

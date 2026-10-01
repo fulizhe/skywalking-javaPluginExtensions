@@ -30,6 +30,19 @@ bash verify/run.sh --list
 首次运行会构建运行器镜像(下载 agent + 两个 Maven 基础镜像)并下载依赖(经 `agent/settings.xml` 的
 aliyun 镜像);之后依赖缓存于 Docker 命名卷 `skywalking-verify_verify-m2`。
 
+CI 上每次是全新 runner,命名卷必为空 —— 故 workflow 用 `VERIFY_M2_VOLUME` 把容器 `/root/.m2`
+换挂到宿主目录并交给 `actions/cache`:`m2-<os>-<hash(settings.xml + agent/**/pom.xml)>` 为 key,
+前缀 `m2-<os>-` 作 restore 兜底,于是 pom 未变时依赖不必重下。本地跑不用管这个变量,默认仍是命名卷。
+
+运行器镜像的两块固定开销(两个 Maven 基础镜像 + `apt` + agent 压缩包,约 1GB)在 CI 上同样逐次重付。
+workflow 改用 `docker/build-push-action` 预先 build 并挂 `cache-from/to: type=gha`(全层),
+再用 `VERIFY_SKIP_BUILD=1` 让 `run.sh` 跳过自带的 build。注意两点:
+
+- 标签须与 `docker-compose.yaml` 的 `services.verify.image` 一致 —— compose 只在镜像**缺失**时才
+  现场构建(`docker compose run` 不会因为 Dockerfile 变了就重建)。
+- `VERIFY_SKIP_BUILD=1` 是「镜像已备好」的显式承诺:若镜像陈旧,场景会静默跑旧代码。
+  本地调试照常用默认路径,让 `run.sh` 自己 build。
+
 ## 退出码
 
 | 码 | 含义 |

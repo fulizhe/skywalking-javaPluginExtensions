@@ -4,3 +4,4 @@
 .scratch
 **/target
 **/*.log
+.m2-verify
