@@ -968,6 +968,8 @@ state.dependencies = (data && data.dependencies) ? data.dependencies : [];
     state.view = v;
     document.getElementById("btn-summary").className = v === "summary" ? "on" : "sec";
     document.getElementById("btn-detail").className = v === "detail" ? "on" : "sec";
+    // 档位标签跟着视图一起变：否则"先在普通模式切到明细、再进演示模式"会显示旧档位
+    renderScopeChip();
     load();
   }
 
