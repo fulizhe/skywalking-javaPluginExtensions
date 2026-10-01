@@ -32,6 +32,8 @@
   .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; color: var(--blue-soft); }
   .bar .home { color: var(--muted); text-decoration: none; font-size: 12px; }
   .bar .home:hover { color: var(--blue-soft); }
+  /* 「自启动以来」只有一种画法(组件级星图),视图切换在该档无意义 —— 置灰而不是留着误导 */
+  button[disabled] { opacity: 0.4; cursor: not-allowed; filter: none; }
   .field { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
   button { padding: 5px 12px; cursor: pointer; background: var(--blue); color: #fff; border: 0;
            border-radius: 4px; }
@@ -876,7 +878,26 @@
 
   // ---------------------------------------------------------------- 交互
 
+  /**
+   * 「自启动以来」只有一种画法（组件级星图），**没有"明细"这一说**。
+   * 该档下把视图切换置灰并强制回到总览 —— 留着可点的按钮只会让人以为明细档也是累计口径。
+   */
+  function syncViewAffordance() {
+    var lifetime = state.scope === "summary-lifetime" || state.scope === "lifetime";
+    var btnSummary = document.getElementById("btn-summary");
+    var btnDetail = document.getElementById("btn-detail");
+    btnSummary.disabled = lifetime;
+    btnDetail.disabled = lifetime;
+    if (lifetime) {
+      state.view = "summary";
+      btnSummary.className = "on";
+      btnDetail.className = "sec";
+      btnSummary.title = "「自启动以来」是组件级累计，只有一种画法";
+    }
+  }
+
   function setView(v) {
+    if (state.scope === "lifetime") { return; }
     state.view = v;
     document.getElementById("btn-summary").className = v === "summary" ? "on" : "sec";
     document.getElementById("btn-detail").className = v === "detail" ? "on" : "sec";
@@ -896,6 +917,7 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
         state.scope = "window";
         state.minutes = Number(b.getAttribute("data-min"));
       }
+      syncViewAffordance();
       load();
     });
   });
@@ -933,6 +955,7 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
 setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
   renderIconKey();
+  syncViewAffordance();
   startPolling();
 })();
 </script>

@@ -287,6 +287,22 @@ Write-Host "   paths=$pathsText"
 Write-Host "   startApp=$StartApp  normalOnly=$NormalOnly  keepRunning=$KeepRunning  skipMetrics=$SkipMetrics"
 Write-Host "==============================================================="
 
+# 告警自环提示:路径集里只要**含返回 5xx 的端点**,错误请求就会经插件 webhook 同步回打本机,
+# 而回打本身又是一次请求 —— 负载自我放大,且污染 persistErrors/aggregateErrors 计数。
+# 故在开跑前就说清楚,免得把"吞吐掉了/计数炸了"误判成插件有问题。
+$errorPaths = @($effectivePaths -split ',' | Where-Object {
+    $_ -match "trace-alert-demo/(error|http500)|/status/\d{3}|helloException|logError|error-call|/api/exists/|/\.well-known"
+})
+if ($errorPaths.Count -gt 0) {
+    Write-Host "[!!] 本档**会触发告警自环** —— 路径集里有返回 5xx 的端点:"
+    Write-Host "     $($errorPaths -join ', ')"
+    Write-Host "     错误请求 → 插件 webhook **同步回打本机** → 回打又是一次请求 → 负载自我放大。"
+    Write-Host "     预期现象:吞吐下降、告警面板出现事件、persistErrors/aggregateErrors 计数上涨。"
+    Write-Host "     只要指标数字请改用 -NormalOnly(不含错误端点),或用 -WithDeps / scripts/stress-slow.ps1。"
+} else {
+    Write-Host "[ok] 本档不含错误端点 → 不会触发告警自环(错误端点只在 -AllEndpoints 与显式 -Paths 里)"
+}
+
 if ($Threads -le 0) { Write-Host "[FAIL] -Threads 必须为正整数"; exit 1 }
 if (-not $Continuous -and $DurationSec -le 0 -and $Requests -le 0) { Write-Host "[FAIL] -Requests 必须为正整数(或改用 -DurationSec / -Continuous)"; exit 1 }
 

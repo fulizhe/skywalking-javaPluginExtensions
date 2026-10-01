@@ -28,7 +28,25 @@ pwsh .\scripts\stress.ps1 -WithDeps      -Requests 2000 -Threads 16   # 只压�
 pwsh .\scripts\stress.ps1 -AllEndpoints  -Requests 2000 -Threads 16   # 压全部页面接口
 pwsh .\scripts\stress.ps1 -NormalOnly    -Requests 2000 -Threads 16   # 只压业务正常端点（排除 error）
 pwsh .\scripts\stress.ps1 -AllEndpoints  -Continuous -Threads 16       # 无限模式：10s 一行 [progress]
+pwsh .\scripts\stress-slow.ps1 -Requests 10 -Threads 1                 # 慢端点演示（手动执行，见下）
 ```
+
+**慢端点演示（`stress-slow.ps1`）**：与上面三种"稳定性压测"是**两种目的**，故分开成独立脚本 ——
+慢端点单请求 0.3s~8.5s，混进稳定性压测会把吞吐数字拖成没有参考价值的平均数。
+
+```powershell
+pwsh .\scripts\stress-slow.ps1                        # 默认 25 次 / 4 线程
+pwsh .\scripts\stress-slow.ps1 -Requests 10 -Threads 1 # 串行慢放，适合边讲边看
+pwsh .\scripts\stress-slow.ps1 -All                   # 加上告警演示端点 → **会触发告警自环**
+```
+
+它开跑前会打印端点清单与单请求量级（便于讲解对照），并说明这一档的吞吐**不要**和上面三种比。
+
+| 事实 | 说明 |
+| --- | --- |
+| **默认不含告警端点** | `/api/trace-alert-demo/error`、`/http500` 会真的报错 → 插件 webhook **同步回打本机** → 回打又是一次请求 → **负载自我放大**。要演示告警才显式加 `-All` |
+| 慢端点分两类 | **依赖侧**：`/api/deps-demo/mysql?sleepMs=1000`、`kafka?op=produce`(broker 不可达约 3s)、`http?site=httpbin`(1~2s)、`grpc`(0.3s，首次建链约 4s)；**业务侧**：`trace-alert-demo/slow?ms=4000`、`/api/order/1`(8.5s)、`/api/export/report`、`/longTimeTask`、`/fullSample`(约 5s) |
+| 另有毫秒级对照 | `/queryDbByMybatis`、hutool 出口自调 —— 用来在同一进程内对比"不同依赖的差距" |
 
 造数与看图：
 
@@ -47,6 +65,8 @@ curl.exe -s -o NUL --noproxy "*" "http://127.0.0.1:9600/api/deps-demo/all" # 依
 - 不带 `-WithDeps` 也能跑，只是 Redis / MySQL 两层**没有节点**（连不上不出边，见下"三条规则"）。
 - **不需要设任何环境变量**：中间件的宿主映射端口（redis `16379` / mysql `13306` / kafka `19092`）已写进 `application.yml` 默认值。
 - 本机脚本常用参数：`-Port` / `-SkipAppBuild` / `-SkipPluginBuild` / `-NoAlert` / `-Continuous` / `-Paths`。
+- **`-AllEndpoints` 会触发告警自环**：它含返回 5xx 的端点，错误请求经插件 webhook 同步回打本机、回打又是一次请求。开跑前脚本会把这个提示与命中的错误端点列出来；只要指标数字请用 `-NormalOnly`。
+- 拓扑页的「**视图**」切换在「自启动以来」档会**置灰**：该档是组件级累计，只有一种画法，没有"明细"一说。
 
 ---
 

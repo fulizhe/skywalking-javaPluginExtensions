@@ -172,7 +172,15 @@ pwsh .\scripts\stress.ps1 -AllEndpoints -Requests 2000 -Threads 16   # 全页面
 pwsh .\scripts\stress.ps1 -NormalOnly  -Requests 2000 -Threads 16   # 只压指标聚合
 pwsh .\scripts\stress.ps1 -WithDeps    -Requests 200  -Threads 8    # 只压依赖三层
 pwsh .\scripts\stress.ps1 -AllEndpoints -Continuous -Threads 16      # 无限模式,10s 一行 [progress]
+pwsh .\scripts\stress-slow.ps1 -Requests 10 -Threads 1              # 慢端点演示(手动执行)
 ```
+
+> ⚠️ **`-AllEndpoints` 会触发告警自环**：它含返回 5xx 的端点，错误请求经插件 webhook
+> **同步回打本机**，回打本身又是一次请求 → 负载自我放大，并把 `persistErrors`/`aggregateErrors`
+> 计数推高。要干净的指标数字用 `-NormalOnly`。`stress.ps1` 开跑前会把这个提示与命中的错误端点列出来。
+>
+> `stress-slow.ps1` 是**演示用**的独立脚本（慢端点单请求 0.3s~8.5s，混进稳定性压测会把吞吐拖成
+> 没有参考价值的平均数）。它默认**不含**告警端点，要演示告警才加 `-All`。
 
 `-Continuous` 下每行 `[progress]` 里的 `plugin=` 段就是插件自己的计数
 (`rowsUpserted` / `lateDropped` / `sampleOverflow` / `persistErrors` / `aggregateErrors`),

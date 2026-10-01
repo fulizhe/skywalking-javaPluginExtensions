@@ -168,10 +168,33 @@ pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 - **依赖面观测**:`run-with-agent.ps1 -WithDeps` + `stress.ps1 -WithDeps`(与前两条互斥,见下)。
 - `stress.ps1 -StartApp` 自身起的应用**不带 alert**(纯指标)。
 
-> `-NormalOnly` 与 `-WithDeps` **互斥**:前者压业务正常端点,后者压依赖造数端点。同时给会直接报错退出(1),
-> 避免"以为压了正常端点、实际压的是依赖端点"这种静默偏差。
+> `-NormalOnly` / `-WithDeps` / `-AllEndpoints` **三者互斥**:分别压"业务正常端点 / 依赖造数端点 / 全部页面接口"。
+> 同时给会直接报错退出(1),避免"以为压了正常端点、实际压的是别的"这种静默偏差。
+>
+> ⚠️ **`-AllEndpoints` 会触发告警自环**:它含返回 5xx 的端点,错误请求经插件 webhook
+> **同步回打本机**,而回打本身又是一次请求 → 负载自我放大,并把
+> `persistErrors`/`aggregateErrors` 计数推高。要干净的指标数字就用 `-NormalOnly`。
+> `stress.ps1` 开跑前会把这个提示与命中的错误端点列出来。
 
-常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`(只压正常端点)、`-WithDeps`(只压依赖造数端点,与 `run-with-agent.ps1 -WithDeps` 同名同义)、`-KeepRunning`、`-SkipMetrics`。
+常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`、`-WithDeps`(与 `run-with-agent.ps1 -WithDeps` 同名同义)、`-AllEndpoints`、`-KeepRunning`、`-SkipMetrics`。
+
+### 慢端点演示(手动执行,`stress-slow.ps1`)
+
+```powershell
+pwsh ./scripts/stress-slow.ps1                          # 默认 25 次 / 4 线程
+pwsh ./scripts/stress-slow.ps1 -Requests 10 -Threads 1  # 串行慢放,边讲边看
+pwsh ./scripts/stress-slow.ps1 -All                    # 加告警演示端点 → 会触发告警自环
+```
+
+与上面三种**稳定性压测是两种目的**,故独立成脚本:慢端点单请求 0.3s~8.5s,混进稳定性压测
+会把吞吐拖成没有参考价值的平均数。开跑前它会打印端点清单与单请求量级,便于讲解对照:
+
+| 类别 | 端点与量级 |
+| --- | --- |
+| 依赖侧(秒级) | `mysql?sleepMs=1000`(依赖侧造慢边)、`kafka?op=produce`(broker 不可达约 3s)、`http?site=httpbin`(1~2s)、`grpc`(0.3s,首次建链约 4s) |
+| 业务侧(秒级) | `trace-alert-demo/slow?ms=4000`(触发 SLOW)、`/api/order/1`(8.5s,命中 Ant 规则)、`/api/export/report`、`/longTimeTask`(1s)、`/fullSample`(约 5s) |
+| 毫秒级对照 | `queryDbByMybatis`、hutool 出口自调 —— 同一进程内对比"不同依赖的差距" |
+| 告警演示(默认不含) | `trace-alert-demo/error`、`/http500` → 报错 → webhook 自环,故要显式 `-All` |
 
 > 稳定性观测:`-Continuous` 下每轮 `[progress]` 行含 `plugin=` 段,即插件 `/inner/sw/metrics` 的计数
 > (`rowsUpserted`/`lateDropped`/`sampleOverflow`/`endpointOverflow`/`persistErrors`/`aggregateErrors`)——
@@ -265,6 +288,7 @@ agent/demo-app/
     ├── validate.ps1           # 验证回路(构建→安装→启动→造数→断言→报告)
     ├── validate-h2.ps1        # H2 影子存储 + Trace 指标专项验证
     ├── stress.ps1             # 压测辅助(起应用/压测/指标摘要/停应用;委托 HttpLoadTest)
+    ├── stress-slow.ps1        # 慢端点演示压测(手动执行;默认不含告警端点,避免自环)
     ├── run-with-agent.ps1     # IDE/手动模式(同参,保持运行)
     └── start-demo.ps1         # 纯应用启动(无 agent)
 ```
