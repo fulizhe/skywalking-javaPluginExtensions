@@ -1,0 +1,165 @@
+/* ============================================================================
+ * 演示模式（Presenter Mode）外壳样式 —— 指标大屏 / 依赖拓扑 / 告警面板 三页共用。
+ *
+ * 为什么单独一个文件而不是各页内联：三页要的是**同一套**"演示态"（藏起运维控件、
+ * 放大数字、口径按需展开、上一页/下一页），各自内联会出现三份逐渐走样的副本，
+ * 而"演示时该看到什么"必须是三页一致的一件事。
+ *
+ * 全部规则都挂在 body.presenter-on 下 —— 未开启演示模式的普通浏览**零影响**，
+ * 这是加这套外壳的第一约束（不能为了汇报把自用页面改难用）。
+ *
+ * 主题：拓扑/指标是深色，告警面板（dashboard.css）是浅色，
+ * 由页面在挂载时给外壳标 data-theme，两套配色都在这里给。
+ * ========================================================================== */
+
+.presenter-shell {
+  /* 深色默认（拓扑 / 指标） */
+  --presenter-bg: rgba(18, 22, 28, 0.92);
+  --presenter-bd: #3d4650;
+  --presenter-fg: #eaeaea;
+  --presenter-ac: #7fd1ff;
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--presenter-bg);
+  border: 1px solid var(--presenter-bd);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.presenter-shell[data-theme="light"] {
+  --presenter-bg: rgba(255, 255, 255, 0.95);
+  --presenter-bd: #dde1e6;
+  --presenter-fg: #22262b;
+  --presenter-ac: #1f6feb;
+  box-shadow: 0 6px 20px rgba(31, 111, 235, 0.18);
+}
+
+.presenter-shell button {
+  padding: 5px 10px;
+  cursor: pointer;
+  background: #2b313a;
+  color: var(--presenter-fg);
+  border: 1px solid var(--presenter-bd);
+  border-radius: 5px;
+  font: inherit;
+}
+.presenter-shell[data-theme="light"] button { background: #f5f6f8; }
+.presenter-shell button:hover { filter: brightness(1.14); }
+.presenter-shell button:focus-visible { outline: 2px solid var(--presenter-ac); outline-offset: 2px; }
+.presenter-shell button[disabled] { opacity: 0.35; cursor: default; }
+
+.presenter-shell .presenter-page { padding: 0 4px; color: var(--presenter-fg); white-space: nowrap; }
+.presenter-shell .presenter-page b { color: var(--presenter-ac); font-weight: 700; }
+.presenter-shell .presenter-toggle { border-color: var(--presenter-ac); }
+/* 已进入演示态：开关本身高亮，让人一眼知道"现在看到的是演示画面" */
+.presenter-shell .presenter-toggle[data-on="1"] { background: var(--presenter-ac); color: #10233a; font-weight: 700; }
+
+/* 演示态下把外壳收进右边缘：截图要干净，但整条边**留在画面里**（全藏了别人就找不到、也不敢碰）。
+   鼠标划过去 / 键盘聚焦即滑回。快捷键 P、←、→ 走 document，与本条无关，照常可用。 */
+body.presenter-on .presenter-shell {
+  transform: translateX(100%);
+  opacity: 0.28;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+body.presenter-on .presenter-shell:hover,
+body.presenter-on .presenter-shell:focus-within {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- 结论卡
+ * 只在演示态出现（普通浏览不需要它 —— 各页本来就有自己的摘要行）。
+ * 数字**由页面从读口算好后传进来**，这里只排版，绝不自己编数据。
+ */
+.presenter-card {
+  --presenter-bg: rgba(18, 22, 28, 0.92);
+  --presenter-bd: #3d4650;
+  --presenter-fg: #eaeaea;
+  --presenter-mut: #9aa4b2;
+  --presenter-ac: #7fd1ff;
+  --presenter-ok: #86efac;
+  --presenter-warn: #fde047;
+  --presenter-err: #ff6b6b;
+  display: none;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--presenter-bg);
+  border: 1px solid var(--presenter-bd);
+  border-radius: 8px;
+}
+.presenter-card[data-theme="light"] {
+  --presenter-bg: #ffffff;
+  --presenter-bd: #dde1e6;
+  --presenter-fg: #22262b;
+  --presenter-mut: #6b7280;
+  --presenter-ac: #1f6feb;
+  --presenter-ok: #1a7f37;
+  --presenter-warn: #b54708;
+  --presenter-err: #d1242f;
+}
+body.presenter-on .presenter-card { display: block; }
+
+.presenter-card-k {
+  font-size: 11px;
+  color: var(--presenter-mut);
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.presenter-items { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.presenter-it { min-width: 0; }
+.presenter-lb { font-size: 12px; color: var(--presenter-mut); }
+.presenter-v { font-size: 26px; font-weight: 700; color: var(--presenter-fg); font-family: Consolas, "Cascadia Code", monospace; line-height: 1.25; }
+.presenter-v[data-tone="ok"] { color: var(--presenter-ok); }
+.presenter-v[data-tone="warn"] { color: var(--presenter-warn); }
+.presenter-v[data-tone="err"] { color: var(--presenter-err); }
+.presenter-sub { font-size: 12px; color: var(--presenter-mut); font-weight: 400; margin-left: 6px; font-family: inherit; }
+
+/* ------------------------------------------------------------ 演示态规则 */
+
+/* 运维控件：时间窗 / 视图切换 / 停止刷新 / 刷新按钮 / 诊断 chips … */
+body.presenter-on .presenter-hide { display: none !important; }
+
+/* 反过来：只在演示态出现的**只读**状态标签。
+   控件收起来后，"看的是哪一档"不能跟着一起消失 —— 观众无从判断那是 5 分钟窗口还是进程累计。 */
+.presenter-only { display: none; }
+body.presenter-on .presenter-only {
+    display: inline-block;
+    padding: 5px 10px;
+    border: 1px solid #4a5462;
+    border-radius: 4px;
+    color: #cfd6e0;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+/* 口径说明：默认收成一行，悬停展开 —— 汇报时看不见，被追问时能立刻答 */
+body.presenter-on .presenter-collapse { max-height: 28px; overflow: hidden; cursor: help; }
+body.presenter-on .presenter-collapse:hover,
+body.presenter-on .presenter-collapse:focus-within { max-height: 62vh; overflow: auto; }
+body.presenter-on .presenter-collapse > h2::after {
+  content: "（悬停展开）";
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted, #9aa4b2);
+  font-size: 12px;
+}
+body.presenter-on .presenter-collapse:hover > h2::after { content: "（鼠标移开即收起）"; }
+
+/* 字号放大一档：投影/投屏时数字要能在后排看清。
+   **刻意不动 `#chart` 的高度** —— 拓扑图的节点坐标是按 560px 画布设计的固定跨度
+   （yAt: y = 60 + i*420/(n-1)，layout:none 不自动重排）。把画布改矮会让节点挤到底边、
+   改高则 canvas 与容器不同步，两者都会让图溢出到图例上。要"图更大"应改 yAt 的跨度，
+   而不是只改 CSS 高度。 */
+body.presenter-on .legend { font-size: 13px; line-height: 2.1; }
+body.presenter-on .kpi-row .k-val { font-size: 30px; }
+body.presenter-on .kpi-row { gap: 10px; }
+body.presenter-on table { font-size: 13px; }
+body.presenter-on .panel h2, body.presenter-on h3 { font-size: 14px; }

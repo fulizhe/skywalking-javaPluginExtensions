@@ -18,6 +18,8 @@
 <script src="../lib/jquery.min.js"></script>
 <script src="../lib/echarts.min.js"></script>
 <script src="../lib/jquery.dataTables.min.js"></script>
+<script src="presenter.js"></script>
+<link rel="stylesheet" href="presenter.css">
 <style>
 *{box-sizing:border-box}
 :root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
@@ -126,10 +128,10 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
 <body>
 <div class="wrap">
   <aside class="rail">
-    <div class="brand"><div class="logo" title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天</div><div><h1 title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天枢观测台</h1><p>TIANSHU · OAPLESS OBSERVABILITY</p></div><button class="rail-toggle" id="railToggle" title="收起/展开侧栏"></button></div>
-    <p class="tagline">把全链路与指标留在应用进程内 —— 不部署 OAP、不依赖外部后端，单应用即可跨重启回溯、审计与聚合。基于 <b>Trace</b> 的指标面：请求数、错误率、慢调用与 P50–P99 分位数。</p>
-    <p class="tagline" style="font-size:10.5px;display:flex;align-items:center;gap:10px;border:1px solid rgba(56,189,248,.38);border-radius:999px;padding:8px 13px;background:rgba(56,189,248,.06)"><span style="flex:none;width:20px;height:20px;border:1.5px solid var(--ac);border-radius:999px;display:grid;place-items:center;color:var(--ac);font-weight:800;font-size:11px">枢</span><span>「天枢」＝<b>北斗第一星</b>，群星所绕之枢轴 —— 观测以应用自身为枢，不假外求。</span></p>
-    <div class="diff">
+    <div class="brand"><div class="logo" title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天</div><div><h1 title="天枢（Tiānshū）＝北斗第一星，群星环绕之枢轴">天枢观测台</h1><p>TIANSHU · OAPLESS OBSERVABILITY</p></div><button class="rail-toggle presenter-hide" id="railToggle" title="收起/展开侧栏"></button></div>
+    <p class="tagline presenter-hide">把全链路与指标留在应用进程内 —— 不部署 OAP、不依赖外部后端，单应用即可跨重启回溯、审计与聚合。基于 <b>Trace</b> 的指标面：请求数、错误率、慢调用与 P50–P99 分位数。</p>
+    <p class="tagline presenter-hide" style="font-size:10.5px;display:flex;align-items:center;gap:10px;border:1px solid rgba(56,189,248,.38);border-radius:999px;padding:8px 13px;background:rgba(56,189,248,.06)"><span style="flex:none;width:20px;height:20px;border:1.5px solid var(--ac);border-radius:999px;display:grid;place-items:center;color:var(--ac);font-weight:800;font-size:11px">枢</span><span>「天枢」＝<b>北斗第一星</b>，群星所绕之枢轴 —— 观测以应用自身为枢，不假外求。</span></p>
+    <div class="diff presenter-hide">
       <div class="row"><span class="chk">◆</span><span><b>OAP-less 自足</b>：零后端、单进程内持久化</span></div>
       <div class="row"><span class="chk">◆</span><span><b>分级持久化</b>：error 7d / slow 24h / normal 仅内存</span></div>
       <div class="row"><span class="chk">◆</span><span><b>磁盘可预测</b>：H2 header + 环形封顶载荷</span></div>
@@ -151,11 +153,11 @@ table.dataTable thead .sorting,table.dataTable thead .sorting_asc,table.dataTabl
     <div class="head">
       <h2 id="title">Trace 指标</h2>
       <span class="meta" id="pollStatus"><span class="dot"></span>实时 · 轮询 5s</span>
-      <span class="seg" id="ranges">
+      <span class="seg presenter-hide" id="ranges">
         <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
       </span>
       <span class="meta" id="updatedAt">-</span>
-      <button class="btn" id="pollToggle" title="暂停 / 继续 5s 自动刷新">⏸ 停止轮询</button>
+      <button class="btn presenter-hide" id="pollToggle" title="暂停 / 继续 5s 自动刷新">⏸ 停止轮询</button>
     </div>
     <div class="err-banner" id="errBanner"></div>
     <div class="kpi-row" id="kpis"></div>
@@ -703,6 +705,9 @@ $(function(){
       : '<span class="dot" style="background:var(--warn)"></span>已暂停';
   }
   $("#pollToggle").on("click", function(){ var on = !refreshTimer; if(on){ refresh(); } setPolling(on); });
+  // 指标页的「结论卡」就是上面那条 KPI 行（请求总数/QPS/错误率/P95/慢调用/活跃 Endpoint），
+  // 数字本来就读自 /inner/sw/metrics/query，**不另算一份**，故这里只放大、不重复渲染。
+  window.SWPresenter.mount({ page: "metrics", theme: "dark" });
   refresh();
   setPolling(true);
 });

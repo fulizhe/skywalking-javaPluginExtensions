@@ -429,14 +429,14 @@ RENDER.alert = function (results, box) {
     box.innerHTML = "";
     var cfg = stat.config || {}, disp = stat.dispatcher || {}, hook = stat.httpWebhook || {};
 
-    var chips = el("div", "chips");
+    var chips = el("div", "chips presenter-hide");
     chips.appendChild(chip("启用", cfg.enabled ? badge("开启", "ok") : badge("关闭", "err")));
     chips.appendChild(chip("webhook 目标", "<code>" + esc(cfg.webhookResolvedUrl || "-") + "</code>"));
     chips.appendChild(chip("默认慢阈值", cfg.defaultSlowThresholdMs + " ms"));
     chips.appendChild(chip("HTTP 错误阈值", ">= " + cfg.httpErrorStatusMin));
     box.appendChild(chips);
 
-    var chips2 = el("div", "chips");
+    var chips2 = el("div", "chips presenter-hide");
     chips2.appendChild(chip("分发 submitted", disp.dispatchSubmitted));
     chips2.appendChild(chip("慢", disp.dispatchSlowCount));
     chips2.appendChild(chip("错误", disp.dispatchErrorCount));
@@ -482,6 +482,26 @@ RENDER.alert = function (results, box) {
         evPanel.appendChild(el("div", "empty", "暂无收讫事件。触发方法:GET /api/trace-alert-demo/slow?ms=4000(慢)、/api/trace-alert-demo/error(错误)。"));
     }
     box.appendChild(evPanel);
+
+    // 结论卡：给汇报用的一行结论，数字全部由本函数手上这两个读口算出，不手写。
+    // 用 `recent.count`（接收端累计）当"告警总数"，而不是当前列表长度 —— 后者只反映最近若干条。
+    if (window.SWPresenter) {
+        var events = (recent && recent.events) || [];
+        var slow = 0, error = 0;
+        events.forEach(function (ev) {
+            (ev.alertTypes || []).forEach(function (t) {
+                if (t === "SLOW") { slow += 1; } else if (t === "ERROR") { error += 1; }
+            });
+        });
+        var total = (recent && recent.count != null) ? Number(recent.count) : events.length;
+        var miss = Number(hook.failureCount) || 0;
+        window.SWPresenter.conclusion([
+            { label: "告警事件", value: String(total), sub: "webhook 收讫累计" },
+            { label: "SLOW", value: String(slow), sub: "最近列表内慢命中", tone: slow ? "warn" : "ok" },
+            { label: "ERROR", value: String(error), sub: "最近列表内错命中", tone: error ? "err" : "ok" },
+            { label: "webhook 投递", value: hook.successCount + "/" + hook.totalAttempts, sub: miss ? (miss + " 次失败") : "无失败", tone: miss ? "err" : "ok" }
+        ]);
+    }
 };
 
 /* ---- 06 Profile ---- */
@@ -785,6 +805,12 @@ function boot() {
         a.href = "dashboard.html?p=" + kv[0];
         nav.appendChild(a);
     });
+
+    // 演示模式外壳只挂在**告警面板**上：它是汇报动线的一环（指标 → 拓扑 → 告警）。
+    // 其它子页（jvm/meter/instance/profile/parity）保持原样 —— 演示模式不是这几个页面的汇报对象。
+    if (p === "alert" && window.SWPresenter) {
+        window.SWPresenter.mount({ page: "alert", theme: "light", slot: "#presenter-slot" });
+    }
 
     var hintBox = document.getElementById("hint");
     var contentBox = document.getElementById("content");

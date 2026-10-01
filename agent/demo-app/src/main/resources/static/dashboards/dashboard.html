@@ -5,23 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>demo-app 仪表盘</title>
 <link rel="stylesheet" href="dashboard.css">
+<link rel="stylesheet" href="presenter.css">
+<script src="presenter.js"></script>
 </head>
 <body>
 <header class="topbar">
     <span class="brand"><a href="index.html">demo-app 仪表盘</a></span>
-    <nav class="page-nav" id="page-nav"></nav>
+    <nav class="page-nav presenter-hide" id="page-nav"></nav>
     <span class="topbar-right">
         <span id="updated">-</span>
-        <button id="refresh-btn" type="button">刷新</button>
+        <button id="refresh-btn" class="presenter-hide" type="button">刷新</button>
     </span>
 </header>
 <main>
     <div class="page-title-row">
         <h2 id="page-title"></h2>
-        <span id="poll-state" class="poll-state">自动刷新 3s</span>
+        <span id="poll-state" class="poll-state presenter-hide">自动刷新 3s</span>
     </div>
-    <div id="hint" class="hint hidden"></div>
-    <section id="async-scenario" class="scenario-panel hidden" aria-labelledby="async-scenario-title">
+    <div class="presenter-slot-host" id="presenter-slot"></div>
+    <div id="hint" class="hint presenter-hide hidden"></div>
+    <section id="async-scenario" class="scenario-panel presenter-hide hidden" aria-labelledby="async-scenario-title">
         <div class="scenario-copy">
             <div class="scenario-kicker">异步链路场景</div>
             <h3 id="async-scenario-title">Servlet 3 async + @TraceCrossThread</h3>

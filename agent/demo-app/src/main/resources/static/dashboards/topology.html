@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>依赖拓扑（self → 外部依赖）</title>
 <script src="../lib/echarts.min.js"></script>
+<script src="presenter.js"></script>
+<link rel="stylesheet" href="presenter.css">
 <style>
   :root {
     --bg: #23272e;
@@ -83,20 +85,22 @@
 <div class="bar">
   <h1>依赖拓扑</h1>
   <a class="home" href="index.html">← 仪表盘</a>
-  <span class="field">视图
+  <span class="field presenter-hide">视图
     <button id="btn-summary" class="sec" type="button">总览</button>
     <button id="btn-detail" type="button">明细</button>
   </span>
-  <span class="field">时间窗
+  <span class="field presenter-hide">时间窗
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
     <button class="sec win" data-scope="lifetime" type="button">自启动以来</button>
   </span>
-  <button id="btn-poll" class="on" type="button">停止刷新</button>
-  <span class="summary" id="summary">加载中…</span>
+  <button id="btn-poll" class="on presenter-hide" type="button">停止刷新</button>
+  <span class="summary presenter-hide" id="summary">加载中…</span>
+  <span class="presenter-only" id="scope-chip" title="演示模式下控件被收起，这一行告诉你当前看的是哪一档"></span>
 </div>
 
 <div class="page">
-  <section class="caveats">
+  <div id="presenter-slot"></div>
+  <section class="caveats presenter-collapse">
     <h2>口径说明（读这张图前必读）</h2>
     <ul>
       <li>依赖边<b>只统计同一个链路段内</b>的调用（段内 Entry × Exit 配对）。</li>
@@ -323,6 +327,50 @@
   }
 
   /**
+   * 千分位整数。结论卡与摘要共用。
+   * <p>
+   * 刻意自己写而**不引入别页的 fmtInt** —— 那种跨页复制粘贴的隐式依赖一旦对不上就是
+   * `ReferenceError`，且它发生在渲染链路上，会把整张图一起带空（页内已有教训）。
+   * </p>
+   */
+  function fmtCount(v) {
+    return String(Number(v) || 0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  /**
+   * 结论卡：给汇报用的一行结论，数字**全部由 `/inner/sw/topology` 的读口算出**，不手写。
+   * <p>
+   * 刻意用 <b>进程累计</b>口径（{@code dependencies}）而不是窗口内的边：累计量不随时间窗跳变，
+   * 翻页/切档时数字稳定，适合放进汇报材料；窗口边的绝对值会随压测停否忽大忽小。
+   * </p>
+   */
+  function presenterConclusion(data) {
+    if (!window.SWPresenter) { return; }
+    try {
+      var deps = (data && data.dependencies) ? data.dependencies : [];
+      var calls = 0, errs = 0, slowest = null;
+      deps.forEach(function (d) {
+        calls += Number(d.requestCount) || 0;
+        errs += Number(d.errorCount) || 0;
+        var ms = Number(d.maxLatency);
+        if (ms > 0 && (slowest === null || ms > slowest.ms)) {
+          slowest = { name: d.componentName || ("component:" + d.componentId), ms: ms };
+        }
+      });
+      var rate = calls ? (errs * 100 / calls) : 0;
+      window.SWPresenter.conclusion([
+        { label: "外部依赖类型", value: String(deps.length), sub: data && data.enabled ? "自启动以来" : "采集未启用" },
+        { label: "累计调用", value: fmtCount(calls) + " 次", sub: "出口 span 段内配对" },
+        { label: "累计错误率", value: rate.toFixed(2) + "%", sub: fmtCount(errs) + " 次错误", tone: rate > 0 ? "err" : "ok" },
+        { label: "最慢依赖", value: slowest ? slowest.ms + " ms" : "-", sub: slowest ? slowest.name : "无数据" }
+      ]);
+    } catch (e) {
+      // 结论卡是锦上添花，绝不能因为它算错就把主图带空 —— 吞掉并留下痕迹
+      if (window.console && console.warn) { console.warn("[topology] 结论卡计算失败", e); }
+    }
+  }
+
+  /**
    * 把跨分钟桶的同一逻辑边合成一条。
    * <p>
    * 插件侧边是<b>按分钟桶</b>存的（与 Trace 指标同构），所以同一窗口内
@@ -389,8 +437,11 @@
       state.enabled = !!(data && data.enabled);
       // 「自启动以来」这一档读的是插件侧的**生命周期累计**,不是窗口内的边:
       // 窗口桶约 4 分钟就被淘汰,只有累计表记得"这个进程伸出去过哪些手"。
-      state.dependencies = (data && data.dependencies) ? data.dependencies : [];
+state.dependencies = (data && data.dependencies) ? data.dependencies : [];
       state.lifetimeSinceMs = (data && data.lifetimeSinceMs) ? Number(data.lifetimeSinceMs) : 0;
+      // 结论卡放在主渲染**之前**算（两档都要用），但它内部自带 try/catch：
+      // 锦上添花的东西坏了也不该把主图带空。
+      presenterConclusion(data);
       if (state.scope === "lifetime") {
         state.edges = [];
         state.rawEdgeCount = 0;
@@ -415,6 +466,7 @@
         + "边 " + state.edges.length + "（分钟桶 " + (state.rawEdgeCount || 0) + "）"
         + " · 窗口 " + range
         + (state.truncated ? " · [已截断]" : "");
+      presenterConclusion(data);
     }).catch(function (e) {
       summary.textContent = "加载失败: " + e;
       render();
@@ -549,8 +601,11 @@
     tbody.innerHTML = "";
     if (!list.length) {
       empty.style.display = "";
-      empty.innerHTML = "本进程还没有调过任何外部依赖。<br>先造点流量，例如 "
-        + "<code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
+      // 说清"为什么空"：依赖边只在进程内存里，**重启即清零**，与落 H2 的指标大屏口径不同。
+      // 不写这句，演示时"拓扑图空 / 指标图有数据"会被当成页面坏了。
+      empty.innerHTML = "本进程还没有调过任何外部依赖。<br>"
+        + "<b>依赖边只存在进程内存里，重启即清零</b>（指标大屏的数字落 H2 跨重启保留，两页口径不同）。<br>"
+        + "先造点流量，例如 <code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
       document.getElementById("table-hint").textContent = "";
       return;
     }
@@ -896,6 +951,18 @@
     }
   }
 
+  /**
+   * 演示模式下的**只读**档位标签：控件被收起后，观众仍需要知道看的是哪一档
+   *（窗口档随压测停否忽大忽小，累计档重启归零 —— 两者不能混读）。
+   */
+  function renderScopeChip() {
+    var chip = document.getElementById("scope-chip");
+    if (!chip) { return; }
+    var view = state.view === "summary" ? "总览" : "明细";
+    var scope = state.scope === "lifetime" ? "自启动以来" : "近 " + state.minutes + " 分钟";
+    chip.textContent = view + " · " + scope;
+  }
+
   function setView(v) {
     if (state.scope === "lifetime") { return; }
     state.view = v;
@@ -918,6 +985,7 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
         state.minutes = Number(b.getAttribute("data-min"));
       }
       syncViewAffordance();
+      renderScopeChip();
       load();
     });
   });
@@ -956,6 +1024,8 @@ setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
   renderIconKey();
   syncViewAffordance();
+  renderScopeChip();
+  window.SWPresenter.mount({ page: "topology", theme: "dark", slot: "#presenter-slot" });
   startPolling();
 })();
 </script>
