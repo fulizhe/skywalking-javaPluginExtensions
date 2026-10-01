@@ -17,6 +17,7 @@
 <title>指标排障 · 最差分钟分位</title>
 <script src="../lib/jquery.min.js"></script>
 <script src="../lib/echarts.min.js"></script>
+<script src="poll.js"></script>
 <style>
 *{box-sizing:border-box}
 :root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
@@ -283,13 +284,23 @@ function chart(el, labels, data, seriesName, markData){
 }
 
 function setRange(r){ currentRange=r; seriesCache={}; selectedEndpoint=null; $("#detail").hide(); $(".rng").removeClass("on").filter(function(){return $(this).data("r")===r;}).addClass("on"); refresh(); }
-function schedule(){ if(timer)clearInterval(timer); timer=setInterval(function(){ if(polling) refresh(); }, 5000); }
+// 间隔不写死：统一控件存了用户选的档位（默认仍是 5s）。polling 只作页面内的兜底开关，
+// 真正的"该不该刷"由 SWPoll 判定（手动暂停 / 切后台 / 演示态）。
+function schedule(){ if(timer)clearInterval(timer); timer=setInterval(function(){ if(polling && !(window.SWPoll && SWPoll.isPaused("troubleshoot",5000))) refresh(); }, SWPoll ? SWPoll.intervalMs("troubleshoot", 5000) : 5000); }
+function stopSchedule(){ if(timer){clearInterval(timer); timer=null;} }
 
 $(function(){
   $(".rng").on("click",function(){ setRange($(this).data("r")); });
-  $("#pause").on("click",function(){ polling=!polling; $(this).text(polling?"停止轮询":"继续轮询").toggleClass("on",!polling); });
+  $("#pause").on("click",function(){
+    if (window.SWPoll) { SWPoll.toggle("troubleshoot", 5000); return; }
+    polling=!polling; $(this).text(polling?"停止轮询":"开始轮询").toggleClass("on",!polling);
+  });
   $("#epTable thead th").on("click",function(){ var k=$(this).data("k"); if(!k)return; if(sortKey===k){sortDesc=!sortDesc;}else{sortKey=k;sortDesc=true;} refresh(); });
-  refresh(); schedule();
+  refresh();
+  if (window.SWPoll) {
+    SWPoll.attach({ key: "troubleshoot", defaultMs: 5000, start: schedule, stop: stopSchedule,
+      onState: function(s){ $("#pause").text(s.paused?"开始轮询":"停止轮询").toggleClass("on", !s.paused); } });
+  } else { schedule(); }
 });
 </script>
 </body>

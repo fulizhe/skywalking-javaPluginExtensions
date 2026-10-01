@@ -19,6 +19,7 @@
 <script src="../lib/echarts.min.js"></script>
 <script src="../lib/jquery.dataTables.min.js"></script>
 <script src="presenter.js"></script>
+<script src="poll.js"></script>
 <link rel="stylesheet" href="presenter.css">
 <style>
 *{box-sizing:border-box}
@@ -696,20 +697,34 @@ $(function(){
   $("#diffMask").on("click", function(e){ if(e.target === this) closeDiff(); });
   $(document).on("keydown", function(e){ if(e.key === "Escape") closeDiff(); });
   // 5s 轮询开关：暂停后不再请求读口，按钮与状态同步切换
-  function setPolling(on){
+function setPolling(on){
     if(refreshTimer){ clearInterval(refreshTimer); refreshTimer = null; }
-    if(on){ refreshTimer = setInterval(refresh, 5000); }
-    document.getElementById("pollToggle").textContent = on ? "⏸ 停止轮询" : "▶ 开始轮询";
-    document.getElementById("pollStatus").innerHTML = on
-      ? '<span class="dot"></span>实时 · 轮询 5s'
-      : '<span class="dot" style="background:var(--warn)"></span>已暂停';
+    // 间隔不写死：统一控件存了用户选的档位（默认仍是 5s），没挂上控件时退回原值
+    if(on){ refreshTimer = setInterval(refresh, SWPoll ? SWPoll.intervalMs("metrics", 5000) : 5000); }
+    renderPollState({paused: !on, ms: SWPoll ? SWPoll.intervalMs("metrics", 5000) : 5000});
   }
-  $("#pollToggle").on("click", function(){ var on = !refreshTimer; if(on){ refresh(); } setPolling(on); });
+  /** 刷新状态文案只此一处写：统一控件（切后台/演示态）与本页按钮都会调它。 */
+  function renderPollState(s){
+    // 只改文案，不动 className —— 本页 .btn 没有 .on 变体（只有 .seg span.on 有）
+    document.getElementById("pollToggle").textContent = s.paused ? "⏵ 开始轮询" : "⏸ 停止轮询";
+    document.getElementById("pollStatus").innerHTML = s.paused
+      ? '<span class="dot" style="background:var(--warn)"></span>已暂停'
+      : '<span class="dot"></span>实时 · 轮询 ' + (s.ms/1000) + 's';
+  }
+  $("#pollToggle").on("click", function(){
+    if (SWPoll) { SWPoll.toggle("metrics", 5000); refresh(); return; }
+    var on = !refreshTimer; if(on){ refresh(); } setPolling(on);
+  });
   // 指标页的「结论卡」就是上面那条 KPI 行（请求总数/QPS/错误率/P95/慢调用/活跃 Endpoint），
   // 数字本来就读自 /inner/sw/metrics/query，**不另算一份**，故这里只放大、不重复渲染。
   window.SWPresenter.mount({ page: "metrics", theme: "dark" });
+  if (SWPoll) {
+    // 统一刷新节奏：间隔可选 / 暂停 / 切后台自动停 / 演示模式冻结。本页按钮与左下角控件同源。
+    SWPoll.attach({ key: "metrics", defaultMs: 5000, start: function(){ setPolling(true); },
+                     stop: function(){ setPolling(false); }, onState: renderPollState });
+  }
   refresh();
-  setPolling(true);
+  if (!SWPoll) { setPolling(true); }
 });
 </script>
 </body>

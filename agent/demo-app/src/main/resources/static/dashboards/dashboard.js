@@ -821,6 +821,7 @@ function closeTraceModal() {
 /* ---------------- 启动 ---------------- */
 
 function boot() {
+    var pollTimer = null;
     var p = new URLSearchParams(location.search).get("p") || "statistic";
     var page = PAGES[p];
     if (!page) { document.getElementById("content").innerHTML = "未知页面: " + esc(p); return; }
@@ -862,7 +863,21 @@ function boot() {
     }
     setupAsyncScenario(p, refresh);
     refresh();
-    setInterval(refresh, page.interval);
+    // 统一刷新节奏：间隔可选 / 暂停 / 切后台自动停 / 演示模式冻结。此前本页只有"手动刷新"，
+    // setInterval 没有任何开关（interval 各子页 3s~6s 不等），是唯一停不下来的一个。
+    if (window.SWPoll) {
+        SWPoll.attach({
+            key: "dashboard-" + p, defaultMs: page.interval,
+            start: function () { pollTimer = setInterval(refresh, SWPoll.intervalMs("dashboard-" + p, page.interval)); },
+            stop: function () { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } },
+            onState: function (s) {
+                document.getElementById("poll-state").textContent = s.paused
+                    ? "已暂停" : ("自动刷新 " + (s.ms / 1000) + "s");
+            }
+        });
+    } else {
+        pollTimer = setInterval(refresh, page.interval);
+    }
 }
 
 document.addEventListener("DOMContentLoaded", boot);

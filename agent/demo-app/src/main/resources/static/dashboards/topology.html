@@ -6,6 +6,7 @@
 <title>依赖拓扑（self → 外部依赖）</title>
 <script src="../lib/echarts.min.js"></script>
 <script src="presenter.js"></script>
+<script src="poll.js"></script>
 <link rel="stylesheet" href="presenter.css">
 <style>
   :root {
@@ -1001,7 +1002,9 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
   var pollTimer = null;
 
   function startPolling() {
-    if (pollTimer === null) { pollTimer = setInterval(load, 5000); }
+    if (pollTimer === null) {
+      pollTimer = setInterval(load, SWPoll ? SWPoll.intervalMs("topology", 5000) : 5000);
+    }
   }
 
   function stopPolling() {
@@ -1010,6 +1013,11 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
 
   document.getElementById("btn-poll").addEventListener("click", function () {
     var btn = document.getElementById("btn-poll");
+    if (SWPoll) {
+      // 交给统一状态：本页按钮与左下角控件是同一份真相，切后台/演示态自动停也能反映到按钮上
+      SWPoll.toggle("topology", 5000);
+      return;
+    }
     if (pollTimer !== null) {
       stopPolling();
       btn.textContent = "恢复刷新";
@@ -1028,7 +1036,18 @@ setView("summary");
   syncViewAffordance();
   renderScopeChip();
   window.SWPresenter.mount({ page: "topology", theme: "dark", slot: "#presenter-slot" });
-  startPolling();
+  if (SWPoll) {
+    SWPoll.attach({
+      key: "topology", defaultMs: 5000, start: startPolling, stop: stopPolling,
+      onState: function (s) {
+        var btn = document.getElementById("btn-poll");
+        btn.textContent = s.paused ? "恢复刷新" : "停止刷新";
+        btn.className = s.paused ? "sec" : "on";
+      }
+    });
+  } else {
+    startPolling();
+  }
 })();
 </script>
 </body>
