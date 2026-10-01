@@ -334,6 +334,8 @@ docker image rm demo-app-agent:9.4.0
 |---|---|
 | 场景怎么声明、断言怎么写、加新插件场景 | [`verify/README.md`](README.md) |
 | 应用的全部读口、参数、术语表 | [`agent/demo-app/README.md`](../agent/demo-app/README.md) |
+| 三种测试场景怎么跑（本地 pwsh / 本地 compose / 远程 Linux compose） | [`agent/demo-app/README-verify-matrix.md`](../agent/demo-app/README-verify-matrix.md) |
+| 远程 Linux 服务器 compose 压测的坑清单 | [`agent/demo-app/README-remote-verify.md`](../agent/demo-app/README-remote-verify.md) |
 | Trace 告警的配置项与判定规则 | `agent/logfile-reporter-plugin/README-trace-alert.md` |
 | 插件构建为什么用 JDK17、运行用 JDK8 | `docs/adr/adr-01*.md` |
 | 六类数据流与本仓库的专有名词 | 仓库根 `CONTEXT.md` |

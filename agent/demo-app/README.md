@@ -12,9 +12,11 @@
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
 >
+> **三种测试场景怎么跑**（本地 Windows pwsh / 本地 compose / 远程 Linux compose 三者并排对照），
+> 看 [`README-verify-matrix.md`](README-verify-matrix.md)。
+>
 > **要在专用 Linux 服务器上做 compose 全面验证与压测**,看
-> [`README-remote-verify.md`](README-remote-verify.md) —— 三个 profile 怎么选、压测怎么配、
-> 坑集中列在一处(别边跑边踩)。
+> [`README-remote-verify.md`](README-remote-verify.md) —— 坑集中列在一处(别边跑边踩)。
 
 ## 初学者演示(迁移自旧 demo 工程)
 
