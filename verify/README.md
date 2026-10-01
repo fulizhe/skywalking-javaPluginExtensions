@@ -23,6 +23,9 @@ bash verify/run.sh --scenario logfile-reporter
 # 跑某场景的版本矩阵(读 support-version.list)
 bash verify/run.sh --scenario override-httpclient --matrix
 
+# 只跑某场景的某一个版本(CI 的每个 job 走这条)
+bash verify/run.sh --scenario override-hutool --version 5.8.47
+
 # 列出场景
 bash verify/run.sh --list
 ```
@@ -45,10 +48,16 @@ CI 上每次是全新 runner,命名卷必为空 —— 故 workflow 用 `VERIFY_
   另外 compose 只在镜像**缺失**时才现场构建(`docker compose run` 不会因为 Dockerfile 变了就重建)。
 - GHCR 镜像名必须全小写,而本仓库名带大写字母,所以 workflow 里有一道 `tr` 再拼 `VERIFY_IMAGE`。
 
-三个场景在 CI 上是**三个并行 job**(matrix + `fail-fast: false`),墙钟取最慢那个,而不是串行。
-新增场景记得往 workflow 的 `matrix.scenario` 加一行。CI 只跑各场景的默认依赖版本 ——
-`--matrix` 版本矩阵留本地按需触发。三个 job 抢同一个 m2 缓存 key 时,`actions/cache` 与 buildkit
-层缓存都只会「保存失败告警」而不 fail job(前者的只读降级是文档保证,后者靠 `ignore-error=true`)。
+CI 上是**「(场景 × 版本)」每个组合一个并行 job**(matrix + `fail-fast: false`),墙钟取最慢那个,而不是串行。
+矩阵由 `plan` job 从场景声明现场生成:有 `support-version.list` 的场景每个版本一个 job,没有的取一个默认版本 ——
+**CI 不重抄场景清单,加版本只改 `.list` 一个文件**。各场景的默认依赖版本本来就在自己的 `.list` 里,所以版本覆盖是
+取代而非叠加(当前 5 个 job:`logfile-reporter` ×1、httpclient ×2、hutool ×2)。
+
+代价主要在 m2 缓存带宽:job 数变多 → 同一份约 1GB 的缓存被并发恢复的次数变多(缓存刚失效时是每个 job 各下全量)。
+仓库是 public,Actions 分钟不收费。
+
+几个 job 抢同一个 m2 缓存 key 时,`actions/cache` 与 buildkit 层缓存都只会「保存失败告警」而不 fail job
+(前者的只读降级是文档保证,后者靠 `ignore-error=true`)。
 
 ## 退出码
 
