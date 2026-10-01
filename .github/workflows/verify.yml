@@ -25,13 +25,16 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # 钉住 24.04:ubuntu-latest 将于 2026-10-19 迁到 Ubuntu 26。本回路整条链
+    # (buildx driver / compose / 基础镜像拉取)对 docker 与 buildx 版本敏感,
+    # 不想在一个无人值守的凌晨被发行版大版本改动打挂。同 major 的镜像周更照收。
+    runs-on: ubuntu-24.04
     env:
       # compose 把这个路径挂到容器的 /root/.m2;放在 workspace 内便于 actions/cache 取存
       VERIFY_M2_VOLUME: ${{ github.workspace }}/.m2-verify
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # CI 每次是全新 runner:命名卷必然为空,plugins + demo-app(Spring Boot /
       # jedis / kafka / grpc / hutool …)的全部依赖都要重下。缓存仓库目录后,
@@ -40,7 +43,7 @@ jobs:
         run: mkdir -p "$VERIFY_M2_VOLUME"
 
       - name: Cache Maven local repo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .m2-verify
           key: m2-${{ runner.os }}-${{ hashFiles('agent/settings.xml', 'agent/**/pom.xml') }}

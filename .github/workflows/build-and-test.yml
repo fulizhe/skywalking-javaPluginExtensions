@@ -20,11 +20,12 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    # 钉住 24.04:理由同 verify.yml(ubuntu-latest 2026-10-19 迁 Ubuntu 26)
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
