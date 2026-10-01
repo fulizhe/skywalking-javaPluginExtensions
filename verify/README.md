@@ -34,14 +34,16 @@ CI 上每次是全新 runner,命名卷必为空 —— 故 workflow 用 `VERIFY_
 换挂到宿主目录并交给 `actions/cache`:`m2-<os>-<hash(settings.xml + agent/**/pom.xml)>` 为 key,
 前缀 `m2-<os>-` 作 restore 兜底,于是 pom 未变时依赖不必重下。本地跑不用管这个变量,默认仍是命名卷。
 
-运行器镜像的两块固定开销(两个 Maven 基础镜像 + `apt` + agent 压缩包,约 1GB)在 CI 上同样逐次重付。
-workflow 改用 `docker/build-push-action` 预先 build 并挂 `cache-from/to: type=gha`(全层),
-再用 `VERIFY_SKIP_BUILD=1` 让 `run.sh` 跳过自带的 build。注意两点:
+运行器镜像的两块固定开销(两个 Maven 基础镜像 + `apt` + agent 压缩包,约 1GB)由 CI 里单独的
+`build-runner` job 构建一次,推 GHCR(`ghcr.io/<owner>/<repo>/verify-runner:9.4.0`),三个场景 job 各自
+`docker pull`。该 job 自己挂 `cache-from/to: type=gha`(全层 scope `verify-runner`),所以镜像没改时
+它只花几十秒。注意三点:
 
-- 标签须与 `docker-compose.yaml` 的 `services.verify.image` 一致 —— compose 只在镜像**缺失**时才
-  现场构建(`docker compose run` 不会因为 Dockerfile 变了就重建)。
+- compose 的 `image` 读 `VERIFY_IMAGE`,没设时回落到本地名 `skywalking-plugin-verify:9.4.0` ——
+  本地照旧由 `run.sh` 自己 build,CI 指向 GHCR。
 - `VERIFY_SKIP_BUILD=1` 是「镜像已备好」的显式承诺:若镜像陈旧,场景会静默跑旧代码。
-  本地调试照常用默认路径,让 `run.sh` 自己 build。
+  另外 compose 只在镜像**缺失**时才现场构建(`docker compose run` 不会因为 Dockerfile 变了就重建)。
+- GHCR 镜像名必须全小写,而本仓库名带大写字母,所以 workflow 里有一道 `tr` 再拼 `VERIFY_IMAGE`。
 
 三个场景在 CI 上是**三个并行 job**(matrix + `fail-fast: false`),墙钟取最慢那个,而不是串行。
 新增场景记得往 workflow 的 `matrix.scenario` 加一行。CI 只跑各场景的默认依赖版本 ——

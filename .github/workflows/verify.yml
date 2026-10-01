@@ -23,13 +23,64 @@ on:
       - 'agent/demo-app/**'
       - '.github/workflows/verify.yml'
 
+env:
+  # 运行器镜像的 tag。与 verify/docker-compose.yaml 的 services.verify.image 同版本号,
+  # 改版本(agent 版本)时两处一起改。
+  RUNNER_IMAGE_VERSION: 9.4.0
+
+# 运行器镜像只构建一次,推 GHCR;三个场景 job 各自 pull。
+# 为什么不用 artifact 分发:那要上传 ~1GB、再让 3 个 job 各下 ~1GB(gzip 来回一趟),
+# 而 GHCR 是内容寻址的 —— 镜像没变时重推只传 manifest(几 KB),job 侧 pull 走 registry
+# 的压缩层拉取,比 buildkit 从 cache 服务导层 + load 进 docker image store 更快。
 jobs:
+  build-runner:
+    name: build runner image
+    # 钉住 24.04:理由同下(ubuntu-latest 2026-10-19 迁 Ubuntu 26)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read   # checkout
+      packages: write  # 推 GHCR
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      # GHCR 镜像名必须全小写,而 github.repository 带大写字母
+      # (…skywalking-javaPluginExtensions) —— 不过 tr 会被 registry 拒。
+      # 顺带把结果写进 GITHUB_ENV,后面的步骤直接用 $VERIFY_IMAGE。
+      - name: Resolve runner image name
+        run: |
+          name=$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "VERIFY_IMAGE=ghcr.io/$name/verify-runner:${{ env.RUNNER_IMAGE_VERSION }}" >> "$GITHUB_ENV"
+
+      # 必须先装 buildx:默认的 docker driver 不支持 gha 缓存导出,会报
+      # "Cache export is not supported for the docker driver"(实测踩过)。
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # 层缓存让这个 job 自己只花几十秒(apt / agent 包 / 两个基础镜像都命中);
+      # ignore-error:缓存导出超时等失败不至于拖垮整个验证(退化成每次重建)。
+      # 这里不 load —— build job 不跑场景,产物给下游 pull。
+      - name: Build and push runner image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: verify/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.VERIFY_IMAGE }}
+          cache-from: type=gha,scope=verify-runner
+          cache-to: type=gha,scope=verify-runner,mode=max,ignore-error=true
+
   verify:
     name: verify (${{ matrix.scenario }})
+    needs: build-runner
     # 钉住 24.04:ubuntu-latest 将于 2026-10-19 迁到 Ubuntu 26。本回路整条链
     # (buildx driver / compose / 基础镜像拉取)对 docker 与 buildx 版本敏感,
     # 不想在一个无人值守的凌晨被发行版大版本改动打挂。同 major 的镜像周更照收。
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     strategy:
       # 三个场景并行,墙钟取最慢那个。fail-fast 关掉:一个场景挂了不该掐掉
       # 另两个 —— 全跑完才知道是"只坏一个"还是"全坏"。
@@ -49,6 +100,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # 同上:小写化后写进环境,compose 的 image 由 VERIFY_IMAGE 决定
+      - name: Resolve runner image name
+        run: |
+          name=$(printf '%s' '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          echo "VERIFY_IMAGE=ghcr.io/$name/verify-runner:${{ env.RUNNER_IMAGE_VERSION }}" >> "$GITHUB_ENV"
+
       # CI 每次是全新 runner:命名卷必然为空,plugins + demo-app(Spring Boot /
       # jedis / kafka / grpc / hutool …)的全部依赖都要重下。缓存仓库目录后,
       # maven 只需补拉 pom 变更涉及的部分;pom 变了就换 key,restore-keys 兜底沿用旧的。
@@ -63,26 +120,8 @@ jobs:
           restore-keys: |
             m2-${{ runner.os }}-
 
-      # 运行器镜像本身也逐层缓存:apt + agent 压缩包 + 两个 Maven 基础镜像
-      # (~1GB 拉取)只在首次付代价,之后命中 gha 层缓存。
-      # 标签必须与 verify/docker-compose.yaml 的 services.verify.image 一致,
-      # 否则下一步的 compose run 找不到本地镜像会回退去现场构建。
-      # ignore-error:缓存导出超时等失败不至于拖垮整个验证(退化成每次重建)。
-      # 必须先装 buildx:默认的 docker driver 不支持 gha 缓存导出,会报
-      # "Cache export is not supported for the docker driver"(实测踩过)。
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build verify runner image (cached layers)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: verify/Dockerfile
-          load: true
-          push: false
-          tags: skywalking-plugin-verify:9.4.0
-          cache-from: type=gha,scope=verify-runner
-          cache-to: type=gha,scope=verify-runner,mode=max,ignore-error=true
+      - name: Pull runner image
+        run: docker pull "$VERIFY_IMAGE"
 
       # 场景名走 env 传,不内插进脚本文本 —— matrix 值虽是我们自己写死的,
       # 但别给这个页面留一个"以后有人加了外部输入"的坑。

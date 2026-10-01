@@ -9,7 +9,9 @@ services:
     build:
       context: ..
       dockerfile: verify/Dockerfile
-    image: skywalking-plugin-verify:9.4.0
+    # 本地默认用本地构建的镜像;CI 下由 VERIFY_IMAGE 指向 GHCR 上构建好的那个
+    # (见 .github/workflows/verify.yml 的 build-runner job)。
+    image: ${VERIFY_IMAGE:-skywalking-plugin-verify:9.4.0}
     working_dir: /src
     volumes:
       - ..:/src
