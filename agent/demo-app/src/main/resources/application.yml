@@ -24,24 +24,27 @@ spring:
 
 # 依赖拓扑演示(票 02/03):Cache / Database / MQ 三层造数目标。
 #
-# 刻意**独立前缀 + 环境变量兜底**,不碰 spring.datasource —— 让 Boot 用 MySQL 顶掉
-# H2 演示库会连带打挂 schema.sql 灌数据与 h2 控制台(NOTES 已记 H2 的既有坑)。
-# 容器内用 compose 服务名(docker compose --profile deps up),本机/verify 用 localhost:
-#   DEPS_REDIS_HOST=redis / DEPS_MYSQL_URL=jdbc:mysql://mysql:3306/... / DEPS_KAFKA_BOOTSTRAP=kafka:9092
+# 刻意**独立前缀**,不碰 spring.datasource —— 让 Boot 用 MySQL 顶掉 H2 演示库会连带
+# 打挂 schema.sql 灌数据与 /h2 控制台(NOTES 已记 H2 的既有坑)。
 #
-# 中间件不在场时端点**照调**,连不上会变成依赖图里的红边(错误率着色),不是"没有依赖"。
+# **默认值 = 本机跑应用时的宿主映射端口**(compose 的 deps profile 把 6379/3306/9092
+# 映射成 16379/13306/19092,避开本机常被别的栈占用的标准端口)。所以:
+#   - 本机跑 jar(pwsh / run-with-agent.ps1 / demo.ps1):**什么都不用设**
+#   - compose 里的 demo-app 容器:用服务名 redis:6379 / mysql:3306 / kafka:9092
+#     (compose 的 environment 已经覆盖下面的默认值)
+#   - 中间件不在场时端点**照调**,连不上即没有依赖边(不是红边),见 NOTES 第 15 条
 deps:
   redis:
     host: ${DEPS_REDIS_HOST:localhost}
-    port: ${DEPS_REDIS_PORT:6379}
+    port: ${DEPS_REDIS_PORT:16379}
   mysql:
     # connectTimeout/socketTimeout 直接写在 URL 上:JDBC 无 Spring Boot 那种属性覆盖,
     # 超时必须显式给,否则默认近乎无限,挂住即拖垮压测与页面轮询。
-    url: "${DEPS_MYSQL_URL:jdbc:mysql://localhost:3306/demo?connectTimeout=2000&socketTimeout=3000}"
-    username: ${DEPS_MYSQL_USER:demo}
-    password: ${DEPS_MYSQL_PASSWORD:demo}
+    url: "${DEPS_MYSQL_URL:jdbc:mysql://localhost:13306/demo?connectTimeout=2000&socketTimeout=3000}"
+    username: ${DEPS_MYSQL_USER:root}
+    password: ${DEPS_MYSQL_PASSWORD:}
   kafka:
-    bootstrap: ${DEPS_KAFKA_BOOTSTRAP:localhost:9092}
+    bootstrap: ${DEPS_KAFKA_BOOTSTRAP:localhost:19092}
     topic: ${DEPS_KAFKA_TOPIC:sw-demo}
   http:
     # 外呼白名单:演示端点不接受任意 URL(避免变成 SSRF 口子)。

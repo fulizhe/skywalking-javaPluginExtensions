@@ -66,6 +66,10 @@ param(
     [switch]$WithDeps,
     # **全部页面接口**:把各仪表盘/演示页的数据源与演示端点一次压全(清单见 $ALL_PATHS)。
     # 与 -NormalOnly / -WithDeps 三者互斥。
+    # 压测档位(与下面三个 switch 等价,默认 AllEndpoints):
+    #   AllEndpoints 全部页面接口 / NormalOnly 只业务正常端点 / WithDeps 只依赖三层
+    [ValidateSet("AllEndpoints", "NormalOnly", "WithDeps")]
+    [string]$Mode = "",
     [switch]$AllEndpoints,
     # 跳过压测后的指标摘要
     [switch]$SkipMetrics,
@@ -139,11 +143,16 @@ $ALL_GROUPS = [ordered]@{
 $ALL_PATHS = ($ALL_GROUPS.Values | ForEach-Object { $_ }) -join ","
 
 $modeCount = 0
+if ($Mode) {
+    if ($Mode -eq "AllEndpoints") { $AllEndpoints = $true }
+    elseif ($Mode -eq "NormalOnly") { $NormalOnly = $true }
+    elseif ($Mode -eq "WithDeps") { $WithDeps = $true }
+}
 if ($NormalOnly) { $modeCount++ }
 if ($WithDeps) { $modeCount++ }
 if ($AllEndpoints) { $modeCount++ }
 if ($modeCount -gt 1) {
-    Write-Host "[FAIL] -NormalOnly / -WithDeps / -AllEndpoints 三者互斥,只能给一个:"
+    Write-Host "[FAIL] -NormalOnly / -WithDeps / -AllEndpoints 三者互斥,只能给一个(或用 -Mode):"
     Write-Host "       -NormalOnly    业务正常端点(排除 error),压指标聚合"
     Write-Host "       -WithDeps      依赖造数端点,压依赖边"
     Write-Host "       -AllEndpoints  全部页面接口(含慢/错,会刷告警)"
