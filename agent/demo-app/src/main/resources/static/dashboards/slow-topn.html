@@ -324,7 +324,36 @@ function delta(prevRanks, ranks){
   return out;
 }
 
+/**
+ * 渲染失败要**看得见**。
+ *
+ * <p>为什么必须这样：之前 `load()` 是「先渲染结论卡、后渲染榜」，于是榜一旦抛异常，
+ * 页面上就剩一张有数字的结论卡 + 一大片空白，而且**浏览器控制台之外没有任何线索** ——
+ * 演示时看到的就是"页面坏了但说不出坏在哪"。这个函数把错误直接画在空白处。
+ *
+ * <p>同时清掉结论卡：结论卡有数字会让观众以为"数据都在，只是没画出来"。
+ */
+function showRenderError(e){
+  var empty = document.getElementById("empty");
+  if (empty) {
+    empty.style.display = "";
+    empty.innerHTML = "<b style='color:#fb7185'>页面渲染失败</b>："
+      + esc(String(e && e.message ? e.message : e))
+      + "<br>这是本页 JS 的问题，不是读口没数据。详情见浏览器控制台。";
+  }
+  if (window.SWPresenter) { try { window.SWPresenter.conclusion([]); } catch (e2) { /* 清不掉就算了 */ } }
+  if (window.console) { window.console.error("slow-topn render failed", e); }
+}
+
 function render(rows){
+  try {
+    renderInner(rows);
+  } catch (e) {
+    showRenderError(e);
+  }
+}
+
+function renderInner(rows){
   var all = ranked(rows);
   var list = bySearch(all);
   var famHost = document.getElementById("familyHost");
@@ -346,6 +375,8 @@ function render(rows){
       + "<code>/api/deps-demo/all</code>（依赖面打穿四层）或 <code>/fullSample</code>（全貌入口）。";
     document.getElementById("hint").textContent = rankLabel() + " · 窗口内无数据";
     document.getElementById("note").innerHTML = "";
+    // 结论卡也要清 —— 留着上一次的数字会让观众以为"数据都在，只是没画出来"
+    if (window.SWPresenter) { try { window.SWPresenter.conclusion([]); } catch (e) { /* 清不掉就算了 */ } }
     return;
   }
   if (!list.length) {
@@ -542,8 +573,10 @@ function load(){
     aggTruncated = !!(d && d.truncated);
     var list = Object.keys(byEp).map(function(k){ return byEp[k]; });
     window.__lastRows = list;      // 族行展开要重渲染，保留原始行
-    presenterConclusion(byEp);
+    // 顺序要紧：**先渲染榜，再更新结论卡**。反过来的话榜一抛异常就会留下
+    // "结论卡有数字、榜一片空白"的假象（用户实跑遇到的就是这个）。
     render(list);
+    presenterConclusion(byEp);
     var chip = document.getElementById("scope-chip");
     if (chip) { chip.textContent = rankLabel() + " · " + SORTS[sortKey].label; }
   }).catch(function(e){
@@ -591,6 +624,14 @@ function startPolling(){
 function stopPolling(){ if (timer !== null) { clearInterval(timer); timer = null; } }
 
 document.addEventListener("DOMContentLoaded", function(){
+  // 全局兜底：任何未捕获异常都在页面上显示出来，而不是留一片空白让人猜。
+  // 这类"白屏无诊断"最费时间 —— 演示时更不能接受。
+  window.addEventListener("error", function(ev){
+    if (ev && ev.error) { showRenderError(ev.error); }
+  });
+  window.addEventListener("unhandledrejection", function(ev){
+    showRenderError((ev && ev.reason) || "Promise 未处理拒绝");
+  });
   Array.prototype.forEach.call(document.querySelectorAll("#ranges span"), function(b){
     b.addEventListener("click", function(){
       Array.prototype.forEach.call(document.querySelectorAll("#ranges span"), function(x){ x.className = ""; });
