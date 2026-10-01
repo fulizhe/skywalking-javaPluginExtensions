@@ -104,7 +104,7 @@ services:
       # 映射到宿主机只为现场用 redis-cli 看 / 给**本机**跑的应用用;
       # compose 内的 demo-app 容器走服务名 redis:6379(与映射无关)。
       # 宿主端口选 16379:本机常被其它栈(如 RuoYi 的 redis)占着 6379。
-      # 本机跑应用时对应 DEPS_REDIS_PORT=16379(见 deps.ps1 -Status 的提示)。
+      # 本机跑应用时对应 DEPS_REDIS_PORT=16379(默认值已写进 application.yml,一般不用设)。
       - "16379:6379"
     mem_limit: 256m
     healthcheck:

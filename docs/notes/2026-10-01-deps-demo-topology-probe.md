@@ -105,7 +105,8 @@ demo-app 自带 `component-libraries.yml` 里的顶层键：
 pwsh ./agent/demo-app/scripts/run-with-agent.ps1 -SkipPluginBuild
 
 # 冒烟八个造数端点 + 计时
-pwsh ./agent/demo-app/scripts/deps.ps1 -Smoke -BaseUrl http://127.0.0.1:9600
+pwsh ./agent/demo-app/scripts/run-with-agent.ps1 -WithDeps
+curl.exe -s --noproxy "*" "http://127.0.0.1:9600/api/deps-demo/all"
 
 # 读边（组件名按实测值：h2-jdbc-driver / kafka-producer / Http(#128)）
 curl.exe -s --noproxy "*" "http://127.0.0.1:9600/inner/sw/topology?view=summary"

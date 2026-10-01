@@ -204,8 +204,8 @@ curl -s "http://127.0.0.1:9600/api/deps-demo/all"   # 依赖面四层一次(Cach
 ```
 
 ```powershell
-pwsh .\scripts\deps.ps1 -Smoke        # 打八个造数端点 + 打印每层耗时/失败原因
-pwsh .\scripts\deps.ps1 -Status        # 看 redis/mysql/kafka 状态
+pwsh .\scripts\run-with-agent.ps1 -WithDeps    # 起应用时顺带拉起 redis/mysql/kafka
+docker compose --profile deps ps              # 看三层中间件状态
 ```
 
 `/fullSample` 默认**带**依赖三层(约 8s/请求,中间件未起时),压测里用 `?deps=false` 关掉。
@@ -283,7 +283,7 @@ bash verify/run.sh --matrix                        # 附带跑各场景的依赖
 | 构建报 `unexpected EOF` | 拉 agent 发行包时网络抖 | 直接重跑 `docker compose up --build -d demo-app`(下载已带重试) |
 | `docker compose ps` 一直 `starting`,或变 `unhealthy` | 应用没起来 | `docker compose logs demo-app` 看最后 30 行;最常见是 9600 端口被占 |
 | 页面打得开但图表全空 | 还没造数据 | 回 §2.3;仪表盘 3~6 秒轮询一次,稍等 |
-| 压测跑起来了但依赖拓扑图上只有两三个节点 | 中间件没起 / 或本机端口上是别的服务 | `pwsh .\agent\demo-app\scripts\deps.ps1 -Status`;中间件缺席时 Redis / MySQL **没有边**(不是红边),见 §2.6 的坑 2 |
+| 压测跑起来了但依赖拓扑图上只有两三个节点 | 中间件没起 / 或本机端口上是别的服务 | `docker compose --profile deps ps`;中间件缺席时 Redis / MySQL **没有边**(不是红边),见 §2.6 的坑 2 |
 | 压测吞吐低得离谱、每行 `[progress]` 间隔很久 | 路径集里混进了慢端点 | 慢端点有 `/api/order/1`(8.5s)、`/api/trace-alert-demo/slow`、`/longTimeTask`、`/api/deps-demo/kafka`(broker 不可达时 3s);压"纯指标"用 `-NormalOnly`,压测里 `/fullSample` 要带 `?deps=false` |
 | 告警面板永远是空的 | 没造告警事件 | 回 §2.5 打开 `/api/trace-alert-demo/error` |
 | **告警面板里有莫名其妙的 ERROR** | 多半是你手打错路径导致 404 / 405 | 看事件里的 `url` 字段。任何 ≥500 的响应(含 404 路径不存在、405 方法不对)都会被判为错误并真的发一条告警。仪表盘入口要用 `/dashboards/index.html`;清空告警要用 `POST /inner/sw/trace-alert/clear`(GET 会 405) |
@@ -334,7 +334,6 @@ docker image rm demo-app-agent:9.4.0
 |---|---|
 | 场景怎么声明、断言怎么写、加新插件场景 | [`verify/README.md`](README.md) |
 | 应用的全部读口、参数、术语表 | [`agent/demo-app/README.md`](../agent/demo-app/README.md) |
-| 三种测试场景怎么跑（本地 pwsh / 本地 compose / 远程 Linux compose） | [`agent/demo-app/README-verify-matrix.md`](../agent/demo-app/README-verify-matrix.md) |
 | 远程 Linux 服务器 compose 压测的坑清单 | [`agent/demo-app/README-remote-verify.md`](../agent/demo-app/README-remote-verify.md) |
 | Trace 告警的配置项与判定规则 | `agent/logfile-reporter-plugin/README-trace-alert.md` |
 | 插件构建为什么用 JDK17、运行用 JDK8 | `docs/adr/adr-01*.md` |

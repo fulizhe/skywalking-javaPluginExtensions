@@ -117,16 +117,28 @@ function Test-HttpOnce($url) {
 }
 
 # ---- 0. 可选:先拉起 deps profile 中间件(依赖拓扑演示)----
-# 放在最前面,是为了"起应用前中间件已在" —— 反过来的话,应用起来后造的数会先撞上一批失败边。
-# Docker 缺席**只警告不失败**:Cache/Database 两层没有边(连接未建立),MQ/外呼仍有边,见 NOTES 第 15 条。
+# 放在最前面,是为了"起应用前中间件已在"。Docker 缺席**只警告不失败**:
+# Cache/Database 两层会没有依赖边(连接未建立不产生出口 span),MQ/外呼仍有边。
 if ($WithDeps) {
     Write-Host "[..] -WithDeps:拉起 deps profile 中间件(redis / mysql / kafka)"
-    & pwsh -NoProfile -File (Join-Path $PSScriptRoot "deps.ps1") -Up
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[WARN] deps 中间件未就绪(exit=$LASTEXITCODE)。继续起应用 ——"
-        Write-Host "       Cache/Database 两层会**没有依赖边**(连接都没建起来,不产生出口 span);"
-        Write-Host "       MQ 与外呼仍有边(调用本身被观测到),但 errorCount 可能仍是 0。"
-        Write-Host "       详见 NOTES-docker-stress.md 第 15 条。"
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        Write-Host "[WARN] 没装 docker,跳过。依赖图里 Redis / MySQL 两层会没有节点(不是红边)。"
+    } else {
+        Push-Location $demoAppDir
+        try {
+            docker compose --profile deps up -d redis mysql kafka
+        } finally {
+            Pop-Location
+        }
+        $up = @(docker ps --filter "name=demo-app-stability" --format "{{.Names}}" 2>$null |
+            Where-Object { $_ -match "redis|mysql|kafka" }).Count
+        if ($up -eq 0) {
+            Write-Host "[WARN] 中间件没起来(拉镜像失败?)。继续起应用 —— Cache/Database 两层没有依赖边,"
+            Write-Host "       MQ 与外呼仍有边但 errorCount 可能仍是 0。详见 NOTES-docker-stress.md 第 15 条。"
+        } else {
+            Write-Host "[OK] 中间件 $up/3 个在跑(宿主端口 redis 16379 / mysql 13306 / kafka 19092,"
+            Write-Host "     应用侧已由 application.yml 的默认值指向它们,不需要设任何环境变量)"
+        }
     }
 }
 

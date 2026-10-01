@@ -12,9 +12,6 @@
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
 >
-> **三种测试场景怎么跑**（本地 Windows pwsh / 本地 compose / 远程 Linux compose 三者并排对照），
-> 看 [`README-verify-matrix.md`](README-verify-matrix.md)。
->
 > **要在专用 Linux 服务器上做 compose 全面验证与压测**,看
 > [`README-remote-verify.md`](README-remote-verify.md) —— 坑集中列在一处(别边跑边踩)。
 
@@ -195,14 +192,11 @@ pwsh ./scripts/run-with-agent.ps1 -WithDeps
 pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 ```
 
-只要中间件不想经脚本拉（例如已经在 compose 里起着），用 `pwsh ./scripts/deps.ps1 -Up`；
-`-Status` 看状态、`-Smoke` 打一遍造数端点、`-Down` 停。跨平台等价写法是
-`docker compose --profile deps up -d`（`agent/demo-app/docker-compose.yaml`）。
+中间件用 `run-with-agent.ps1 -WithDeps` 顺带拉起（内部就是 `docker compose --profile deps up -d`，见 `agent/demo-app/docker-compose.yaml`）。
 
-> **本机跑应用时连中间件要用映射后的宿主端口**（容器内仍是标准端口）：
-> `DEPS_REDIS_PORT=16379`、`DEPS_MYSQL_URL=jdbc:mysql://localhost:13306/demo?...`、
-> `DEPS_KAFKA_BOOTSTRAP=localhost:19092`。之所以不用 6379/3306/9092，是因为宿主上这些端口
-> 常被别的栈占着（本机的 RuoYi 就自带 redis/mysql）。`deps.ps1 -Status` 会把这几条打出来。
+> **本机跑应用时连中间件不用设任何环境变量**：宿主映射端口（redis `16379` / mysql `13306` / kafka `19092`）
+> 已经写进 `application.yml` 的默认值。之所以不用 6379/3306/9092，是因为宿主上这些端口
+> 常被别的栈占着（本机的 RuoYi 就自带 redis/mysql）。
 
 | 造数端点 | 层 | 说明 |
 | --- | --- | --- |
@@ -266,7 +260,6 @@ agent/demo-app/
     ├── setup.ps1              # 环境自足:检测/下载 agent、装插件、产出启动命令
     ├── validate.ps1           # 验证回路(构建→安装→启动→造数→断言→报告)
     ├── validate-h2.ps1        # H2 影子存储 + Trace 指标专项验证
-    ├── deps.ps1               # 依赖拓扑演示的中间件编排(-Up/-Down/-Status/-Smoke/-All)
     ├── stress.ps1             # 压测辅助(起应用/压测/指标摘要/停应用;委托 HttpLoadTest)
     ├── run-with-agent.ps1     # IDE/手动模式(同参,保持运行)
     └── start-demo.ps1         # 纯应用启动(无 agent)
