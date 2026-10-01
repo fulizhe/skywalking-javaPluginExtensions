@@ -26,13 +26,18 @@
 
     var STORAGE_KEY = "sw.presenter.mode";
 
-    /** 汇报动线：指标 → 拓扑 → 告警（首尾相接，翻页就是循环）。 */
+    /**
+     * 汇报动线：指标 → 慢调用榜 → 拓扑 → 告警（首尾相接，翻页就是循环）。
+     * 顺序按叙事排：先看"总量与水位"（指标）→ 再看"哪里慢、慢到什么量级"（慢调用榜，
+     * 争取资源要用的就是那张）→ 再看"慢在哪条路上、谁在调我"（拓扑）→ 最后看"有没有出事"（告警）。
+     */
     var PAGES = {
         metrics:  { href: "metrics.html",           title: "Trace 指标" },
+        slow:     { href: "slow-topn.html",          title: "慢调用 TopN" },
         topology: { href: "topology.html",          title: "依赖拓扑" },
         alert:    { href: "dashboard.html?p=alert", title: "Trace 告警" }
     };
-    var ORDER = ["metrics", "topology", "alert"];
+    var ORDER = ["metrics", "slow", "topology", "alert"];
 
     var shell = null;
     var cardItems = null;

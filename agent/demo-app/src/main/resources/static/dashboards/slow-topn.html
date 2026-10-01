@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>慢调用 TopN 榜</title>
+<script src="range.js"></script>
+<script src="presenter.js"></script>
+<script src="poll.js"></script>
+<link rel="stylesheet" href="presenter.css">
+<style>
+  *{box-sizing:border-box}
+  :root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;
+        --ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+  body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);
+       font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;
+       -webkit-font-smoothing:antialiased;min-height:100vh}
+  a{color:var(--ac);text-decoration:none} a:hover{text-decoration:underline}
+  .bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;
+       background:#0c1526;border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+  .bar h1{font-size:17px;margin:0}
+  .bar .home{font-size:12.5px;color:var(--mut)}
+  .field{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+  .seg{display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+  .seg span{padding:4px 10px;font-size:12px;cursor:pointer;color:#c7cff0;background:#0f1930}
+  .seg span+span{border-left:1px solid var(--bd)}
+  .seg span.on{background:#1c2b4a;color:#fff;font-weight:700}
+  .btn{background:#1c2b4a;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;
+       padding:4px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+  .btn:hover{background:#24365c}
+  select.btn{padding:4px 6px}
+  .summary{font-size:12px;color:var(--mut);margin-left:auto}
+  .page{padding:16px 18px 40px;max-width:1360px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+  .card-h{margin:0 0 10px;font-size:13.5px;color:var(--ac);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:7px 8px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}
+  th{position:sticky;top:0;background:#0c1526;color:var(--mut);font-weight:600;z-index:1}
+  td.num{text-align:right;font-family:var(--mono)}
+  tbody tr{cursor:pointer} tbody tr:hover{background:#16233d}
+  td.rank{font-family:var(--mono);color:var(--mut);width:1%}
+  td.rank .no{color:#e8eefc;font-weight:700;font-size:14px}
+  .up{color:var(--ok);font-size:11px;margin-left:4px}
+  .down{color:var(--err);font-size:11px;margin-left:4px}
+  .flat{color:var(--mut);font-size:11px;margin-left:4px}
+  .fresh{color:var(--warn);font-size:11px;margin-left:4px}
+  .bar-rank{display:inline-block;height:6px;border-radius:3px;background:var(--ac);vertical-align:middle;margin-right:6px;min-width:2px}
+  .muted{color:var(--mut)}
+  .note{font-size:12px;color:var(--mut);line-height:1.8;border-top:1px dashed var(--bd);padding-top:10px;margin-top:12px}
+  .note b{color:#c7cff0}
+  .caveats{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:12px 16px;margin-bottom:14px}
+  .caveats h2{margin:0 0 8px;font-size:12.5px;color:var(--ac)}
+  .caveats ul{margin:0;padding-left:18px}
+  .caveats li{font-size:12px;color:var(--mut);line-height:1.85;margin-bottom:2px}
+  .caveats b{color:#c7cff0}
+  .empty{padding:30px 12px;text-align:center;color:var(--mut);font-size:13px;line-height:1.9}
+  .foot{margin-top:10px;color:var(--mut);font-size:11.5px;line-height:1.9}
+  /* 名次变化图例：不解释的话 ▲▼ 会被当成装饰 */
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>慢调用 TopN 榜</h1>
+  <a class="home" href="metrics.html">← 指标大屏</a>
+  <span class="field presenter-hide">时间窗
+    <span class="seg" id="ranges">
+      <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
+    </span>
+  </span>
+  <span class="field presenter-hide">排序依据
+    <select class="btn" id="topnSort">
+      <option value="p95">P95 降序</option>
+      <option value="worstP95">最差 P95 降序</option>
+      <option value="p99">P99 降序</option>
+      <option value="avgLatency">平均耗时降序</option>
+      <option value="slowRate">慢率降序</option>
+      <option value="errorRate">错误率降序</option>
+      <option value="requestCount">请求数降序</option>
+    </select>
+  </span>
+  <span class="field presenter-hide">前
+    <select class="btn" id="topnN">
+      <option value="10">10</option><option value="20">20</option><option value="50">50</option>
+    </select>
+  </span>
+  <span class="summary presenter-hide" id="hint">加载中…</span>
+  <span class="presenter-only" id="scope-chip" title="演示模式下控件被收起，这一行告诉你当前看的是哪一档"></span>
+</div>
+
+<div class="page">
+  <div id="presenter-slot"></div>
+
+  <section class="caveats presenter-collapse">
+    <h2>口径说明（看这张榜之前必读）</h2>
+    <ul>
+      <li><b>榜排的是窗口内「全量调用」的分位，不是「慢调用次数」</b>。数据源
+          <code>/inner/sw/metrics/query?aggregate=true</code>（真聚合、落 H2、<b>跨重启保留</b>）。</li>
+      <li><b>「最差 P95」= 窗口内最差那个桶的 P95</b>，不是平均。平均值会把尖峰抹平，
+          而汇报要问的正是"最坏的时候有多坏"。</li>
+      <li><b>分位是按请求数加权平均</b>的近似值（≤24h 用分钟分位，7d/30d 用小时分位，
+          小时分位本身是分钟分位的加权近似）；<b>样本不足的桶分位为空、不参与加权</b>。</li>
+      <li><b>「慢率 / 错误率」是插件自己的计数口径</b>，与"慢调用"告警的阈值规则是两套判断，
+          两者不必一致。</li>
+      <li><b>点行打开的是「逐条证据」，不是同一份数据</b>：<code>/inner/sw/trace-slow</code> 的 SQL 是
+          <code>WHERE endpoint = ?</code>（<b>单 endpoint 精确匹配</b>）、按耗时降序、受 <code>limit</code> 截断，
+          载荷可能已过期。<b>两页数字不要相加。</b></li>
+      <li><b>时间窗的桶范围与指标大屏同源</b>（共用 <code>range.js</code> 的 <code>SWRanges</code>）——
+          同一档位在两页查到的是同一批分钟桶。24h 及以内走分钟分位，更长走小时 rollup。</li>
+      <li>时间窗拉到 7d/30d 时，被清理掉的旧桶会让<b>早期的名次失去样本</b>；
+          那时看「名次变化」要结合 <code>bucketCount</code> 一起看。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h3 class="card-h">按「慢」排序的 endpoint 榜</h3>
+    <table>
+      <thead><tr>
+        <th>名次</th><th>Endpoint</th><th class="num">请求</th><th class="num">错误率</th>
+        <th class="num">慢率</th><th class="num">P50</th><th class="num">P95</th>
+        <th class="num">最差 P95</th><th class="num">桶数</th><th>逐条慢调用</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="legend presenter-hide">
+      <span><span class="up">▲n</span> 比上一档前进 n 名</span>
+      <span><span class="down">▼n</span> 后退 n 名</span>
+      <span><span class="flat">—</span> 名次没动，或还没有可比的上一档</span>
+      <span><span class="fresh">新</span> 上一档里没有这个端点</span>
+    </div>
+    <div class="empty" id="empty" style="display:none"></div>
+    <div class="note" id="note"></div>
+    <div class="foot">
+      名次变化的基准是<b>上一次换档</b>（换时间窗或换排序依据）时的名次 —— 同一档内每 10s 轮询一次，
+      拿上一次渲染当基准的话箭头会一直抖，那是噪声不是趋势。<br>
+      逐条证据、链路可视化、双源对照见
+      <a href="dashboard.html?p=statistic">Trace 缓存统计</a> ·
+      <a href="/inner/sw/trace-recent?limit=20" target="_blank">最近链路</a> ·
+      <a href="/inner/sw/trace-parity" target="_blank">H2 影子对账</a>。
+    </div>
+  </section>
+</div>
+
+<script>
+"use strict";
+var currentRange = SWRanges.DEFAULT_RANGE;
+var sortKey = "p95";
+var topN = 10;
+var lastRanks = null;      // { w: 窗口标签, s: 排序依据, ranks: {ep:名次} }
+var aggTruncated = false;
+
+/** 排序依据 → 取值函数。键名与服务端 MetricsRow.toMap() 的 camelCase 字段一一对应。 */
+var SORTS = {
+  p95:          { label: "P95 降序",      get: function(r){ return r.p95; } },
+  worstP95:     { label: "最差 P95 降序", get: function(r){ return r.worstP95; } },
+  p99:          { label: "P99 降序",      get: function(r){ return r.p99; } },
+  avgLatency:   { label: "平均耗时降序",  get: function(r){ return r.avgLatency; } },
+  slowRate:     { label: "慢率降序",      get: function(r){ return r.slowRate; } },
+  errorRate:    { label: "错误率降序",    get: function(r){ return r.errorRate; } },
+  requestCount: { label: "请求数降序",    get: function(r){ return r.requestCount; } }
+};
+
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+  return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]; }); }
+function fmtInt(n){ return n == null ? "-" : Number(n).toLocaleString("en-US"); }
+function fmtMs(v){ return v == null ? "-" : (v >= 1000 ? (v/1000).toFixed(2) + " s" : Math.round(v) + " ms"); }
+function pct(v){ return v == null ? "-" : (v * 100).toFixed(2) + "%"; }
+function rankLabel(){ return SWRanges.label(currentRange); }
+
+/** 榜一行的口径宽度（条形长度按当前依据的相对值，量级一眼可见）。 */
+function barWidth(v, max){ return (!max || v == null) ? "" : Math.max(2, Math.round(v / max * 54)) + "px"; }
+
+function ranked(rows){
+  var get = SORTS[sortKey].get;
+  return rows.slice()
+    .filter(function(r){ return r.endpoint != null && Number(r.requestCount) > 0 && get(r) != null; })
+    .sort(function(a,b){
+      var d = (Number(get(b)) || 0) - (Number(get(a)) || 0);
+      // 同分按请求数兜底：否则名次会在两次刷新间随机互换，"名次变化"就成了噪声
+      return d !== 0 ? d : (Number(b.requestCount) || 0) - (Number(a.requestCount) || 0);
+    });
+}
+
+/**
+ * 名次变化的纯计算（不碰 DOM，可单测 —— 见 verify/frontend/slow-topn-render.test.js）。
+ * 「没有基准」与「上一档里没这个端点」必须分开：混起来会在首屏给每个端点都贴一个"新"字。
+ */
+function delta(prevRanks, ranks){
+  var out = {};
+  Object.keys(ranks).forEach(function(ep){
+    var cur = ranks[ep];
+    if (!prevRanks){ out[ep] = { cls:"flat", text:"—" }; return; }
+    var was = prevRanks[ep];
+    if (was == null){ out[ep] = { cls:"fresh", text:"新" }; }
+    else if (was === cur){ out[ep] = { cls:"flat", text:"—" }; }
+    else if (was > cur){ out[ep] = { cls:"up", text:"▲" + (was - cur) }; }
+    else { out[ep] = { cls:"down", text:"▼" + (cur - was) }; }
+  });
+  return out;
+}
+
+function render(rows){
+  var tbody = document.getElementById("rows");
+  var list = ranked(rows);
+  var ranks = {};
+  list.forEach(function(r,i){ ranks[r.endpoint] = i + 1; });
+
+  // 基准只在**换档**时推进。旧名次必须在覆盖快照之前取出来，否则每行都在跟自己比。
+  var w = rankLabel();
+  var cmp = null, prev = null;
+  if (lastRanks && (lastRanks.w !== w || lastRanks.s !== sortKey)) { cmp = lastRanks.w; prev = lastRanks.ranks; }
+  lastRanks = { w: w, s: sortKey, ranks: ranks };
+  var d = delta(cmp ? prev : null, ranks);
+
+  var get = SORTS[sortKey].get;
+  var shown = list.slice(0, topN);
+  var max = shown.length ? Math.max.apply(null, shown.map(function(r){ return Number(get(r)) || 0; })) : 0;
+
+  var empty = document.getElementById("empty");
+  if (!list.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "";
+    empty.innerHTML = "窗口内还没有 endpoint 指标。<br>先造点流量，例如 "
+      + "<code>/api/deps-demo/all</code>（依赖面打穿四层）或 <code>/fullSample</code>（全貌入口）。";
+    document.getElementById("hint").textContent = w + " · 窗口内无数据";
+    document.getElementById("note").innerHTML = "";
+    return;
+  }
+  empty.style.display = "none";
+
+  tbody.innerHTML = shown.map(function(r){
+    var rank = ranks[r.endpoint];
+    // 证据页阈值取该端点自己的 P95：全站统一 3000ms 对快端点毫无意义、对慢端点又漏掉一堆
+    var thr = Math.max(1, Math.round(Number(r.p95) || 0));
+    return "<tr data-href='trace-slow.html?endpoint=" + encodeURIComponent(r.endpoint) + "&minLatencyMs=" + thr + "'>"
+      + '<td class="rank"><span class="no">' + rank + "</span>"
+      + '<span class="' + d[r.endpoint].cls + '">' + d[r.endpoint].text + "</span></td>"
+      + "<td><span class='bar-rank' style='width:" + barWidth(Number(get(r)) || 0, max) + "'></span>"
+      + "<span class='mono' title='" + esc(r.endpoint) + "'>" + esc(r.endpoint) + "</span></td>"
+      + '<td class="num">' + fmtInt(r.requestCount) + "</td>"
+      + '<td class="num">' + pct(r.errorRate) + "</td>"
+      + '<td class="num">' + pct(r.slowRate) + "</td>"
+      + '<td class="num">' + fmtMs(r.p50) + "</td>"
+      + '<td class="num">' + fmtMs(r.p95) + "</td>"
+      + '<td class="num">' + fmtMs(r.worstP95) + "</td>"
+      + '<td class="num" title="该端点在窗口内落到几个桶">' + fmtInt(r.bucketCount) + "</td>"
+      + "<td><a class='mono' target='_blank' title='按该端点自己的 P95（" + thr + "ms）列出逐条慢调用，可点行进链路图'"
+      + " href='trace-slow.html?endpoint=" + encodeURIComponent(r.endpoint) + "&minLatencyMs=" + thr + "'>慢调用 ›</a></td>"
+      + "</tr>";
+  }).join("");
+
+  // 点行 = 去看这个端点的逐条慢调用（榜 → 证据）。行内已有同一个链接，点它别再跳一次。
+  Array.prototype.forEach.call(tbody.querySelectorAll("tr[data-href]"), function(tr){
+    tr.addEventListener("click", function(ev){
+      if (ev.target && ev.target.tagName === "A") { return; }
+      window.open(tr.getAttribute("data-href"), "_blank");
+    });
+  });
+
+  document.getElementById("hint").textContent =
+    w + " · " + SORTS[sortKey].label + " · 前 " + shown.length + " / 共 " + list.length + " 个"
+    + (cmp ? " · 名次变化 vs " + cmp : "");
+
+  var notes = [];
+  notes.push("<b>榜 = 窗口内全量调用的分位</b>，不是「慢调用次数榜」。次数是插件 slowCount 的口径，"
+    + "与逐条慢段不是一回事，两页数字<b>不要相加</b>。");
+  notes.push("<b>「最差 P95」= 窗口内最差那个桶的 P95</b>。分位列是<b>按请求数加权平均</b>的近似值，"
+    + "会抹平尖峰 —— 汇报要问「最坏时有多坏」时看这一列。");
+  if (aggTruncated) {
+    notes.push("<b>[已截断]</b>服务端聚合行数达 limit（1000），榜基于这批返回，"
+      + "不是全量 endpoint。");
+  }
+  document.getElementById("note").innerHTML = notes.map(function(t){ return "· " + t; }).join("<br>");
+}
+
+function load(){
+  var b = SWRanges.buckets(currentRange);
+  var url = "/inner/sw/metrics/query?aggregate=true"
+    + "&fromBucket=" + b.from + "&toBucket=" + b.to + "&resolution=" + b.res + "&limit=1000";
+  return fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    var rows = (d && d.rows) ? d.rows : [];
+    // 旧服务端忽略 aggregate → 返回逐桶行。按 endpoint 归并，否则同一个端点会重复出现多行。
+    var byEp = {};
+    rows.forEach(function(r){ if (r && r.endpoint != null) byEp[r.endpoint] = r; });
+    aggTruncated = !!(d && d.truncated);
+    presenterConclusion(byEp);
+    render(Object.keys(byEp).map(function(k){ return byEp[k]; }));
+    var chip = document.getElementById("scope-chip");
+    if (chip) { chip.textContent = rankLabel() + " · " + SORTS[sortKey].label; }
+  }).catch(function(e){
+    document.getElementById("hint").textContent = "加载失败: " + e;
+  });
+}
+
+/** 演示模式结论卡：只排版、不算数据（数字全部来自上面这次读口）。 */
+function presenterConclusion(byEp){
+  if (!window.SWPresenter) { return; }
+  try {
+    var list = ranked(Object.keys(byEp).map(function(k){ return byEp[k]; }));
+    if (!list.length) { return; }
+    var top = list[0];
+    SWPresenter.conclusion([
+      { label: "最慢 " + SORTS[sortKey].label.replace(" 降序", "") + " 的端点", value: top.endpoint },
+      { label: "其 P95", value: fmtMs(top.p95) },
+      { label: "其最差 P95", value: fmtMs(top.worstP95) }
+    ]);
+  } catch (e) {
+    // 锦上添花的东西坏了也不该把主表带空
+    if (window.console) { console.warn("conclusion failed", e); }
+  }
+}
+
+var timer = null;
+function startPolling(){
+  if (timer === null) {
+    timer = setInterval(load, SWPoll ? SWPoll.intervalMs("slow-topn", 10000) : 10000);
+  }
+}
+function stopPolling(){ if (timer !== null) { clearInterval(timer); timer = null; } }
+
+document.addEventListener("DOMContentLoaded", function(){
+  Array.prototype.forEach.call(document.querySelectorAll("#ranges span"), function(b){
+    b.addEventListener("click", function(){
+      Array.prototype.forEach.call(document.querySelectorAll("#ranges span"), function(x){ x.className = ""; });
+      b.className = "on";
+      currentRange = b.getAttribute("data-r");
+      load();
+    });
+  });
+  document.getElementById("topnSort").addEventListener("change", function(){
+    sortKey = this.value;
+    load();
+  });
+  document.getElementById("topnN").addEventListener("change", function(){
+    topN = Number(this.value) || 10;
+    load();
+  });
+
+  window.SWPresenter.mount({ page: "slow", theme: "dark", slot: "#presenter-slot" });
+  if (window.SWPoll) {
+    // 一页只有一个聚合查询，默认 10s 比别页的 5s 更从容 —— 榜不需要秒级新鲜度
+    SWPoll.attach({ key: "slow-topn", defaultMs: 10000, start: startPolling, stop: stopPolling, once: load });
+  } else {
+    startPolling();
+  }
+  load();
+});
+</script>
+</body>
+</html>
