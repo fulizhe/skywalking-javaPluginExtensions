@@ -330,7 +330,15 @@ $mvnArgs = @(
 if ($Continuous) { $mvnArgs += "-Dloadtest.durationSec=-1" }
 elseif ($DurationSec -gt 0) { $mvnArgs += "-Dloadtest.durationSec=$DurationSec" }
 else { $mvnArgs += "-Dloadtest.requests=$Requests" }
-if ($effectivePaths) { $mvnArgs += "-Dloadtest.paths=$effectivePaths" }
+# 路径里常带 `&`（如 ?value=v&phase=P）。Windows 上 mvn 是 mvn.cmd，PowerShell 必须经
+# cmd.exe 调它，而 **cmd 会把 `&` 当命令分隔符** —— 值会被截断，后面几段变成"命令"而报错
+# （症状：'xxx' 不是内部或外部命令，且压测静默少打几个路径）。
+# 修法：值内嵌双引号，cmd 才会把它当一个整体。引号由 HttpLoadTest.prop() 剥掉。
+if ($effectivePaths) {
+    $pathCount = @($effectivePaths -split ',').Count
+    Write-Host "[..] 压测路径 $pathCount 条$(if ($effectivePaths.Contains('&')) { '（含 & → 已加引号防止被 cmd 截断）' })"
+    $mvnArgs += "-Dloadtest.paths=`"$effectivePaths`""
+}
 Write-Host ""
 Write-Host "[..] 运行压测: mvn -f $demoAppPom test -Dtest=HttpLoadTest -Dloadtest=true ..."
 Write-Host ""

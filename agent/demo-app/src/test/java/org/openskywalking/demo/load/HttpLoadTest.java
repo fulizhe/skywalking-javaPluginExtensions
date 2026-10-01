@@ -392,6 +392,17 @@ public class HttpLoadTest {
 
     private static String prop(final String key, final String defaultValue) {
         final String value = System.getProperty(key);
-        return value == null || value.trim().isEmpty() ? defaultValue : value.trim();
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        // 剥掉一对外层双引号：那是 shell 的转义产物，不是数据本身。
+        // 路径里常带 `&`（如 ?value=v&phase=P），而 Windows 上 mvn 是 mvn.cmd，
+        // PowerShell 必须经 cmd.exe 调它，cmd 会在 `&` 处截断参数 —— 所以调用方
+        // 只能用内嵌引号把整串包住，那对引号就会原样到这里，由本方法剥掉。
+        String out = value.trim();
+        if (out.length() >= 2 && out.startsWith("\"") && out.endsWith("\"")) {
+            out = out.substring(1, out.length() - 1);
+        }
+        return out;
     }
 }

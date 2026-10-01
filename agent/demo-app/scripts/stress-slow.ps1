@@ -44,7 +44,9 @@ $SLOW_PATHS = [ordered]@{
     "/api/deps-demo/kafka?op=produce"     = "Kafka 生产(broker 不可达时约 3s 超时,见拓扑页 caveats)"
     "/api/deps-demo/http?site=httpbin"   = "外呼 httpbin 约 1~2s(网络往返)"
     "/api/deps-demo/grpc"                = "进程内 gRPC 约 0.3s(首次建链约 4s)"
-    "/api/hutool-demo/post-json?value=v&phase=P" = "Hutool 出口回环自调(毫秒级,作为对照基线)"
+    # 不带 phase 参数：它是给断言区分回环阶段的，压测用不上。
+    # （早先这里写成 ?value=v&phase=P，而 `&` 会被 Windows 的 cmd.exe 当命令分隔符 —— 见 stress.ps1 里的说明）
+    "/api/hutool-demo/post-json?value=v" = "Hutool 出口回环自调(毫秒级,作为对照基线)"
     "/queryDbByMybatis"                   = "MyBatis → H2(毫秒级基线)"
     # ---- 秒级:业务慢端点,用来触发 SLOW 告警 ----
     "/api/trace-alert-demo/slow?ms=4000" = "睡 4s,超过默认 SLOW 阈值 3s → 触发 SLOW 告警"
