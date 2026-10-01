@@ -67,10 +67,23 @@
         btn.title = on ? "退出演示模式（P）" : "进入演示模式（P）";
     }
 
+    /**
+     * 拼"带上演示模式"的翻页地址。
+     * <p>
+     * **不能**直接写 `href + "?presenter=1"` —— 告警页的 href 自带查询串
+     * （{@code dashboard.html?p=alert}），拼出来是 {@code ?p=alert?presenter=1}，
+     * 第二个 {@code ?} 会被当成 {@code p} 的值的一部分，页面直接报
+     * "未知页面: alert?presenter=1"。而指标/拓扑两页 href 里没有查询串，看着好好的 ——
+     * 于是只有"往前翻到第三档"才炸，且很容易被误判成第三档本身的问题。
+     * </p>
+     */
+    function hrefWithPresenter(href) {
+        return href + (href.indexOf("?") === -1 ? "?" : "&") + "presenter=1";
+    }
+
     function go(delta) {
         var next = ORDER[(ORDER.indexOf(currentPage) + delta + ORDER.length) % ORDER.length];
-        // presenter=1 一起带上：翻页后仍是演示态，即使本机 localStorage 被清过
-        global.location.href = PAGES[next].href + "?presenter=1";
+        global.location.href = hrefWithPresenter(PAGES[next].href);
     }
 
     /** 结论卡条目：`[{ label, value, sub, tone }]`。tone: ok / warn / err。 */
