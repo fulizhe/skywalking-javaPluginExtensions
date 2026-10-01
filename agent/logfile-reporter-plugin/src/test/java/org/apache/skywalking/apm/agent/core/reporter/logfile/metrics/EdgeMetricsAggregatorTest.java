@@ -28,6 +28,8 @@ public class EdgeMetricsAggregatorTest {
     private static final int COMPONENT_H2 = 32;
     private static final int COMPONENT_HTTPCLIENT = 2;
     private static final int COMPONENT_HUTOOL = 128;
+    /** Jedis(缓存)组件 id:生命周期累计测试用。 */
+    private static final int COMPONENT_JEDIS = 30;
 
     private static long now() {
         return System.currentTimeMillis();
@@ -52,10 +54,20 @@ public class EdgeMetricsAggregatorTest {
 
     /** 一个含 Entry + 若干 Exit 的段——段内配对的正常形态。 */
     private static SegmentObject segmentWithExits(final String endpoint, final SpanObject... exits) {
+        return segmentWithEntryAt(endpoint, now(), exits);
+    }
+
+    /**
+     * 同上，但**显式指定 Entry 的开始时间**。
+     * <p>
+     * 分钟桶取自 Entry span 的 {@code startTime}（不是 exit 的），所以要构造"落在某个特定分钟"的段
+     * 就必须能控制 Entry 时间——首末见桶、窗口淘汰这类断言全都依赖这一点。
+     */
+    private static SegmentObject segmentWithEntryAt(final String endpoint, final long entryStart,
+            final SpanObject... exits) {
         final SegmentObject.Builder builder = SegmentObject.newBuilder().setTraceId("t").setTraceSegmentId("s")
                 .setService(SERVICE);
-        final long base = now();
-        builder.addSpans(entry(endpoint, base, base + 500L));
+        builder.addSpans(entry(endpoint, entryStart, entryStart + 500L));
         for (SpanObject e : exits) {
             builder.addSpans(e);
         }
@@ -394,7 +406,113 @@ public class EdgeMetricsAggregatorTest {
         }
 
         final EdgeRow row = aggregator.snapshot().get(0);
-        Assert.assertTrue("操作名上限应生效", row.getOperations().size() <= 8);
-        Assert.assertTrue("截断必须打标记，页面才能提示", row.isOperationsTruncated());
+        Assert.assertTrue("同一出口上的操作名有上限", row.getOperations().size() <= 8);
+        Assert.assertTrue("超限时带截断标记供页面显示", row.isOperationsTruncated());
+    }
+
+    // ------------------------------------------------- 生命周期累计（自启动以来）
+
+    private static EdgeLifetimeRow lifetimeOf(final List<EdgeLifetimeRow> rows, final int componentId) {
+        for (EdgeLifetimeRow row : rows) {
+            if (row.getComponentId() == componentId) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    public void accumulatesLifetimePerComponent() {
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        final long base = now();
+        for (int i = 0; i < 3; i++) {
+            aggregator.onSegment(segmentWithExits("GET:/a",
+                    exit("H2/JDBC/PreparedStatement/execute", COMPONENT_H2, base, base + 5L, false)));
+        }
+        aggregator.onSegment(segmentWithExits("GET:/b",
+                exit("Jedis/set", COMPONENT_JEDIS, SpanLayer.Cache, base, base + 7L, true)));
+
+        final List<EdgeLifetimeRow> rows = aggregator.lifetimeSnapshot();
+        Assert.assertEquals("两个组件各一行", 2, rows.size());
+        final EdgeLifetimeRow h2 = lifetimeOf(rows, COMPONENT_H2);
+        Assert.assertNotNull("H2 有累计行", h2);
+        Assert.assertEquals("累计调用次数", 3L, h2.getRequestCount());
+        Assert.assertEquals("累计错误次数", 0L, h2.getErrorCount());
+        final EdgeLifetimeRow jedis = lifetimeOf(rows, COMPONENT_JEDIS);
+        Assert.assertNotNull("Jedis 有累计行", jedis);
+        Assert.assertEquals("错误数取自出口 span", 1L, jedis.getErrorCount());
+        Assert.assertEquals("层分类随行透出(宿主侧命名靠它)", "Cache", jedis.getSpanLayer());
+        Assert.assertEquals("出口操作名去重后只有一个", 1, jedis.getOperations().size());
+    }
+
+    /**
+     * 核心回归：累计表<b>不参与</b>桶淘汰。窗口边早被 evict 掉之后，"伸出去过哪些手"必须还在——
+     * 这正是它存在的理由（"自启动以来"这个问题只有它答得了）。
+     */
+    @Test
+    public void keepsLifetimeAfterWindowBucketsEvicted() {
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        final long base = now();
+        aggregator.onSegment(segmentWithExits("GET:/a",
+                exit("H2/JDBC/PreparedStatement/execute", COMPONENT_H2, base, base + 5L, false)));
+        Assert.assertEquals("evict 前窗口里有一条边", 1, aggregator.snapshot().size());
+
+        // 推进 10 分钟:窗口桶(当前 +3 晚到)必然被清空
+        aggregator.evictClosedBuckets(now() + 10 * MINUTE_MS);
+        Assert.assertEquals("窗口边已被淘汰", 0, aggregator.snapshot().size());
+        Assert.assertEquals("生命周期表不受淘汰影响", 1, aggregator.lifetimeSnapshot().size());
+        Assert.assertEquals("累计调用次数仍在", 1L,
+                lifetimeOf(aggregator.lifetimeSnapshot(), COMPONENT_H2).getRequestCount());
+    }
+
+    @Test
+    public void lifetimeSnapshotSortsByRequestCountDesc() {
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        final long base = now();
+        aggregator.onSegment(segmentWithExits("GET:/a",
+                exit("x", COMPONENT_HUTOOL, SpanLayer.Http, base, base + 1L, false)));
+        for (int i = 0; i < 5; i++) {
+            aggregator.onSegment(segmentWithExits("GET:/b",
+                    exit("y", COMPONENT_H2, base, base + 1L, false)));
+        }
+        final List<EdgeLifetimeRow> rows = aggregator.lifetimeSnapshot();
+        Assert.assertEquals("按累计调用量降序", COMPONENT_H2, rows.get(0).getComponentId());
+    }
+
+    @Test
+    public void lifetimeTracksFirstAndLastSeenBucket() {
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        final long base = now() - 2 * MINUTE_MS;   // 落在当前桶内,不触发 lateDropped
+        final long later = base + 2 * MINUTE_MS;
+        aggregator.onSegment(segmentWithEntryAt("GET:/a", base,
+                exit("x", COMPONENT_H2, base, base + 1L, false)));
+        aggregator.onSegment(segmentWithEntryAt("GET:/b", later,
+                exit("x", COMPONENT_H2, later, later + 1L, false)));
+
+        final EdgeLifetimeRow row = lifetimeOf(aggregator.lifetimeSnapshot(), COMPONENT_H2);
+        Assert.assertEquals("首次出现是最早那个桶", base / MINUTE_MS, row.getFirstSeenBucket());
+        Assert.assertEquals("最近出现是最晚那个桶", later / MINUTE_MS, row.getLastSeenBucket());
+    }
+
+    @Test
+    public void lifetimeBoundedWithOverflowCounter() {
+        // 上限是 512,这里只验证"有界 + 有溢出计数"这条契约,不真造 512 个组件(那是 512 次建段)
+        final EdgeMetricsAggregator aggregator = EdgeMetricsAggregator.forTesting(10, 10);
+        final long base = now();
+        for (int i = 1; i <= 60; i++) {
+            aggregator.onSegment(segmentWithExits("GET:/a" + i,
+                    exit("x", COMPONENT_H2 + i, base, base + 1L, false)));
+        }
+        final Map<String, Object> counters = aggregator.snapshotCounters();
+        final long components = ((Number) counters.get("lifetimeComponents")).longValue();
+        Assert.assertTrue("累计表组件数有上限,不会随时间无界增长: " + components, components <= 512);
+        Assert.assertNotNull("溢出有计数可观测", counters.get("lifetimeDropped"));
+    }
+
+    @Test
+    public void lifetimeStartedAtIsReported() {
+        final EdgeMetricsAggregator aggregator = newAggregator();
+        Assert.assertTrue("进程启动时刻可读(页面显示'自启动以来'的起点)",
+                aggregator.getStartedAtMs() > 0L && aggregator.getStartedAtMs() <= now());
     }
 }

@@ -85,6 +85,7 @@
   <span class="field">时间窗
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
     <button class="sec win" data-min="60" type="button">近 1 小时</button>
+    <button class="sec win" data-scope="lifetime" type="button">自启动以来</button>
   </span>
   <button id="btn-poll" class="on" type="button">停止刷新</button>
   <span class="summary" id="summary">加载中…</span>
@@ -114,7 +115,10 @@
           而连接建立本身（connection refused、主机名解析失败）发生在被观测的调用之前，
           <b>不会产生依赖边</b>。所以某个组件缺席<b>不能</b>读成「没有这个调用」，
           要确认请到链路视图里看那条请求的失败现场。</li>
-      <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。</li>
+      <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。
+          「近 5 分钟 / 近 1 小时」两档看的是<b>窗口内的边</b>（窗口桶约 4 分钟，过期即淘汰）；
+          <b>「自启动以来」</b>那一档读的是插件侧的<b>进程累计</b>——它不参与淘汰，回答的是
+          "这个进程从起来到现在伸出去过哪些手"，<b>重启即从零开始</b>。</li>
     </ul>
   </section>
 
@@ -185,7 +189,8 @@
     { max: 1.01,  color: "#e74c3c", label: ">= 5%" }
   ];
 
-  var state = { view: "summary", minutes: 5, edges: [], counters: {}, rawEdgeCount: 0 };
+  var state = { view: "summary", minutes: 5, scope: "window", edges: [], dependencies: [],
+    counters: {}, rawEdgeCount: 0, lifetimeSinceMs: 0 };
   var chart = null;
 
   function slaColor(rate) {
@@ -371,6 +376,24 @@
     var fromBucket = nowBucket - state.minutes;
     var url = "/inner/sw/topology?view=" + encodeURIComponent(state.view) + "&limit=2000";
     return fetchJson(url).then(function (data) {
+      state.counters = (data && data.counters) ? data.counters : {};
+      state.truncated = !!(data && data.truncated);
+      state.enabled = !!(data && data.enabled);
+      // 「自启动以来」这一档读的是插件侧的**生命周期累计**,不是窗口内的边:
+      // 窗口桶约 4 分钟就被淘汰,只有累计表记得"这个进程伸出去过哪些手"。
+      state.dependencies = (data && data.dependencies) ? data.dependencies : [];
+      state.lifetimeSinceMs = (data && data.lifetimeSinceMs) ? Number(data.lifetimeSinceMs) : 0;
+      if (state.scope === "lifetime") {
+        state.edges = [];
+        state.rawEdgeCount = 0;
+        render();
+        var since = state.lifetimeSinceMs ? fmtClock(state.lifetimeSinceMs) : "?";
+        summary.textContent = (state.enabled ? "" : "[聚合未启用] ")
+          + "自启动以来 " + state.dependencies.length + " 个依赖 · 累计 "
+          + (state.dependencies.reduce(function (s, d) { return s + (Number(d.requestCount) || 0); }, 0))
+          + " 次调用 · 起点 " + since;
+        return;
+      }
       var edges = (data && data.edges) ? data.edges : [];
       var kept = edges.filter(function (e) {
         return Number(e.timeBucket) >= fromBucket;
@@ -378,9 +401,6 @@
       // 插件侧按分钟桶存边,同一逻辑边会跨桶重复 —— 合并后再上视图/上表
       state.edges = aggregateEdges(kept);
       state.rawEdgeCount = kept.length;
-      state.counters = (data && data.counters) ? data.counters : {};
-      state.truncated = !!(data && data.truncated);
-      state.enabled = !!(data && data.enabled);
       render();
       var range = fmtClock(fromBucket * 60000) + " – " + fmtClock((nowBucket + 1) * 60000);
       summary.textContent = (state.enabled ? "" : "[聚合未启用] ")
@@ -400,8 +420,147 @@
   }
 
   function render() {
+    if (state.scope === "lifetime") {
+      renderLifetimeChart();
+      renderLifetimeTable();
+      return;
+    }
     renderChart();
     renderTable();
+  }
+
+  /**
+   * 「自启动以来」这一档：画的是 **self → 每个依赖** 的星图，数字取插件侧的生命周期累计
+   *（累计调用 / 累计错误 / 首次出现），与窗口档的"最近几分钟"是两件事。
+   * 节点形状仍按组件大类（图例一致），只是右边不再有"哪条路慢"的边标签 ——
+   * 累计表不存耗时样本（见 EdgeLifetimeAccumulator 的注释）。
+   */
+  function renderLifetimeChart() {
+    var list = (state.dependencies || []).slice();
+    var total = 0;
+    var errs = 0;
+    list.forEach(function (d) { total += Number(d.requestCount) || 0; errs += Number(d.errorCount) || 0; });
+
+    var rows = Math.max(list.length, 1);
+    var nodes = [{
+      id: SELF_ID, name: "本服务", category: 0, symbolSize: 44, symbol: svgSymbol(ICON_SVG.self),
+      x: 90, y: rows <= 1 ? 60 : 270,
+      itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 },
+      label: {
+        color: "#eaeaea", fontSize: 11, position: "top", distance: 12,
+        align: "center", width: 190, lineHeight: 15,
+        formatter: "本服务（自启动以来）\n依赖 " + list.length + " 个 · 调用 " + total + " · 错误 " + errs
+      },
+      lifetime: true
+    }];
+    var links = [];
+    list.forEach(function (d, i) {
+      var rate = Number(d.requestCount) > 0 ? (Number(d.errorCount) || 0) / Number(d.requestCount) : 0;
+      var id = "d:c:" + d.componentId + "|" + d.spanLayer;
+      nodes.push({
+        id: id, name: d.componentName || ("component-" + d.componentId), category: 1, symbolSize: 40,
+        symbol: iconFor(d.componentName, d.spanLayer),
+        x: 545, y: rows <= 1 ? 60 : 60 + (i * 420) / (rows - 1),
+        itemStyle: { color: "#1c2027", borderColor: slaColor(rate), borderWidth: 3 },
+        label: { color: "#eaeaea", fontSize: 11, position: "right", distance: 6, width: 120 },
+        ops: d.operations, comp: d.componentName, layerName: d.spanLayer,
+        n: Number(d.requestCount) || 0, err: Number(d.errorCount) || 0,
+        mark: (Number(d.errorCount) || 0) > 0,
+        firstSeenMs: Number(d.firstSeenBucket) * 60000,
+        lastSeenMs: (Number(d.lastSeenBucket) + 1) * 60000,
+        maxLatency: Number(d.maxLatency) || 0
+      });
+      links.push({
+        source: SELF_ID, target: id,
+        value: Number(d.requestCount) || 0,
+        rate: rate,
+        p95: -1,
+        endpoint: "",
+        depName: d.componentName || ("component-" + d.componentId),
+        firstSeenMs: Number(d.firstSeenBucket) * 60000,
+        curveness: 0.06
+      });
+    });
+
+    if (!chart) { chart = echarts.init(document.getElementById("chart")); }
+    document.getElementById("chart-hint").textContent =
+      "自启动以来累计（本档不看时间窗，重启即重置）· 右列=进程伸出去过的依赖 · 固定布局";
+
+    chart.setOption({
+      tooltip: {
+        formatter: function (p) {
+          if (p.dataType === "node" && String(p.data.id) === SELF_ID) {
+            return "<b>本服务</b>（自 " + fmtClock(state.lifetimeSinceMs) + " 起）"
+              + "<br>累计依赖 " + list.length + " 个 · 调用 " + total + " 次 · 错误 " + errs + " 次";
+          }
+          if (p.dataType === "node") {
+            var d = p.data;
+            var ops = (d.ops && d.ops.length) ? d.ops.join("<br>") : "(无记录)";
+            return "<b>" + escapeHtml(d.name) + "</b><br>层: " + escapeHtml(d.layerName || "-")
+              + "<br>累计调用 " + d.n + " 次 · 错误 " + d.err
+              + "<br>首次出现 " + fmtClock(d.firstSeenMs) + " · 最近 " + fmtClock(d.lastSeenMs)
+              + "<br>累计最大耗时 " + fmtMs(d.maxLatency)
+              + "<br><br>出口操作:<br>" + ops;
+          }
+          return "";
+        }
+      },
+      legend: [{ data: ["本服务", "外部依赖"], top: 6, textStyle: { color: "#9aa4b2" } }],
+      series: [{
+        type: "graph", layout: "none", roam: true, draggable: true,
+        categories: [
+          { name: "本服务", itemStyle: { color: "#1c2027", borderColor: "#7fd1ff", borderWidth: 2 } },
+          { name: "外部依赖", itemStyle: { color: "#1c2027", borderColor: "#86efac", borderWidth: 3 } }
+        ],
+        label: { show: true, overflow: "break", width: 150 },
+        edgeLabel: {
+          show: true, fontSize: 10, color: "#9aa4b2", rotate: 0, distance: 4,
+          formatter: function (p) { return "累计 " + p.data.value + " · 首现 " + fmtClock(p.data.firstSeenMs); }
+        },
+        edgeSymbol: ["none", "arrow"],
+        edgeSymbolSize: 7,
+        lineStyle: { color: "#8a94a0", width: 1.5, opacity: 0.7 },
+        data: nodes, links: links
+      }]
+    }, true);
+  }
+
+  function renderLifetimeTable() {
+    var tbody = document.getElementById("edge-rows");
+    var empty = document.getElementById("empty");
+    var list = (state.dependencies || []).slice();
+    tbody.innerHTML = "";
+    if (!list.length) {
+      empty.style.display = "";
+      empty.innerHTML = "本进程还没有调过任何外部依赖。<br>先造点流量，例如 "
+        + "<code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
+      document.getElementById("table-hint").textContent = "";
+      return;
+    }
+    empty.style.display = "none";
+    empty.innerHTML = "暂无依赖边。<br>先造点带外部调用的流量,例如：<br>"
+      + "<code>/queryDbByMybatis</code> · <code>/queryDbByJdbc</code> · <code>/api/hutool-demo/post-json</code><br>"
+      + "三层依赖面：<code>/api/deps-demo/redis?op=set</code> ·"
+      + "<code>/api/deps-demo/mysql?sleepMs=300</code> ·"
+      + "<code>/api/deps-demo/kafka?op=produce</code> ·"
+      + "<code>/api/deps-demo/http?site=httpbin</code><br>"
+      + "一次打穿四层：<code>/api/deps-demo/all</code>（依赖面专用，可分别造慢边/失败）；"
+      + "<code>/fullSample</code> 是**全貌入口**，每种被监控的组件各打一次（<code>?deps=false</code> 关掉三层）";
+    var head = document.querySelector("#edge-rows").closest("table").querySelector("thead");
+    head.innerHTML = "<tr><th>依赖</th><th>层</th><th class=\"num\">累计调用</th><th class=\"num\">错误</th>"
+      + "<th>首次出现</th><th>最近</th></tr>";
+    tbody.innerHTML = list.map(function (d) {
+      var n = Number(d.requestCount) || 0;
+      var err = Number(d.errorCount) || 0;
+      return "<tr><td><span class=\"dot\" style=\"background:" + slaColor(n > 0 ? err / n : 0) + "\"></span>"
+        + escapeHtml(shorten(d.componentName || ("component-" + d.componentId), 26)) + "</td>"
+        + "<td>" + escapeHtml(d.spanLayer || "-") + "</td>"
+        + "<td class=\"num\">" + n + "</td><td class=\"num\">" + err + "</td>"
+        + "<td>" + fmtClock(Number(d.firstSeenBucket) * 60000) + "</td>"
+        + "<td>" + fmtClock((Number(d.lastSeenBucket) + 1) * 60000) + "</td></tr>";
+    }).join("");
+    document.getElementById("table-hint").textContent =
+      list.length + " 个依赖 · 自启动以来累计 · 按累计调用降序";
   }
 
   function renderChart() {
@@ -706,11 +865,17 @@
 
   document.getElementById("btn-summary").addEventListener("click", function () { setView("summary"); });
   document.getElementById("btn-detail").addEventListener("click", function () { setView("detail"); });
-  Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (b) {
+Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (b) {
     b.addEventListener("click", function () {
-      state.minutes = Number(b.getAttribute("data-min"));
       Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (x) { x.className = "sec win"; });
       b.className = "on win";
+      if (b.getAttribute("data-scope") === "lifetime") {
+        state.scope = "lifetime";
+        state.minutes = 0;
+      } else {
+        state.scope = "window";
+        state.minutes = Number(b.getAttribute("data-min"));
+      }
       load();
     });
   });
@@ -745,7 +910,7 @@
     }
   });
 
-  setView("summary");
+setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
   startPolling();
 })();

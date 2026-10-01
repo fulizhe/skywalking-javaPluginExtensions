@@ -182,6 +182,23 @@ public class StatisticController {
                 }
             }
         }
+        // 自启动以来的依赖清单：同样只透出 componentId，组件名在这里补（与上面同一套三级 fallback）
+        Object depsObj = result.get("dependencies");
+        if (depsObj instanceof List) {
+            List<?> dependencies = (List<?>) depsObj;
+            for (Object depObj : dependencies) {
+                if (!(depObj instanceof Map)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dep = (Map<String, Object>) depObj;
+                Object cidObj = dep.get("componentId");
+                if (cidObj instanceof Number) {
+                    dep.put("componentName", componentDisplayName(((Number) cidObj).intValue(),
+                            String.valueOf(dep.get("spanLayer"))));
+                }
+            }
+        }
         return result;
     }
 

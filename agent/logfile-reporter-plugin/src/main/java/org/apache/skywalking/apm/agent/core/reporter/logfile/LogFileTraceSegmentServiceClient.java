@@ -40,6 +40,7 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.alert.TraceAlertMet
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsSink;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeMetricsAggregator;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeLifetimeRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsAggregator;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsQuery;
@@ -347,6 +348,16 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		result.put("truncated", truncated);
 		result.put("edges", rows);
 		result.put("counters", edgeAggregator.snapshotCounters());
+		// 自进程启动以来的**依赖清单**（组件级累计，不受窗口淘汰影响）。
+		// 无条件附带而非按参数切换：它只有组件数那么多行、代价可忽略，而"这个进程伸出去过哪些手"
+		// 与"此刻谁在调谁"是两个都要看的问题，挤进一个参数开关只会让契约更难懂。
+		final List<EdgeLifetimeRow> lifetime = edgeAggregator.lifetimeSnapshot();
+		final List<Map<String, Object>> dependencyRows = new ArrayList<Map<String, Object>>(lifetime.size());
+		for (int i = 0; i < lifetime.size(); i++) {
+			dependencyRows.add(lifetime.get(i).toMap());
+		}
+		result.put("dependencies", dependencyRows);
+		result.put("lifetimeSinceMs", edgeAggregator.getStartedAtMs());
 		return result;
 	}
 

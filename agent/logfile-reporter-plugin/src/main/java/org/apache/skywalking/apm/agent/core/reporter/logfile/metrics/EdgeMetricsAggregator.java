@@ -1,9 +1,12 @@
 package org.apache.skywalking.apm.agent.core.reporter.logfile.metrics;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -82,9 +85,26 @@ public class EdgeMetricsAggregator {
     /** 抽样种子写死，使抽样过程可复现、测试可写。 */
     private static final long EDGE_RESERVOIR_SEED = 20260930L;
 
+    /**
+     * 生命周期累计表最多记多少个依赖组件（组件级，**不是**「端点 × 组件」的交叉积）。
+     * <p>
+     * 基数天然很低（一个进程伸出去的手通常个位数到几十），但仍设上限：它是<b>不参与淘汰</b>的，
+     * 一旦基数异常（例如某个动态类名被当成组件）就会永久占内存。超限后并入兜底组件并计
+     * {@code lifetimeDropped}，宁可丢精度也不让内存无界。
+     */
+    private static final int MAX_LIFETIME_COMPONENTS = 512;
+
     private final Object lock = new Object();
     private final TreeMap<Long, Map<EdgeKey, EdgeAccumulator>> buckets =
             new TreeMap<Long, Map<EdgeKey, EdgeAccumulator>>();
+    /**
+     * 自进程启动以来的组件级累计（<b>不参与</b>{@link #evictClosedBuckets} 的桶淘汰）。
+     * 与 {@link #buckets} 的分工：buckets 答"此刻谁在调谁"，这张表答"从起来到现在伸出去过哪些手"。
+     */
+    private final Map<LifetimeKey, EdgeLifetimeAccumulator> lifetime =
+            new LinkedHashMap<LifetimeKey, EdgeLifetimeAccumulator>();
+    /** 进程内累计的起点（构造时刻），读口回给宿主用于显示"自启动以来"的起点。 */
+    private final long startedAtMs = System.currentTimeMillis();
     private final Random reservoirRandom = new Random(EDGE_RESERVOIR_SEED);
     private final Map<String, Long> counters = new LinkedHashMap<String, Long>();
     private final int maxEdgesPerBucket;
@@ -171,6 +191,33 @@ public class EdgeMetricsAggregator {
         return out;
     }
 
+    /**
+     * 生命周期累计快照：自进程启动以来见过的每个依赖组件一行，按累计调用量降序。
+     * <p>
+     * <b>不受窗口影响</b>：{@link #evictClosedBuckets} 只清分钟桶，这张表一直留着，
+     * 所以窗口滑过之后仍能回答"这个进程伸出去过哪些手"。
+     */
+    public List<EdgeLifetimeRow> lifetimeSnapshot() {
+        final List<EdgeLifetimeRow> out = new ArrayList<EdgeLifetimeRow>();
+        synchronized (lock) {
+            for (Map.Entry<LifetimeKey, EdgeLifetimeAccumulator> entry : lifetime.entrySet()) {
+                out.add(entry.getValue().toRow());
+            }
+        }
+        Collections.sort(out, new Comparator<EdgeLifetimeRow>() {
+            @Override
+            public int compare(final EdgeLifetimeRow a, final EdgeLifetimeRow b) {
+                return Long.compare(b.getRequestCount(), a.getRequestCount());
+            }
+        });
+        return out;
+    }
+
+    /** 进程启动时刻（毫秒）；读口回给宿主显示"自启动以来"的起点。 */
+    public long getStartedAtMs() {
+        return startedAtMs;
+    }
+
     /** 体检计数：无入口段 / 无出口段 / 迟到丢弃 / 边溢出 / 异常。 */
     public Map<String, Object> snapshotCounters() {
         final Map<String, Object> out = new LinkedHashMap<String, Object>();
@@ -181,6 +228,8 @@ public class EdgeMetricsAggregator {
             out.put("edgeOverflow", getOrZero("edgeOverflow"));
             out.put("liveEdgeCount", (long) liveEdgeCount());
             out.put("liveBucketCount", (long) buckets.size());
+            out.put("lifetimeComponents", (long) lifetime.size());
+            out.put("lifetimeDropped", getOrZero("lifetimeDropped"));
         }
         return out;
     }
@@ -234,6 +283,31 @@ public class EdgeMetricsAggregator {
         }
         accumulator.add(duration, error, reservoirRandom);
         accumulator.addOperation(operation);
+        accumulateLifetime(bucket, componentId, spanLayer, operation, duration, error);
+    }
+
+    /**
+     * 累计到生命周期表（<b>与桶无关</b>）。与 {@link #accumulate} 在同一把锁内调用。
+     * <p>
+     * 口径与边同源：只有被接受建边的出口 span 才进这张表，迟到丢弃的段（{@code lateDropped}）
+     * 与跨段出口都不在内 —— 累计表回答的是"伸出去过哪些手"，不需要为了完整性去捡那些段。
+     */
+    private void accumulateLifetime(final long bucket, final int componentId, final String spanLayer,
+            final String operation, final long duration, final boolean error) {
+        LifetimeKey key = new LifetimeKey(componentId, spanLayer);
+        EdgeLifetimeAccumulator accumulator = lifetime.get(key);
+        if (accumulator == null) {
+            if (lifetime.size() >= MAX_LIFETIME_COMPONENTS) {
+                bump("lifetimeDropped");
+                key = new LifetimeKey(OTHER_EDGE_COMPONENT, OTHER_SPAN_LAYER);
+                accumulator = lifetime.get(key);
+            }
+        }
+        if (accumulator == null) {
+            accumulator = new EdgeLifetimeAccumulator(componentId, spanLayer, bucket);
+            lifetime.put(key, accumulator);
+        }
+        accumulator.add(operation, duration, error, bucket);
     }
 
     /**
@@ -324,6 +398,85 @@ public class EdgeMetricsAggregator {
         }
         final long value = sorted[rank - 1];
         return value > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) value;
+    }
+
+    /** 生命周期累计的键：组件 × 层。刻意不含端点 —— 累计表答的是"伸出去过哪些手"，与端点无关。 */
+    private static final class LifetimeKey {
+
+        private final int componentId;
+        private final String spanLayer;
+
+        LifetimeKey(final int componentId, final String spanLayer) {
+            this.componentId = componentId;
+            this.spanLayer = spanLayer;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof LifetimeKey)) {
+                return false;
+            }
+            final LifetimeKey other = (LifetimeKey) o;
+            return componentId == other.componentId && spanLayer.equals(other.spanLayer);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * componentId + spanLayer.hashCode();
+        }
+    }
+
+    /**
+     * 生命周期累计的累加器：计数 + 首末见分钟桶 + 累计最大耗时 + 出口操作名去重集合。
+     * <p>
+     * <b>不存耗时样本</b>（与边的蓄水池不同）：累计表要回答的是"有没有被调过、调了多少次"，
+     * 不是"分布如何"；要看分布用窗口内的边。这样这张表的内存与进程时长无关，只与组件数有关。
+     */
+    private static final class EdgeLifetimeAccumulator {
+
+        private final int componentId;
+        private final String spanLayer;
+        private final long firstSeenBucket;
+        private long lastSeenBucket;
+        private long requestCount;
+        private long errorCount;
+        private long maxLatency;
+        private final LinkedHashSet<String> operations = new LinkedHashSet<String>();
+
+        EdgeLifetimeAccumulator(final int componentId, final String spanLayer, final long bucket) {
+            this.componentId = componentId;
+            this.spanLayer = spanLayer;
+            this.firstSeenBucket = bucket;
+            this.lastSeenBucket = bucket;
+        }
+
+        void add(final String operation, final long duration, final boolean error, final long bucket) {
+            requestCount++;
+            if (error) {
+                errorCount++;
+            }
+            if (duration > maxLatency) {
+                maxLatency = duration;
+            }
+            if (bucket < firstSeenBucket) {
+                // 理论上不会（桶只会前进），留这一行是为了让首见/末见的定义在乱序下仍然自洽
+                lastSeenBucket = Math.min(lastSeenBucket, bucket);
+            } else if (bucket > lastSeenBucket) {
+                lastSeenBucket = bucket;
+            }
+            if (operation != null && operations.size() < MAX_OPERATIONS_PER_EDGE) {
+                operations.add(operation);
+            }
+        }
+
+        EdgeLifetimeRow toRow() {
+            return new EdgeLifetimeRow(componentId, spanLayer, new ArrayList<String>(operations),
+                    operations.size() >= MAX_OPERATIONS_PER_EDGE, requestCount, errorCount, maxLatency,
+                    firstSeenBucket, lastSeenBucket);
+        }
     }
 
     /** 边键：入口端点 × 组件。刻意不用字符串拼接做键——拼接会引入分隔符转义问题。 */
