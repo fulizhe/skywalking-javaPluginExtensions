@@ -46,8 +46,12 @@ jobs:
       # (~1GB 拉取)只在首次付代价,之后命中 gha 层缓存。
       # 标签必须与 verify/docker-compose.yaml 的 services.verify.image 一致,
       # 否则下一步的 compose run 找不到本地镜像会回退去现场构建。
-      # ignore-error:缓存导出失败(fork PR 只读、~1GB 导出触发 maximum timeout)
-      # 不该拖垮整个验证 —— 退化成每次重建而已。
+      # ignore-error:缓存导出超时等失败不至于拖垮整个验证(退化成每次重建)。
+      # 必须先装 buildx:默认的 docker driver 不支持 gha 缓存导出,会报
+      # "Cache export is not supported for the docker driver"(实测踩过)。
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Build verify runner image (cached layers)
         uses: docker/build-push-action@v7
         with:
