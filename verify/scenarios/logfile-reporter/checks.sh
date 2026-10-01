@@ -216,11 +216,7 @@ run_checks() {
     t0=$(date +%s)
     assert_eq "造数端点返回 200: $api" 200 "$(http_code "$api")"
     elapsed=$(( $(date +%s) - t0 ))
-    if (( elapsed >= budget )); then
-      log "FAIL: 造数端点耗时 ${elapsed}s(>= ${budget}s),超时未生效? $api"
-    else
-      log "PASS: 造数端点 ${elapsed}s(< ${budget}s)内返回 —— $api"
-    fi
+    assert_le "造数端点有界(超时生效): ${elapsed}s < ${budget}s —— $api" "$budget" "$elapsed"
   done
   # 白名单:外呼端点不接受任意 URL(演示端点不能是 SSRF 口子)
   assert_jq "外呼端点只接受白名单 site(未知站点被拒)" "$(http_get_or_empty '/api/deps-demo/http?site=evil.example.com')" \
@@ -240,21 +236,22 @@ run_checks() {
   local tAll; tAll=$(date +%s)
   http_get_or_empty "/api/deps-demo/all" >/dev/null
   elapsed=$(( $(date +%s) - tAll ))
-  if (( elapsed >= 15 )); then
-    log "FAIL: /api/deps-demo/all 耗时 ${elapsed}s(>= 15s)—— 每层超时没兜住?"
-  else
-    log "PASS: /api/deps-demo/all ${elapsed}s(< 15s,四层叠加但每层有超时)"
-  fi
-
-  sleep 3
-  depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
+  assert_le "all 端点有界(四层叠加但每层有超时): ${elapsed}s < 15s" 15 "$elapsed"
 
   # ---- 归因断言:全貌入口的出口必须记在它自己名下 ----
   # /fullSample 一次请求打齐四层(内部调用 DepsDemoService)。**曾经踩过的坑**:
   # 那四层逻辑原先住在 DepsDemoController 里,fullSample 直接调它的 handler 方法,
   # agent 的 Spring MVC 增强把 handler 的 operationName 当成 Entry —— 一次 fullSample
   # 的 7 个出口全被记到 GET:/api/deps-demo/redis 名下。下面两条正是那个 bug 的照妖镜。
-  local k
+  #
+  # **只能对增量断言**:deps 端点在本场景开头已被直接调用过(它们本来就该有 MQ/Http
+  # 出口),对全量快照断言"deps 名下没有跨层出口"是自己打自己脸 —— deps 端点的出口
+  # 是这次测试自己造的。故先取基线,再比 fullSample 前后 deps 名下的
+  # (端点,组件,层) 组合集合有没有**新增**:那正是归因被改写时的形状
+  # (redis 端点多出 kafka/h2/Http 组合)。用组合集合而非 requestCount 求和 ——
+  # 分钟桶滚动不会造成假红。
+  local k before
+  before=$(http_get_or_empty "/inner/sw/topology?view=summary")
   for ((k = 0; k < 3; k++)); do
     http_get_or_empty "/fullSample" >/dev/null
   done
@@ -262,8 +259,9 @@ run_checks() {
   depTopology=$(http_get_or_empty "/inner/sw/topology?view=summary")
   assert_jq "全貌入口的出口归在它自己名下(GET:/fullSample 至少两条边)" "$depTopology" \
     '[.edges[]? | select(.endpoint == "GET:/fullSample")] | length >= 2'
-  assert_jq "内部调用不改写 Entry:deps 端点名下不出现跨层出口" "$depTopology" \
-    '[.edges[]? | select(.endpoint | test("^GET:/api/deps-demo/")) | select(.spanLayer == "MQ" or .spanLayer == "Http")] | length == 0'
+  assert_jq "内部调用不改写 Entry:fullSample 不往 deps 端点名下塞出口" "$depTopology" \
+    '([.edges[]? | select(.endpoint | test("^GET:/api/deps-demo/")) | "\(.endpoint)|\(.componentId)|\(.spanLayer)"] | sort) == ([$before.edges[]? | select(.endpoint | test("^GET:/api/deps-demo/")) | "\(.endpoint)|\(.componentId)|\(.spanLayer)"] | sort)' \
+    --argjson before "$before"
 
   # 断言 2:组件识别。组件名取自 demo-app 自带的 component-libraries.yml,
   # **按实测值断言**而不是按概念名 —— 库里 H2 的键是 h2-jdbc-driver、Kafka 的键是
