@@ -181,8 +181,7 @@ ok('hint 写明 前 2 / 共 3', nodes.hint.textContent.indexOf('前 2 / 共 3 �
 
 console.log('== 边界 ==');
 M.resetRanks(); M.setN(10); M.setRange('24h');   // 先复位窗口：下面断言写的是近 24h
-M.render([]);
-ok('空数据切到空态（不显示残留行）', nodes.empty.innerHTML.indexOf('还没有 endpoint 指标') >= 0);
+M.render([]);ok('空数据切到空态（不显示残留行）', nodes.empty.innerHTML.indexOf('还没有 endpoint 指标') >= 0);
 ok('空数据时 hint 说明是哪个窗口', nodes.hint.textContent.indexOf('近 24h') >= 0, nodes.hint.textContent);
 M.render(ROWS);
 M.setTruncated(true);
@@ -198,6 +197,25 @@ M.render([{ endpoint: 'E', requestCount: 5, p95: 2, worstP95: null }]);
 ok('worstP95 为 null 的行照常进榜，但该列显示 - 而不是 0（0 会被读成「分位是 0」）',
   nodes.rows.innerHTML.indexOf('<td class="num">-</td>') >= 0
   && nodes.rows.innerHTML.indexOf('>0<') < 0);
+
+console.log('== 全站合计行 "*" 必须被剔除（真实数据下它必然在返回里）==');
+// 指标聚合把全局桶也放进同一张表，endpoint = "*"。它不是端点 ——
+// 不剔的话它会作为一个"端点"排进榜里，而夹具里没有这行，所以只能在这里补。
+M.resetRanks();
+M.render(ROWS.concat([{
+  endpoint: '*', requestCount: 47052, errorCount: 5009, slowCount: 3146,
+  errorRate: 0.1065, slowRate: 0.0668, avgLatency: 1418, maxLatency: 65112,
+  p50: 1, p90: 905, p95: 4156, p99: 63368, worstP50: 900, worstP95: 63368, worstP99: 65112,
+  bucketCount: 28
+}]));
+ok('"*" 行不进榜', nodes.rows.innerHTML.indexOf('endpoint=%2A') < 0
+  && nodes.rows.innerHTML.indexOf('>"*"') < 0,
+  'got: ' + nodes.rows.innerHTML.slice(0, 200));
+ok('"*" 行也没把行数撑多（仍是 3 行）',
+  (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length === 3,
+  'rows=' + (nodes.rows.innerHTML.match(/<tr data-href=/g) || []).length);
+ok('hint 的"共 N 个"按剔 "*" 后的真实端点数算',
+  nodes.hint.textContent.indexOf('共 3 个') >= 0, nodes.hint.textContent);
 
 console.log(fails ? '\n断言失败 ' + fails + ' 条' : '\n全部通过');
 process.exit(fails ? 1 : 0);

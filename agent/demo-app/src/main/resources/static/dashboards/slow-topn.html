@@ -173,7 +173,11 @@ function barWidth(v, max){ return (!max || v == null) ? "" : Math.max(2, Math.ro
 function ranked(rows){
   var get = SORTS[sortKey].get;
   return rows.slice()
-    .filter(function(r){ return r.endpoint != null && Number(r.requestCount) > 0 && get(r) != null; })
+    // 剔掉 "*"：它是全站合计行（指标聚合把全局桶也放进同一张表），**不是端点**。
+    // 不剔的话它会作为一个"端点"排进榜里 —— 真实数据下必然发生，而夹具里没有这行，
+    // 排第几还会随窗口乱跳（全局 P95 跟谁比都不成比例）。
+    .filter(function(r){ return r.endpoint != null && r.endpoint !== "*"
+                         && Number(r.requestCount) > 0 && get(r) != null; })
     .sort(function(a,b){
       var d = (Number(get(b)) || 0) - (Number(get(a)) || 0);
       // 同分按请求数兜底：否则名次会在两次刷新间随机互换，"名次变化"就成了噪声
