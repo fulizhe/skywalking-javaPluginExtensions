@@ -58,6 +58,9 @@
   #chart { width: 100%; height: 560px; }
   .legend { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11px;
             color: var(--muted); line-height: 1.9; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+  .key .ki { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .key .ki img { width: 18px; height: 18px; display: block; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
             margin-right: 5px; vertical-align: middle; }
   .table-wrap { max-height: 560px; overflow: auto; }
@@ -129,9 +132,7 @@
       <h2><span>调用关系图</span><span class="hint" id="chart-hint"></span></h2>
       <div id="chart"></div>
       <div class="legend">
-        <div><b>节点图标 = 组件类型</b>（与 SkyWalking 拓扑图同一套读法）：<b>圆柱</b> 数据库 ·
-             <b>堆叠盘</b> 缓存 · <b>六边形</b> 消息队列 · <b>云朵</b> HTTP 出网 ·
-             <b>辐射</b> gRPC · <b>圆环</b> 其它 · <b>实心圆</b> 本服务</div>
+        <div class="key" id="icon-key"></div>
         <div><b>节点边框色 = SLA 分档</b>（按该组件所有边的错误率；阈值硬编码，非 OAP 的 100/99.9/99/95）</div>
         <div>
           <span class="swatch" style="background:#86efac"></span>无错误
@@ -270,7 +271,28 @@
   };
 
   function svgSymbol(svg) {
-    return "image://data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    return "image://" + dataUri(svg);
+  }
+
+  /** 纯 data URI：既能喂 ECharts 的 symbol（加 image:// 前缀），也能直接塞进&lt;img&gt; 的 src。 */
+  function dataUri(svg) {
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  /**
+   * 图下方那行「图标 = 组件类型」：**画真图标**（而不是文字描述"圆柱/堆叠盘"），
+   * 否则读者要靠想象把文字对上图里的形状 —— 这正是图例与图上对不上的根因。
+   */
+  function renderIconKey() {
+    var el = document.getElementById("icon-key");
+    if (!el) { return; }
+    var items = [["数据库", ICON_SVG.database], ["缓存", ICON_SVG.cache], ["消息队列", ICON_SVG.mq],
+                 ["HTTP 出网", ICON_SVG.http], ["gRPC", ICON_SVG.grpc], ["其它", ICON_SVG.generic],
+                 ["本服务", ICON_SVG.self]];
+    el.innerHTML = "<b>节点图标 = 组件类型</b>（与 SkyWalking 拓扑图同一套读法）："
+      + items.map(function (it) {
+          return '<span class="ki"><img src="' + dataUri(it[1]) + '" alt="">' + it[0] + "</span>";
+        }).join("");
   }
 
   function iconFor(componentName, spanLayer) {
@@ -509,7 +531,16 @@
           return "";
         }
       },
-      legend: [{ data: ["本服务", "外部依赖"], top: 6, textStyle: { color: "#9aa4b2" } }],
+      // 图例用**真图标**：ECharts 默认给的是方块符号，与图上的组件图标对不上。
+      // "外部依赖"这一项没有单一图标（图标随组件类型而异），故用中性圆环，
+      // 各组件的真实图标在图下方的图标行里逐个列出。
+      legend: [{
+        data: [
+          { name: "本服务", icon: svgSymbol(ICON_SVG.self) },
+          { name: "外部依赖", icon: svgSymbol(ICON_SVG.generic) }
+        ],
+        top: 6, itemGap: 18, textStyle: { color: "#9aa4b2" }
+      }],
       series: [{
         type: "graph", layout: "none", roam: true, draggable: true,
         categories: [
@@ -740,7 +771,12 @@
         }
       },
       legend: [{
-        data: [isSummary ? "本服务" : "入口端点", "外部依赖"], top: 6, textStyle: { color: "#9aa4b2" }
+        // 同上：图例用真图标，"外部依赖"用中性圆环（各组件图标在下方图标行里列全）
+        data: [
+          { name: isSummary ? "本服务" : "入口端点", icon: svgSymbol(ICON_SVG.self) },
+          { name: "外部依赖", icon: svgSymbol(ICON_SVG.generic) }
+        ],
+        top: 6, itemGap: 18, textStyle: { color: "#9aa4b2" }
       }],
       series: [{
         type: "graph",
@@ -916,6 +952,7 @@ Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (
 
 setView("summary");
   document.querySelector('button.win[data-min="5"]').className = "on win";
+  renderIconKey();
   startPolling();
 })();
 </script>
