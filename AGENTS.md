@@ -20,6 +20,7 @@
 - **Known TODOs** — 何时读：规划 demo-app 验证范围时。→ `docs/repo/index.md`
 - **Code style / 纯重构规范** — 何时读：写新 Java 代码、改既有代码、拆分大方法、对齐代码风格时。→ `docs/repo/index.md`
 - **教学空间页面格式** — 何时读：新增或修改 `docs/tutorial/` 下的教学页面（入口页 / 课程 / 参考）。→ `docs/tutorial/index.html`
+- **排错清单（compose / 中间件 / 代理 / 端口）** — 何时读：本地或远程把 compose 跑起来时出错。→ `agent/demo-app/NOTES-docker-stress.md`（第 13~16 条）与 `agent/demo-app/README-remote-verify.md`（远程 Linux 压测 runbook）
 
 ## Task routing
 
@@ -30,6 +31,27 @@
 - **统一收口** — 验证通过、验收项有证据、spec / ticket 状态回写、diff 不越界；commit / push 仅在用户明确要求时执行。
 - **OMO 补短板** — 用于可并行的探索、竞争假设和独立复核；spec、领域语言与最终决策由 Matt Skills 主流程维护。
 - **Skill 演化** — 先以内联规则运行；稳定使用一段时间后，再考虑抽成 /route-work skill。
+
+## 入口约定（demo-app）
+
+- **日常只有两个脚本入口**：`scripts/run-with-agent.ps1`（起应用）与 `scripts/stress.ps1`（压测）。
+  **新增第三个入口、或把这两者包一层新脚本之前先问用户** —— 入口一多，"该敲哪条"就变成日常摩擦。
+  压测档位用 `-AllEndpoints` / `-NormalOnly` / `-WithDeps` 表达（三者互斥），不再另开脚本承载。
+- **前置为零**：端口、凭据这类会变的默认值写进 `application.yml`（compose 用 `environment` 覆盖），
+  用户跑 `run-with-agent.ps1` 时**不需要设任何环境变量**。
+- **中间件与端口**：三层中间件在 compose 的 `deps` profile（默认不起，`run-with-agent.ps1 -WithDeps` 顺带拉起）；
+  宿主映射避开常用端口（`16379/13306/19092`，本机常被别的栈占），容器内仍用服务名 + 标准端口。
+  排错细节（端口占用、镜像 403、daemon 代理只认 Windows 系统代理）→ `agent/demo-app/NOTES-docker-stress.md` 第 13~16 条。
+- **依赖面相关的坑**（连接失败不产生边 / 判成功≠调用成功 / 组件名按实测值 / 插件 support 范围 / fat jar 驱动注册 / kafka `close()` 无界等待）
+  → 何时读：改 `DepsDemoService`、给依赖拓扑加组件、或给 `checks.sh` 写依赖面断言前。→ `docs/notes/2026-10-01-deps-demo-topology-probe.md`
+
+## 验证节奏
+
+- **短命令自己跑，长命令交给用户**：构建、compose 编排、压测、长跑一律给命令让用户跑；
+  确需自己跑时拆成 **<60s 的短调用**。
+- **后台起进程后立刻回报**：后台起 java / compose / 压测容器后，先告诉用户"在跑了、日志在哪"，再去轮询。
+  工具调用挂到超时往往是**假死**（子进程持有 stdout），把"启动"与"检查"拆成两次调用即可 —— 不让用户干等。
+- **失败即给结论与下一步**，不用"我继续"过渡。
 
 ## 文档写作（图 > 表 > 文）
 
