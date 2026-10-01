@@ -160,7 +160,20 @@
         });
 
         // 结论卡插槽：只有需要结论卡的页面才传（指标大屏不传 —— 它的 KPI 行本身就是结论）
-        var host = document.querySelector(opts.slot);
+        var host = opts.slot ? document.querySelector(opts.slot) : null;
+        if (opts.slot && !host) {
+            // 到这里说明**页面 HTML 与本文件不是同一版**：挂载点 id 写在 HTML 里、挂载逻辑在本文件里，
+            // 而静态资源只带 Last-Modified、没有 Cache-Control，浏览器会启发式缓存 —— 于是两者
+            // 各自被缓存成不同版本。旧 JS 找不到新槽位，卡片就**静默消失**，最难查的就是这种。
+            // 所以不直接放弃：就地兜一个挂载点继续工作，并把错位这件事说清楚。
+            if (window.console && console.warn) {
+                console.warn("[presenter] 找不到挂载点 " + opts.slot
+                    + " —— 页面 HTML 与 presenter.js 大概不是同一版，硬刷新（Ctrl+F5）即可；已临时兜在页面顶部。");
+            }
+            host = document.createElement("div");
+            var main = document.querySelector("main") || document.body;
+            main.insertBefore(host, main.firstChild);
+        }
         if (host) {
             var card = document.createElement("section");
             card.className = "presenter-card";
