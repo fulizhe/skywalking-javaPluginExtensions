@@ -366,10 +366,13 @@ function render(rows){
   } else {
     renderEndpoints(list, all);
   }
-  renderNotes(list.length, (rows && rows.length ? rows.length : 0) - all.length);
+  // maxBucket = 最大的 bucketCount ≈ 窗口内数据跨了多少个分钟桶（用来提示"数据有多短"）
+  var maxBucket = 0;
+  all.forEach(function(r){ maxBucket = Math.max(maxBucket, Number(r.bucketCount) || 0); });
+  renderNotes(list.length, (rows && rows.length ? rows.length : 0) - all.length, maxBucket);
 }
 
-function renderNotes(rowsKept, dropped){
+function renderNotes(rowsKept, dropped, maxBucket){
   var notes = [];
   notes.push("<b>榜 = 窗口内全量调用的分位</b>，不是「慢调用次数榜」。次数是插件 slowCount 的口径，"
     + "与逐条慢段不是一回事，两页数字<b>不要相加</b>。");
@@ -378,6 +381,12 @@ function renderNotes(rowsKept, dropped){
   if (viewMode === "family") {
     notes.push("<b>前缀族 = 按 endpoint 名推的</b>（取路径前两段），指标读口<b>没有 layer 字段</b>，"
       + "所以它<b>不是层归类</b>、回答不了「哪一层慢」。要看层，去<a href=\"topology.html\">依赖拓扑</a>。");
+  }
+  // 数据有多长：内存库重启即清零，不写明的话"列表怎么突然空了"只能靠猜
+  if (maxBucket > 0 && maxBucket < 120) {
+    notes.push("<b>当前只有 " + maxBucket + " 分钟的数据</b>（指标落 <b>H2 内存库</b>，"
+      + "<b>重启即清零</b>）。时间窗选得再大也只是这 " + maxBucket + " 分钟 —— "
+      + "族/端点会随新流量持续增减，<b>这是数据在积累，不是页面在乱跳</b>。");
   }
   // 剔掉的行要说清是多少、为什么 —— 不静默隐藏
   if (dropped > 0) {
