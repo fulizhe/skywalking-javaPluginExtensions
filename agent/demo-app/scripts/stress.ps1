@@ -128,7 +128,7 @@ $ALL_GROUPS = [ordered]@{
     # hutool override 插件演示(全部回环自调)
     "hutool"     = "/api/hutool-demo/get-query?marker=m,/api/hutool-demo/post-form?value=v&phase=P,/api/hutool-demo/post-json?value=v&phase=P,/api/hutool-demo/post-multipart?value=v,/api/hutool-demo/error-call,/api/hutool-demo/status/500"
     # 依赖面三层(单层端点;/api/deps-demo/all 不进压测:它是演示入口,四层耗时叠加)
-    "deps"       = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/redis?op=del,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/kafka?op=consume,/api/deps-demo/http?site=httpbin"
+    "deps"       = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/redis?op=del,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/kafka?op=consume,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc"
 }
 # **故意排除**的端点(附理由)—— 全量不等于无脑全打,这三类打了会把压测毁掉:
 #   1) 改状态:POST /toggle(关插件写入)、POST /httpclient/collect/toggle、POST /profile(启采样)、

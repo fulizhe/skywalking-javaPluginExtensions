@@ -84,7 +84,6 @@
   </span>
   <span class="field">时间窗
     <button class="sec win" data-min="5" type="button">近 5 分钟</button>
-    <button class="sec win" data-min="60" type="button">近 1 小时</button>
     <button class="sec win" data-scope="lifetime" type="button">自启动以来</button>
   </span>
   <button id="btn-poll" class="on" type="button">停止刷新</button>
@@ -115,10 +114,13 @@
           而连接建立本身（connection refused、主机名解析失败）发生在被观测的调用之前，
           <b>不会产生依赖边</b>。所以某个组件缺席<b>不能</b>读成「没有这个调用」，
           要确认请到链路视图里看那条请求的失败现场。</li>
-      <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。
-          「近 5 分钟 / 近 1 小时」两档看的是<b>窗口内的边</b>（窗口桶约 4 分钟，过期即淘汰）；
-          <b>「自启动以来」</b>那一档读的是插件侧的<b>进程累计</b>——它不参与淘汰，回答的是
-          "这个进程从起来到现在伸出去过哪些手"，<b>重启即从零开始</b>。</li>
+      <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。<br>
+          本页只有两档：<b>「近 5 分钟」</b>看窗口内的边 —— 插件只保留「当前分钟 + 3 个晚到桶」
+          ≈ <b>4 分钟</b>，再往前的桶已被淘汰，所以这一档拉不出更长历史；
+          <b>「自启动以来」</b>读插件侧的<b>进程累计</b>（不参与淘汰），回答"这个进程伸出去过哪些手"，
+          <b>重启即从零开始</b>。<br>
+          要看<b>小时级 / 天级</b>趋势请看<a href="metrics.html" target="_blank">指标大屏</a>——
+          端点级指标<b>落 H2</b>并做小时 rollup，那一页才有 1h/6h/24h/7d/30d。</li>
     </ul>
   </section>
 
