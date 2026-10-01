@@ -184,11 +184,12 @@ function maxEndReadable(entry) {
     return m ? fmtTime(m) : "-";
 }
 
-function expandRow(traceId, logs) {
+function expandRow(traceId, logs, colSpan) {
     var tr = el("tr");
     tr.style.display = "none";
     var td = el("td");
-    td.colSpan = 8;
+    // 列数由调用页决定：statistic 表 8 列、告警事件表 7 列。不传则沿用 8，调用方无需改。
+    td.colSpan = colSpan || 8;
     var spans = [];
     var spansBySeg = [];
     logs.forEach(function (l) {
@@ -423,6 +424,11 @@ RENDER.instance = function (results, box) {
 };
 
 /* ---- 05 告警 ---- */
+// 告警页 3s 自动刷新会**整表重建**，展开的行会随之消失；而演示模式下"停止轮询"按钮是收起来的，
+// 用户连暂停的手段都没有 —— 展开态必须跨刷新保留，否则"点开看详情"只能看 3 秒。
+// 记 traceId 而不是 DOM 引用：重建后拿旧引用没有意义。
+var expandedAlertTraces = {};
+
 RENDER.alert = function (results, box) {
     var stat = results[0], recent = results[1];
     if (isPluginHint(stat)) { showHint(stat, box); return; }
@@ -464,17 +470,41 @@ RENDER.alert = function (results, box) {
     var evPanel = el("div", "panel");
     evPanel.appendChild(el("h3", null, "webhook 收讫事件(" + (recent && recent.count != null ? recent.count : 0) + ")"));
     var evTable = el("table");
-    evTable.appendChild(el("thead", null, "<tr><th>收讫时间</th><th>traceId</th><th>类型</th><th>url</th><th>耗时</th><th>错误 span</th></tr>"));
+    evTable.appendChild(el("thead", null, "<tr><th>收讫时间</th><th>traceId</th><th>类型</th><th>url</th><th>耗时</th><th>错误 span</th><th>详情</th></tr>"));
     var evBody = el("tbody");
     ((recent && recent.events) || []).forEach(function (ev) {
         var types = (ev.alertTypes || []).map(function (t) { return badge(t, t === "ERROR" ? "err" : "warn"); }).join(" ");
-        evBody.appendChild(el("tr", null,
+        // 告警事件要能"点开看是什么链路" —— 否则只有一行摘要，没法分析。
+        // 两套做法与 statistic 页完全一致：点行在原位展开 span 时间线 + span 明细表，
+        // 点「查看」直接开链路图弹窗。事件自带的 logs 与 statistic 的 logs 同构
+        // （traceSegmentId + spans[]），所以 expandRow 可直接复用。
+        var tr = el("tr", "clickable",
             "<td class='mono'>" + esc(ev._receivedAt || "-") + "</td>" +
             "<td class='mono' title='" + esc(ev.traceId) + "'>" + esc(shortId(ev.traceId)) + "</td>" +
             "<td>" + types + "</td>" +
             "<td class='mono'>" + esc(ev.url || "-") + "</td>" +
             "<td class='mono'>" + (ev.durationMs != null ? ev.durationMs + " ms" : "-") + "</td>" +
-            "<td>" + (ev.errorSpanCount != null ? ev.errorSpanCount : "-") + "</td>"));
+            "<td>" + (ev.errorSpanCount != null ? ev.errorSpanCount : "-") + "</td>" +
+            "<td><button class='link-btn' type='button'>查看</button></td>");
+        tr.appendChild(expandRow(ev.traceId, ev.logs || [], 7));
+        tr.querySelector("button.link-btn").addEventListener("click", function (e) {
+            e.stopPropagation();
+            openTraceModal(ev.traceId);
+        });
+        var detail = tr.nextElementSibling;
+        if (expandedAlertTraces[ev.traceId]) {
+            detail.style.display = "";
+        }
+        tr.addEventListener("click", function () {
+            var open = detail.style.display === "none";
+            detail.style.display = open ? "" : "none";
+            if (open) {
+                expandedAlertTraces[ev.traceId] = true;
+            } else {
+                delete expandedAlertTraces[ev.traceId];
+            }
+        });
+        evBody.appendChild(tr);
     });
     evTable.appendChild(evBody);
     evPanel.appendChild(evTable);

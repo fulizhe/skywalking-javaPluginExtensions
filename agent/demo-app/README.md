@@ -257,6 +257,11 @@ pwsh ./scripts/stress.ps1 -WithDeps -Requests 50 -Threads 8
 三页右下角共用一个开关 **「演示模式」**：`metrics.html`（指标大屏）、`topology.html`（依赖拓扑）、
 `dashboard.html?p=alert`（告警面板）。逻辑与样式都在 `presenter.js` / `presenter.css` 两个共用文件里。
 
+告警面板的每条事件都**可点开看详情**，与 `?p=statistic` 同一套做法：点行在原位展开这条事件的
+**span 时间线 + span 明细表**（operationName / 层 / 组件 / 耗时 / 错误 / 标签），点「查看」直接开
+链路图弹窗。事件自带的 `logs` 与 statistic 的 `logs` 同构，所以复用同一份 `expandRow()`。
+展开态按 traceId 记住并跨 3s 自动刷新保留 —— 否则演示模式（轮询按钮已收起）下只能看 3 秒。
+
 打开后：
 
 | 变化 | 说明 |
