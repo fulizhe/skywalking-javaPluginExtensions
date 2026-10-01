@@ -192,7 +192,7 @@ bash verify/run.sh --matrix          # 附带各场景的依赖版本矩阵
 | 8 | `depends_on` 报"服务未定义" | 跨 profile 的 `depends_on` 在 compose v2 里会报错 | 本编排**故意不给** demo-app 加 deps 依赖,靠服务名解析失败来表达"中间件不在场" |
 | 9 | 9600 端口被占 | 之前有实例没退干净 | `docker compose down` / `ss -lntp \| grep 9600`;应用默认端口是 `9601`,compose 用 `WebPort=9600` 显式指定 |
 | 9b | `Bind for 0.0.0.0:6379/3306 failed: port is already allocated` | 宿主上这些端口被**别的栈**占着(很常见:本机的 RuoYi 之类自带 redis/mysql) | 本编排已把宿主映射改成 `16379` / `13306` / `19092`(容器内不变)。真要占用标准端口就把映射改回去,并先停掉占用方 |
-| 9c | 拉镜像报 `proxyconnect tcp: dial tcp 127.0.0.1:7897: connection refused` | Docker Desktop 的 daemon 跑在虚拟机里,它连的 `127.0.0.1:7897` 是**虚拟机内**的 127.0.0.1,不是你宿主机上那个代理 | Docker Desktop → Settings → Resources → Proxies:**Manual 留空**(不走代理,直连镜像源);或把代理主机写成 `host.docker.internal`。**Apply & Restart** 后重试。宿主侧 `Test-NetConnection 127.0.0.1 -Port 7897` 通不代表 daemon 能连上 |
+| 9c | 拉镜像报 `proxyconnect tcp: dial tcp 127.0.0.1:7897: connection refused` | **Docker Desktop 没启用 Manual 代理时，daemon 直接继承 Windows 的系统代理**（`Internet Settings` 的 `ProxyServer`）。而 Linux 引擎跑在 WSL2 发行版里，它看到的 `127.0.0.1` 是**虚拟机自己的回环**，那里没有代理 | 先 `docker info` 看 daemon 实际用的代理值（那是真值来源，别看界面）。修法：Resources → Proxies → 开 **Manual**，两栏填 `http://host.docker.internal:7897`（**不要清空**）→ Apply & restart；或改 Windows `ProxyServer` 后彻底重启 Docker（OS 级改动，会影响其它走系统代理的应用）。详见 `NOTES-docker-stress.md` 第 13 条 |
 | 10 | H2 控制台用宿主 IP 访问返回 404 | H2 2.1.212 的 `WebThread.checkHost` 只放行 server 自身地址与 `localhost`/`127.0.0.1` | 用 `http://127.0.0.1:8092`;远程访问走 SSH 端口转发 `ssh -L 8092:127.0.0.1:8092 user@host` |
 
 ---
