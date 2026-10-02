@@ -29,6 +29,26 @@
 #   ⚠️ 别拿 -AllEndpoints 的 QPS 和默认档比:两者压的**不是同一批端点**,
 #      前者天花板由最慢那条决定。QPS 低先看路径集里混了什么。
 #
+# ★★★ 硬约束:压测路径集里**有 5xx** 的话,压之前必须先清空 TCP 端口 ★★★
+#   **Tomcat 对 4xx/5xx 响应的 ERROR 派发会强制发 `Connection: close`**
+#   (实测 400/500/503 关,404 不关 —— 404/410 不做 ERROR 派发),
+#   于是**每个失败请求都泄漏一条 TCP 连接**。而 TIME_WAIT 在 Windows 上挂 120 秒、
+#   本机动态端口池只有 13,977 个 → 临界速率 `13977/120 ≈ 116 条/秒`,超过就打满。
+#   打满后**本机任何**新建连接都失败( Winsock errno 10022 / "Invalid argument: connect"),
+#   表现为**仪表盘页面白屏**(js/css 加载不出来,报 `SRange is not defined` 之类)——
+#   那不是插件坏了,是端口池被压测自己打爆了。
+#
+#   实测(同机、16 线程、180 秒,只换路径集):
+#     路径集含 5xx   → TIME_WAIT **28 秒冲到 17,396(打满)**,19,802 请求因连不上而失败
+#     路径集全 2xx   → TIME_WAIT 峰值 **465**,自然回落,面板错误率 0.00%
+#
+#   所以:
+#     · 压测**含 5xx** 的档(默认档 5 条里 2 条是 5xx、-AllEndpoints 60 条里 8 条是 5xx)
+#       → 跑之前先 `netsh int tcp reset`(需管理员),或者干脆用 -NormalOnly(不含 5xx);
+#     · 长时间压测(-Continuous)前尤其要做,否则一次就能把端口池抽干;
+#     · 压完若仪表盘白屏,先看 TIME_WAIT 数量再怀疑插件。
+#   排查经过与可复现命令见 docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md。
+#
 # 三种模式:
 #   1) 请求数模式(默认):发够 -Requests 个请求即结束
 #      pwsh ./scripts/stress.ps1 -Requests 2000 -Threads 16
@@ -334,8 +354,26 @@ if ($errorPaths.Count -gt 0) {
     Write-Host "     错误请求 → 插件 webhook **同步回打本机** → 回打又是一次请求 → 负载自我放大。"
     Write-Host "     预期现象:吞吐下降、告警面板出现事件、persistErrors/aggregateErrors 计数上涨。"
     Write-Host "     只要指标数字请改用 -NormalOnly(不含错误端点),或用 -WithDeps / scripts/stress-slow.ps1。"
+
+    # 端口池水位检测:5xx 响应带 Connection:close → 每个失败请求泄漏一条 TCP 连接。
+    # TIME_WAIT 挂 120s、池子 13,977 → 临界 116 条/秒。打满后本机任何新建连接都失败,
+    # 表现为仪表盘白屏,而非插件故障。含 5xx 的档开跑前必须先清空。
+    $tw = 0
+    try { $tw = (netstat -ano -p tcp | Select-String 'TIME_WAIT' | Measure-Object).Count } catch { }
+    if ($tw -ge 3000) {
+        Write-Host ""
+        Write-Host "[!!] TCP 端口池水位已高: TIME_WAIT=$tw (池 13,977)。"
+        Write-Host "     本档含 5xx,而 Tomcat 对 5xx 响应强制发 \`Connection: close\` → 每个失败请求"
+        Write-Host "     泄漏一条连接。**打满后本机任何新建连接都会失败**,仪表盘会白屏(ERR_INVALID_ARGUMENT)。"
+        Write-Host "     强烈建议先清空再跑(需管理员):"
+        Write-Host "         netsh int tcp reset"
+        Write-Host "     或改用不含 5xx 的档: -NormalOnly / -WithDeps"
+    } elseif ($tw -gt 0) {
+        Write-Host "     (当前 TIME_WAIT=$tw,尚安全;若压测中途仪表盘白屏,先看这个值)"
+    }
 } else {
     Write-Host "[ok] 本档不含错误端点 → 不会触发告警自环(错误端点只在 -AllEndpoints 与显式 -Paths 里)"
+    Write-Host "     也不存在 5xx 的 Connection:close 连接泄漏,无需 netsh int tcp reset。"
 }
 
 if ($Threads -le 0) { Write-Host "[FAIL] -Threads 必须为正整数"; exit 1 }

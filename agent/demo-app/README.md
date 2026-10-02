@@ -176,6 +176,24 @@ pwsh ./scripts/stress.ps1 -StartApp -Continuous -KeepRunning   # 同时起应用
 > `persistErrors`/`aggregateErrors` 计数推高。要干净的指标数字就用 `-NormalOnly`。
 > `stress.ps1` 开跑前会把这个提示与命中的错误端点列出来。
 
+> ⚠️⚠️ **含 5xx 的档压之前必须先 `netsh int tcp reset`**(需管理员)。
+> **Tomcat 对 4xx/5xx 响应(404 除外)强制发 `Connection: close`**,于是
+> **每个失败请求泄漏一条 TCP 连接**;而 TIME_WAIT 在 Windows 上挂 120 秒、本机动态端口池
+> 只有 13,977 个 → 临界速率 `13977/120 ≈ 116` 条/秒,**超过就打满**。
+> 打满后**本机任何**新建连接都失败(`errno 10022`),表现为**仪表盘页面白屏**
+> (js/css 加载不出来)—— **那不是插件坏了,是压测自己把端口池打爆了**。
+>
+> 实测(同机 16 线程 180 秒,只换路径集):
+>
+> | 路径集 | TIME_WAIT 峰值 | 结果 |
+> | --- | --- | --- |
+> | `-NormalOnly`(无 5xx) | **465** | 自然回落,面板错误率 0.00% |
+> | 全 5xx | **17,396** | **28 秒打满**,后续请求大量失败 |
+>
+> 默认档 5 条路径里 **2 条是 5xx**、`-AllEndpoints` 60 条里 **8 条是 5xx**,所以这两档
+> 开跑前都要清空。`stress.ps1` 现在会读 TIME_WAIT 水位,**≥3000 时直接提示先 reset**。
+> 排查经过与可复现命令见 `docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md`。
+
 常用参数:`-BaseUrl`(默认 `http://127.0.0.1:9600`)、`-Requests`、`-Threads`、`-DurationSec`、`-Continuous`、`-ProgressSec`(持续模式打印间隔,默认 10s)、`-Paths`(逗号分隔,默认混合正常/错误/慢)、`-NormalOnly`、`-WithDeps`(与 `run-with-agent.ps1 -WithDeps` 同名同义)、`-AllEndpoints`、`-KeepRunning`、`-SkipMetrics`。
 
 ### 慢端点演示(手动执行,`stress-slow.ps1`)

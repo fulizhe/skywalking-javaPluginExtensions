@@ -16,6 +16,34 @@ import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
  * <p>
  * URL 支持 {@code ${WebPort:9600}} 占位符，或由 {@code webhook_path} + 环境变量端口自动拼装。
  * </p>
+ * <p>
+ * <b>关于"每条告警一条 TCP 连接"这件事（2026-10-02 排查结论，勿再重复追查）</b>：
+ * 曾怀疑本类每条告警新建一条连接、高频告警下打满本机端口池（13,977），并为此换过自带池化
+ * HTTP 客户端 —— <b>该结论已被证伪，池化方案已回退</b>。
+ * </p>
+ * <p>
+ * 干净的对照实验（单线程 + 池大小 1 的进程内探针发 200 次请求，负载生成器自身最多占 1 条连接）：
+ * <pre>
+ *   ① /hello（200，不产生告警）                        => 新增连接   2 条
+ *   ② /status/500（500，命中 error_ignore 规则，无告警） => 新增连接 252 条
+ *   ③ /api/trace-alert-demo/error（500，产生告警）      => 新增连接 235 条
+ * </pre>
+ * ②与③几乎相同、而②<b>根本没有告警</b> —— 说明连接增长与告警无关。
+ * 真因是响应头：<b>Tomcat 对走 {@code /error} 错误派发的 5xx 响应强制发
+ * {@code Connection: close}</b>（对比 200 响应带 {@code Content-Length}），于是
+ * <b>每个 5xx 请求泄漏一条 TCP 连接</b>。压测路径集里 5xx 占比高（默认档 2/5、
+ * {@code -AllEndpoints} 8/60），在数百 rps 下即产生上百条连接/秒，远超
+ * {@code 13977/120 ≈ 116} 条/秒的填池阈值。
+ * </p>
+ * <p>
+ * 因此本类维持最朴素的 {@code HttpURLConnection} + 逐条 {@code disconnect()}：
+ * <b>它不是缺陷所在</b>，换成显式池化也不能改变 5xx 响应带 {@code Connection: close}
+ * 这一事实（对照实验里三种客户端写法 —— 保留 disconnect / 去掉 disconnect + 排空 body /
+ * 显式池化 —— 分别得到 202 / 207 / 207 条连接，无差别）。
+ * 若日后要让 5xx 响应也可复用连接，该改的是<b>服务端</b>（让控制器直接返回
+ * {@code ResponseEntity.status(500)} 而非抛异常走 ERROR 派发），不是本类。
+ * 排查经过与可复现命令见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md}。
+ * </p>
  */
 class HttpTraceAnomalyListener implements TraceAnomalyListener {
 
@@ -71,7 +99,6 @@ class HttpTraceAnomalyListener implements TraceAnomalyListener {
             }
 
             final int status = connection.getResponseCode();
-            drainBody(connection, status);
             if (status < 200 || status >= 300) {
                 TraceAlertMetrics.get().recordHttpFailure(event.getTraceId(), targetUrl, status,
                         "HTTP status " + status);
@@ -92,37 +119,6 @@ class HttpTraceAnomalyListener implements TraceAnomalyListener {
             if (connection != null) {
                 connection.disconnect();
             }
-        }
-    }
-
-    /**
-     * 读干净响应体再关闭连接。
-     *
-     * <p>成功读 {@code getInputStream()}、非 2xx 读 {@code getErrorStream()}（4xx/5xx 时前者直接抛
-     * {@link IOException}）。不读干净则 socket 里残留未消费的字节，{@code disconnect()} 之外还可能
-     * 让对端迟迟收不到 FIN —— 排空是本方法存在的全部理由。
-     *
-     * <p>读失败只吞不抛：body 读不出来属于"采集不到"，不该反过来再记一次投递失败。
-     */
-    private static void drainBody(final HttpURLConnection connection, final int status) {
-        try (java.io.InputStream in = status >= 200 && status < 400
-                ? connection.getInputStream() : connection.getErrorStream()) {
-            if (in == null) {
-                return;
-            }
-            final byte[] buf = new byte[512];
-            int total = 0;
-            // 上限兜底：防御"对端不回 EOF"的响应把 dispatch 线程挂住。
-            // 每 socket 有 readTimeout 兜底，这里再限一次总字节数避免无界读。
-            while (total < 64 * 1024) {
-                final int n = in.read(buf);
-                if (n < 0) {
-                    break;
-                }
-                total += n;
-            }
-        } catch (IOException e) {
-            LOGGER.debug("### [TraceAlert] drain webhook response body failed (ignored): {}", e.getMessage());
         }
     }
 
