@@ -76,20 +76,26 @@ public class HttpLoadTest {
     /** 每线程延迟样本上限（蓄水池），保证无限模式下内存有界。 */
     private static final int SAMPLES_PER_THREAD = 50_000;
 
+    /**
+     * 默认混合集 = 毫秒级正常端点 + 错误端点（<b>刻意不含慢端点</b>）。
+     *
+     * <p>{@code /fullSample}（默认 deps=true，单请求 5.5s，中间件未全起时约 8s）与
+     * {@code /longTimeTask}（固定 sleep 0.5s）会把延迟均值拉到 ~800ms、吞吐掉一个数量级
+     * （8 线程 ~10 rps vs ~800 rps）。两条都在 {@code scripts/stress-slow.ps1} 里，
+     * 那一档才是"压慢端点"的地方；依赖面造数用 {@code stress.ps1 -WithDeps}。
+     *
+     * <p>要连慢端点一起压（如为 slow 统计列表造数）走
+     * {@code deploy/deploy_remote.py} 的远程压测档，那份路径清单是独立硬编码的。
+     */
     private static final String[] DEFAULT_PATHS = {
         "/hello",
-        // 必须带 ?deps=false：fullSample 默认 deps=true，会打 Redis/MySQL/Kafka/外呼四层，
-        // 单请求 5.5s（中间件未全起时约 8s）。混进压测路径集会把均值拉到 ~800ms、
-        // 吞吐掉一个数量级（8 线程 ~10 rps vs ~580 rps）。要压依赖面用 stress.ps1 -WithDeps。
-        "/fullSample?deps=false",
         "/queryDbByMybatis",
         "/queryDbByJdbc",
         "/api/trace-alert-demo/error",
-        "/api/trace-alert-demo/http500",
-        "/longTimeTask"
+        "/api/trace-alert-demo/http500"
     };
     private static final String[] PATHS = prop("loadtest.paths", "").isEmpty()
-        ? DEFAULT_PATHS : prop("loadtest.paths", "").split(",");
+        ? DEFAULT_PATHS : splitPaths(prop("loadtest.paths", ""));
 
     private static final String DURATION_PROP = prop("loadtest.durationSec", "");
     private static final boolean DURATION_MODE = !DURATION_PROP.isEmpty();
@@ -440,6 +446,84 @@ public class HttpLoadTest {
             i = close + 1;
         }
         return out.toString();
+    }
+
+    /**
+     * 按逗号切路径，但只在<b>该逗号真的分隔两条路径</b>时才切。
+     *
+     * <p><b>为什么需要</b>：路径集用逗号分隔，而逗号在 URL query 值里是合法字符 —— 朴素的
+     * {@code split(",")} 会把一条路径静默拆成两条。症状不是报错，而是"压测少打了一半路径"
+     * 或"凭空多出 400"，很难往切分上想。两类真实踩过的坑：
+     * <ul>
+     *   <li>{@code {rand:min,max}} 占位符（{@link #randomize}）：{@code {rand:1000,4000}}
+     *       被切成 {@code {rand:1000} 和 {@code 4000}}，前者找不到闭合 {@code } 原样发出 → 400。
+     *       这条真在 stress-slow.ps1 里踩到过（e495abf 引入）。</li>
+     *   <li>query 参数值里带逗号（{@code ?ids=1,2,3}）。</li>
+     * </ul>
+     *
+     * <p><b>判据</b>：路径集里每条路径都以 {@code /} 开头，而 query 值里的逗号后面跟的是
+     * 数字或字母。所以 <b>depth==0 且后继非空白字符是 {@code /} 的逗号才算分隔符</b>。
+     * 花括号 depth 是兜底 —— 万一将来出现"值里逗号紧跟斜杠"（{@code ?tags=a,/b}），depth 至少
+     * 能护住占位符那类区间。
+     *
+     * <p><b>已知局限</b>（不追求"根治"，取舍见下）：判据是启发式的，所以
+     * {@code ?tags=a,/b} 这种"值里的逗号后面紧跟斜杠"仍会被切开。真正的根治是让路径集
+     * 不再与 URL 语法共用逗号（换分隔符），但分隔符要穿过 PowerShell + cmd.exe 两道手
+     * （5a4d951 刚在 {@code &} 上踩过），代价高于收益 —— 等真有这种端点再说。
+     *
+     * <p><b>未闭合的 {@code &#123;</b> 到串尾：depth 永远回不到 0，剩余逗号全保留 —— 与
+     * {@link #randomize} 对未闭合占位符"原样保留"的取向一致，让笔误一路走到 400，而不是被这里悄悄修复。
+     */
+    static String[] splitPaths(final String spec) {
+        final List<String> out = new ArrayList<String>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < spec.length(); i++) {
+            final char c = spec.charAt(i);
+            if (c == '{') {
+                depth++;
+            } else if (c == '}' && depth > 0) {
+                depth--;
+            } else if (c == ',' && depth == 0 && isSeparator(spec, i)) {
+                final String piece = spec.substring(start, i).trim();
+                if (!piece.isEmpty()) {
+                    out.add(piece);
+                }
+                start = i + 1;
+            }
+        }
+        final String tail = spec.substring(start).trim();
+        if (!tail.isEmpty()) {
+            out.add(tail);
+        }
+        return out.toArray(new String[out.size()]);
+    }
+
+    /**
+     * 这个 depth==0 的逗号是不是分隔符。
+     *
+     * <p>判据是"后继非空白字符是 {@code /}"（路径集里每条路径都以 {@code /} 开头，而 query
+     * 值里的逗号后面跟的是数字或字母）。但不能只看这一条 —— 那样 {@code "/a,,/b"} 里第一个逗号
+     * 的后继是另一个逗号，不满足判据、不切，于是片段变成 {@code "/a,"}（把逗号吃进路径里发出去）。
+     * 所以还要放过"空片段"：本次逗号到下一个逗号（或串尾）之间只有空白时，它分隔的是空项，
+     * 按"丢弃空片段"处理。
+     */
+    private static boolean isSeparator(final String spec, final int comma) {
+        int i = comma + 1;
+        boolean blankSoFar = true;
+        for (; i < spec.length(); i++) {
+            final char c = spec.charAt(i);
+            if (Character.isWhitespace(c)) {
+                continue;
+            }
+            // 空片段：本逗号与下一个分隔符之间没有内容，丢弃即可（否则逗号会被吃进路径）
+            if (blankSoFar && c == ',') {
+                return true;
+            }
+            return c == '/';
+        }
+        // 串尾：末尾逗号（空片段），丢弃
+        return blankSoFar;
     }
 
     private static String stripTrailingSlash(final String s) {
