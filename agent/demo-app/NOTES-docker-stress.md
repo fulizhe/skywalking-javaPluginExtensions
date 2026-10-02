@@ -30,7 +30,12 @@
 
 ## 本地用法
 
-`stress` 收在 compose profile 里，**默认不启动**（只想看效果就别带它）。
+压测收在 compose profile 里，**默认不启动**（只想看效果就别带它）。分**两档、各自一个 profile**：
+
+| profile | 服务 | 目的 | 压什么 | 跑法 |
+| --- | --- | --- | --- | --- |
+| `stress` | `stress` | **冲高 QPS + 看长跑稳定性**（堆、插件计数是否异常） | 5 条 **ms 级、只 2xx** | `up -d` 后 `logs -f`，无限循环 |
+| `stress-slow` | `stress-slow` | **核对指标准确性**（分位是否落在已知耗时上） | 6 条**慢端点**，每条耗时已知 | 240 次请求，打完即退 |
 
 ```bash
 cd agent/demo-app
@@ -38,11 +43,28 @@ cd agent/demo-app
 docker compose up --build -d demo-app
 #    浏览器 http://127.0.0.1:9600/  与  /dashboards/index.html
 
-# B) 连压测一起起（显式带 profile）
+# B) 常规压测（显式带 profile）：高 QPS + 长跑稳定性
 docker compose --profile stress up --build -d
 docker compose logs -f stress      # 每 10s 一行 [progress]
+
+# C) 慢接口压测：核对分位准确性（有限请求数，打完退出，不用 -d）
+docker compose --profile stress-slow up --build stress-slow
+docker compose logs stress-slow
+#    打开 /dashboards/metrics.html 与 slow-topn.html 对照：
+#      /api/order/1  8.5s · /api/trace-alert-demo/slow?ms=4000  4.0s
+#      /api/export/report?ms={rand:1000,4000} 每请求随机 1~4s
+#      /debug 3.1s · /longTimeTask 1.5s · /api/deps-demo/grpc 0.3s（毫秒级对照）
+
 docker compose down
 ```
+
+⚠️ **两档互斥，不要一起起**：慢端点档单请求 1~8.5s、req/s 天花板约 1~2，
+和常规档同跑会把那边的吞吐数字彻底压垮，两边观测都失真。同理**别拿两档的 req/s 互比**。
+
+路径集与线程数都取自 Windows 侧 `scripts/stress.ps1 -MaxRps` 与 `scripts/stress-slow.ps1`
+的 2026-10-02 实测值，两处刻意保持一致（免得同一台机器/container 里两套数字对不上）。
+**每档为什么"刻意不含"某些端点**，写在 `docker-compose.yaml` 里对应服务的注释上 ——
+改路径集前先读那段，别把慢端点或 5xx 混进常规档。
 
 `[progress]` 关键字段：`rps` / `2xx` / `non2xx` / `exc` / `heap` +
 `plugin=rowsUpserted, lateDropped, sampleOverflow, endpointOverflow, persistErrors, aggregateErrors`。
@@ -94,12 +116,16 @@ python agent/demo-app/deploy/deploy_remote.py `
 
 | 位置 | 路径集合 | 原因 |
 | --- | --- | --- |
-| 本地 compose | 5 条**正常**路径 | 错误路径会同步 webhook 回打自身形成放大环路，污染稳定性观测 |
+| 本地 compose `stress` 档 | 5 条 **ms 级、只 2xx**（`/hello` + 两个 SQL + 两个 `/statistic*` 读口） | 错误路径会同步 webhook 回打自身形成放大环路、污染稳定性观测；慢端点（`/longTimeTask` 1.5s、`/fullSample` 自调回环）会把上限从千级压到几十 RPS |
+| 本地 compose `stress-slow` 档 | 6 条**慢端点**（耗时 0.3s~8.5s，均不含 5xx） | 目的是**核对分位准确性** —— 慢端点耗时已知，面板上的 P50/P95 有真值可对；常规档的 ms 级端点分位差异淹没在噪声里 |
 | 远端（脚本默认） | 7 条**全压**（含 `/api/trace-alert-demo/error`、`/http500`） | 压力机要看"指标 + 告警"耦合下的表现 |
 
 - 覆盖发生在 `render_remote_compose()`：就地替换 `-Dloadtest.paths` 并打印实际生效值；
-  传 `--stress-paths compose` 则沿用 compose 里的 5 条正常路径。
+  传 `--stress-paths compose` 则沿用 compose `stress` 档那 5 条 ms 级路径（仍不含 5xx，
+  语义不变 —— 换档没改"本档不含错误端点"这件事）。
 - **远端 compose 是脚本渲染出来的**，直接 SSH 上去手改会被下一次部署覆盖。
+- 远端那套**没有慢接口档**：它要的是"指标 + 告警"耦合下的稳定性，掺慢端点只会压低吞吐。
+  要在本机核对分位准确性，用 `--profile stress-slow`。
 
 ### 切换压测路径后，错误率要等一个窗口
 

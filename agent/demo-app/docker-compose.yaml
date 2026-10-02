@@ -9,10 +9,26 @@
 # ⚠ 仪表盘入口是 /dashboards/index.html,不是 /dashboards/——后者 404,
 #   而 404 会被插件判为错误并真的发一条 ERROR 告警,凭空多出一条假事件。
 #
-# 【要压测观测插件长跑稳定性】——显式带上 stress profile:
+# 【要压测观测插件长跑稳定性】——显式带上 stress profile(常规档,冲高 QPS):
 #   docker compose --profile stress up --build -d
 #   docker compose logs -f stress        # 每 10s 一行 [progress]:吞吐 + plugin 计数 + heap
 #   docker compose down                  # 停止并删除容器(volume 保留)
+#
+# 【要核对指标准确性】——用 stress-slow profile(慢接口档,每端点耗时已知故有真值可对):
+#   docker compose --profile stress-slow up --build stress-slow      # 打完即退,不 up -d
+#   docker compose logs stress-slow
+#   浏览器打开 http://127.0.0.1:9600/dashboards/metrics.html 与 slow-topn.html 对照:
+#     /api/order/1                        8.5s  → P50 应在 8s 量级
+#     /api/trace-alert-demo/slow?ms=4000  4.0s  → P50 应在 4s 量级
+#     /api/export/report?ms={rand:1000,4000}     → P50≈2.5s、P95≈4s(随机分布)
+#     /debug                              3.1s  → P50 应在 3s 量级
+#     /longTimeTask                       1.5s  → P50 应在 1.5s 量级
+#     /api/deps-demo/grpc                 0.3s  → **毫秒级**:与上面几条拉开一个数量级
+#   ⚠️ 两档**互斥,不要一起起**:慢端点档 req/s 天花板约 1~2,会把常规档的吞吐压垮。
+#      精确核对命令(Windows/Linux 都可用):
+#        curl "http://127.0.0.1:9600/inner/sw/metrics/query?aggregate=true&fromBucket=<分钟桶>&toBucket=<分钟桶>&resolution=min"
+#   ⚠️ 分位是**按请求数加权平均的近似值**(≤24h 走分钟分位),所以小样本下与端点
+#      真实耗时会差一截 —— 先确认 bucketCount 够大再判"不准"。
 #
 # 【想看依赖拓扑图的"分层"】——显式带上 deps profile,起 Redis / MySQL / Kafka:
 #   docker compose --profile deps up --build -d
@@ -168,10 +184,20 @@ services:
       retries: 20
       start_period: 30s
 
+  # ---- 压测分两档,各收在独立 profile:**别一起起**(目标互斥,详见各服务注释)----
+  #
+  #   stress       = 常规压测 → **冲高 QPS + 看长跑稳定性**(堆、插件自身计数)
+  #   stress-slow  = 慢接口压测 → **核对指标准确性**(分位/慢率是否落在已知耗时上)
+  #
+  # 两档的分工与 Windows 侧 `scripts/stress.ps1` 的档位一一对应,路径集与线程数都取自
+  # 那边 2026-10-02 的本机实测值;`scripts/stress-slow.ps1` 是慢端点那一份。两处保持一致,
+  # 免得"同一台机器/container 里两套数字对不上"。
+  # ⚠️ 别拿两档的 req/s 互比 —— 压的不是同一批端点,天花板由最慢那条 / 5xx 占比决定。
+
   stress:
-    # 收在可选 profile 里:默认 `docker compose up` 不启动它。
-    # 原先 stress 与 demo-app 一起默认起,首次只想看效果的人会被无限压测的
-    # 日志与内存占用淹没,且它只压正常端点(纯指标),并不演示告警。
+    # ★ 常规压测档 = `stress.ps1 -MaxRps` 的路径集:**只 ms 级、只 2xx**。
+    #   收在可选 profile 里:默认 `docker compose up` 不启动它(首次只想看效果的人
+    #   不该被无限压测的日志与内存占用淹没)。
     profiles: ["stress"]
     image: demo-app-agent:9.4.0
     restart: unless-stopped
@@ -199,22 +225,88 @@ services:
       - -Dloadtest=true
       - -Dloadtest.baseUrl=http://demo-app:9600
       - -Dloadtest.durationSec=-1
-      - -Dloadtest.threads=16
+      # 32 线程 = `stress.ps1 -MaxRps` 的推荐值(本机实测甜点区:16 线程约 1280 RPS,
+      # 32 线程服务端嵌入式 Tomcat 开始成为瓶颈,再往上收益很小)。
+      - -Dloadtest.threads=32
       - -Dloadtest.progressSec=10
-      # 只压正常端点(排除 /error、/http500):本 profile 的目的是"纯指标稳定性观测",
-      # 而 demo-app 侧现已默认开 Trace 告警。若沿用 HttpLoadTest 的默认路径集,
-      # 错误请求会触发插件**同步 webhook 回打自身**形成放大回路,恰好污染这里要看的
-      # persistErrors/aggregateErrors 计数与 heap 趋势。
-      # 要压"指标+告警耦合",把本行换成含错误端点的路径集即可(如在末尾追加
-      # ,/api/trace-alert-demo/error,/api/trace-alert-demo/http500)。
-      # /fullSample?deps=false —— 默认关掉依赖三层,原因:**stress profile 单独起时中间件不在**
-      # (redis/mysql/kafka 只在 deps profile 里),全貌入口默认那四次调用会各等 1~3s 超时
-      # ≈ 8s/请求,把吞吐拖垮。
-      # 要连依赖面一起压 —— 两个 profile 一起起,并把本行换成:
-      #   docker compose --profile stress --profile deps up --build -d
-      #   -Dloadtest.paths=/hello,/fullSample,/api/deps-demo/redis?op=set,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
-      # (去掉 ?deps=false 让全貌入口带上三层,再显式补上可单独造慢边的路径)
-      - -Dloadtest.paths=/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,/longTimeTask
+      # ★ 只 ms 级、只 2xx —— 两处刻意的"不含"才是这一档能冲上限的原因:
+      #   · 不含 /longTimeTask(固定 sleep ~1.5s):留着它上限会掉到约 50 RPS,
+      #     压出来的是"等慢端点"而不是吞吐(Windows 侧 -NormalOnly 就吃了这个亏)。
+      #   · 不含 /fullSample?deps=false:它自身只 4.5ms,但内部会自调一次
+      #     /api/trace-alert-demo/ok —— 每个业务请求变成两个 HTTP 往返,
+      #     压出来的是"回环放大"的吞吐,不是应用吞吐。
+      #   · 不含 5xx:5xx 响应带 Connection: close(Tomcat 协议层行为,8 个码),
+      #     每个泄漏一条 TCP 连接;容器 network namespace 的端口池虽比 Windows 宿主宽裕得多,
+      #     但长时间 `-durationSec=-1` 仍不该靠运气。顺带也没有告警自环,
+      #     persistErrors/aggregateErrors 计数与堆趋势才干净可读。
+      - -Dloadtest.paths=/hello,/queryDbByMybatis,/queryDbByJdbc,/statisticJVM,/statisticLogs
+      - -DargLine=-Xmx512m
+    mem_limit: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  stress-slow:
+    # ★ 慢接口档 = `scripts/stress-slow.ps1` 的路径集,目的是**核对指标准确性**:
+    #   这些端点的耗时是**已知的**(下表给了实测值),所以面板上的 P50/P95/P99
+    #   有真值可对 —— 这是"指标准不准"唯一能验的方式。常规档做不到:ms 级端点的
+    #   分位差异淹没在噪声里,压出来也看不出对错。
+    #
+    #   和常规档**互斥,不要一起起**:本档单请求 1~8.5s,req/s 天花板极低(4 线程约 1~2 req/s),
+    #   和 stress 一起跑会把那侧的吞吐数字彻底压垮,两边的观测都失真。
+    profiles: ["stress-slow"]
+    image: demo-app-agent:9.4.0
+    restart: "no"          # 有限请求数,打完就退出 —— "no" 免得 restart 反复重跑
+    depends_on:
+      demo-app:
+        condition: service_healthy
+    environment:
+      MAVEN_OPTS: "-Xmx256m"
+    volumes:
+      - m2-cache:/root/.m2
+      - ../settings.xml:/opt/demo-app/settings.xml:ro
+    command:
+      - mvn
+      - -s
+      - /opt/demo-app/settings.xml
+      - -f
+      - /opt/demo-app/pom.xml
+      - test
+      - -Dtest=HttpLoadTest
+      - -Dloadtest=true
+      - -Dloadtest.baseUrl=http://demo-app:9600
+      # 240 次 / 6 端点 = **每端点约 40 个样本**。分位至少要几十个样本才有意义:
+      # 25 次(Windows 侧默认值)摊到 6 个端点只剩每端点 4 个,P95 完全是噪声。
+      # 想看"数据在积累"的走势就改用 -Dloadtest.durationSec=-1(但那时看不到准确分位)。
+      - -Dloadtest.requests=240
+      - -Dloadtest.threads=4
+      # 30s 而非默认 10s:最慢端点 /api/order/1 睡 8.5s,并发下尾延迟会超过 10s ——
+      # 那样会攒出"网络异常"让断言非零退出,而超时在慢端点压测里是预期现象,不是缺陷。
+      - -Dloadtest.timeoutMs=30000
+      - -Dloadtest.progressSec=10
+      # ★ 慢端点清单(实测耗时取自 stress-slow.ps1 头注释,2026-10-02 Windows 本机):
+      #     /api/order/1                     8.5s   ← 命中 demo-app 的 /api/order/*=8000 SLOW 规则
+      #     /api/trace-alert-demo/slow?ms=4000  4.0s
+      #     /api/export/report?ms={rand:1000,4000}  每请求随机 1~4s
+      #     /debug                           3.1s
+      #     /longTimeTask                    1.5s
+      #     /api/deps-demo/grpc              0.3s(进程内 gRPC,**不依赖中间件**)
+      #   · /api/export/report 用 {rand:min,max} 让每请求随机睡 1~4s:一条路径就能压出
+      #     **连续的耗时分布**,而写死 3s 只压出一条线。它裸调默认睡 65s,
+      #     容器内 timeoutMs=30000 会直接放弃 —— 所以必须带 ms 参数。
+      #     (YAML 里值含 `{}` 与 `:`,必须整体加引号)
+      #   · 刻意**不含**依赖三层的 redis/mysql/kafka:它们只在 deps profile 里起,
+      #     本档单独跑时连接建不起来 → 退化成 connect refused(毫秒级),不是慢端点。
+      #     要连依赖面一起压,加 --profile deps 并在末尾追加
+      #     ,/api/deps-demo/mysql?sleepMs=30(实测约 3s)。
+      #   · 刻意**不含**告警演示端点(/api/trace-alert-demo/error|http500):
+      #     5xx 会触发插件 webhook 同步回打本机 → 负载自环,且 Tomcat 对 5xx 强制
+      #     Connection: close、每个泄漏一条连接。要压告警链路请另起带 error 的路径集。
+      #   · /api/order/1 会真的触发一条 SLOW 告警(这是预期):本档看的是"慢 → 指标 + 告警"
+      #     的完整链路,告警面板出现事件属正常。
+      - "-Dloadtest.paths=/api/order/1,/api/trace-alert-demo/slow?ms=4000,/api/export/report?ms={rand:1000,4000},/debug,/longTimeTask,/api/deps-demo/grpc"
       - -DargLine=-Xmx512m
     mem_limit: 2g
     logging:
