@@ -11,6 +11,9 @@
 **通用运行器镜像 + 声明式场景 + 版本矩阵 + 数据驱动断言**;按本仓库约束裁剪(单运行器镜像、场景内跑 maven、
 `pwsh` 脚本保留为次选)。
 
+上游那套东西到底怎么运转(尤其是 `containers/` 拿容器干什么的、哪些机制我们刻意没借鉴),
+见 [`README-upstream-skywalking-java.md`](README-upstream-skywalking-java.md)。
+
 ## 快速开始
 
 ```bash
