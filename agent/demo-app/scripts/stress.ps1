@@ -3,14 +3,20 @@
 # 压测实现是自包含的 Java 类(demo-app 测试源码 org.openskywalking.demo.load.HttpLoadTest,
 # JUnit5,默认不参与 mvn test)。本脚本只做编排:起应用(可选) -> 跑压测 -> 打印指标摘要 -> 停应用(可选)。
 #
-# ★★★ 三档语义(改路径集前先读这段)★★★
-#   本脚本有两档,外加一个独立脚本,分工是**按单请求耗时**分的:
+# ★★★ 压测档位(四档互斥,改路径集前先读这段)★★★
+#   本脚本有四档,外加一个独立脚本,分工是**按单请求耗时 / 有无 5xx**分的:
 #
-#   1) 默认档(留空 $Paths) = **只 ms 级**。
-#      实测 5 条:4.4 / 3.2 / 2.0 / 1.7 / 1.6 ms。16 线程约 500 RPS。
-#      用途:吞吐、稳定性、指标聚合。**要 QPS 数字就用这档。**
+#   1) 默认档(留空 $Paths) = ms 级 + 错误端点。
+#      5 条里 2 条是 5xx(告警自环),含 /fullSample?deps=false。16 线程约 500 RPS。
 #
-#   2) -AllEndpoints = **所有**端点,**含慢端点与 5xx**。
+#   2) **-MaxRps = 极限吞吐档**。只 ms 级、**只 2xx**、无自调用回环。
+#      实测 16 线程约 **1280 RPS**;未显式给 -Threads 时默认用 32。
+#      **要"应用能跑多快"的数字就用这一档** —— 它是唯一不受慢端点与 5xx 干扰的档。
+#
+#   3) -NormalOnly = 业务正常端点(排除 5xx),但**含 /longTimeTask(固定 sleep ~1.5s)**,
+#      16 线程只有约 50 RPS。它测的是"指标聚合"而非吞吐,别拿它的数字当上限。
+#
+#   4) -AllEndpoints = **所有**端点,**含慢端点与 5xx**。
 #      慢端点(/api/export/report 裸调 65s、/api/order/1 8.5s、/fullSample 裸调 4.8s、
 #      /debug 5s、trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 1.5s)在这里是
 #      **故意留的** —— 本档求**覆盖度**(每个页面接口都打到),不求吞吐。
@@ -19,15 +25,15 @@
 #      **服务端仍睡满 65s 并占住线程**,p99 会被拉到这个量级。同理见 stress-slow.ps1 的
 #      `?ms={rand:1000,4000}` 写法 —— 那边给这条路径加了随机 sleep 上限。
 #
-#   3) stress-slow.ps1 = **只放慢的**,且更多是**手动执行**(讲解 / 演示 / 看慢端点现象),
+#   5) stress-slow.ps1 = **只放慢的**,且更多是**手动执行**(讲解 / 演示 / 看慢端点现象),
 #      不是稳定性压测的日常路径。它是"慢端点专用镜头",与 -AllEndpoints 的区别是:
 #      后者混杂快慢求覆盖,前者全是慢的、看得清每条多慢。
 #
-#   `deploy/deploy_remote.py` 的远程压测档是**第四份独立清单**,也故意含慢端点
+#   `deploy/deploy_remote.py` 的远程压测档是**另一份独立清单**,也故意含慢端点
 #   (它要的是 slow 统计列表),不受本脚本影响 —— 改 $ALL_GROUPS 不会改变它。
 #
-#   ⚠️ 别拿 -AllEndpoints 的 QPS 和默认档比:两者压的**不是同一批端点**,
-#      前者天花板由最慢那条决定。QPS 低先看路径集里混了什么。
+#   ⚠️ 别拿不同档的 QPS 互比:压的**不是同一批端点**,天花板由最慢那条 / 5xx 占比决定。
+#      QPS 低先看路径集里混了什么,别急着怀疑插件。
 #
 # ★★★ 硬约束:压测路径集里**有 5xx** 的话,压之前必须先清空 TCP 端口 ★★★
 #   **Tomcat 对 4xx/5xx 响应的 ERROR 派发会强制发 `Connection: close`**
@@ -111,8 +117,13 @@ param(
     # 两条命令连起来是依赖面的完整闭环(起应用 + 造数)。
     [switch]$WithDeps,
     # **全部页面接口**:把各仪表盘/演示页的数据源与演示端点一次压全(清单见 $ALL_PATHS)。
-    # 与 -NormalOnly / -WithDeps 三者互斥。
+    # 与 -NormalOnly / -WithDeps / -MaxRps 互斥。
     [switch]$AllEndpoints,
+    # **极限 RPS**:只压 ms 级、只 2xx 的端点,冲吞吐上限(实测 16 线程约 1280 RPS)。
+    # 与 -NormalOnly 的区别是本档**不含 /longTimeTask**(它固定 sleep ~1.5s,会把上限压到 ~50 RPS);
+    # 与 -AllEndpoints 的区别是本档**不含 5xx 与慢端点**,所以不会触发告警自环、
+    # 也不会因 Connection:close 泄漏连接打爆本机端口池。四者互斥。
+    [switch]$MaxRps,
     # 跳过压测后的指标摘要
     [switch]$SkipMetrics,
     # 指标摘要前等待秒数(给翻转线程一点时间)
@@ -147,6 +158,20 @@ $NORMAL_PATHS = "/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,
 # 那条边照样会被记下来(kafka-producer),只是 errorCount 可能仍是 0
 # (出口 span 不由 send 的超时异常置 isError,见探针笔记)。
 $DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc"
+
+# 极限 RPS 档(-MaxRps)专用路径集:**只 ms 级、只 2xx**。
+# 与 -NormalOnly 的区别:NormalOnly 里留着 /longTimeTask(固定 sleep ~1.5s),它把延迟均值
+# 抬到 ~300ms,16 线程也只有 ~50 RPS —— 那是"纯指标聚合"档的代价,不是吞吐上限。
+# 本档把那类慢端点全去掉,只留能真正压出上限的:实测 4 条 16 线程约 **1280 RPS**。
+#
+# 为什么必须"只 2xx":5xx 响应带 Connection: close(见头注释"硬约束"段),每个失败请求
+# 泄漏一条 TCP 连接,压测自己会把本机端口池打爆。本档要的是干净上限,不是覆盖率。
+# 刻意**不含** /fullSample?deps=false:它虽只 4.5ms,但内部会自调一次 /api/trace-alert-demo/ok,
+# 等于每个业务请求变成两个 HTTP 往返,压出来的不是应用吞吐而是"回环放大"的吞吐。
+$MAXRPS_PATHS = "/hello,/queryDbByMybatis,/queryDbByJdbc,/statisticJVM,/statisticLogs"
+# -MaxRps 档的推荐线程数(用户未显式给 -Threads 时采用)。32 是本机实测的甜点区:
+# 16 线程约 1280 RPS,32 线程服务端(嵌入式 Tomcat)开始成为瓶颈,再往上收益很小。
+$MAXRPS_DEFAULT_THREADS = 32
 
 # 全部页面接口(-AllEndpoints):按"页"分组铺开,便于看出漏了哪一页。
 # 清单是**显式枚举**而不是从代码里反射 —— 反射要处理注解/参数/副作用,反而更不可控;
@@ -197,17 +222,24 @@ $modeCount = 0
 if ($NormalOnly) { $modeCount++ }
 if ($WithDeps) { $modeCount++ }
 if ($AllEndpoints) { $modeCount++ }
+if ($MaxRps) { $modeCount++ }
 if ($modeCount -gt 1) {
-    Write-Host "[FAIL] -NormalOnly / -WithDeps / -AllEndpoints 三者互斥,只能给一个:"
-    Write-Host "       -NormalOnly    业务正常端点(排除 error),压指标聚合"
+    Write-Host "[FAIL] -NormalOnly / -WithDeps / -AllEndpoints / -MaxRps 四者互斥,只能给一个:"
+    Write-Host "       -NormalOnly    业务正常端点(排除 error),压指标聚合(含 /longTimeTask,上限 ~50 RPS)"
     Write-Host "       -WithDeps      依赖造数端点,压依赖边"
     Write-Host "       -AllEndpoints  全部页面接口(含慢/错,会刷告警)"
+    Write-Host "       -MaxRps        只 ms 级只 2xx,冲吞吐上限(实测 16 线程 ~1280 RPS)"
     exit 1
+}
+# -MaxRps 未显式给 -Threads 时用本档推荐值(32)。显式给了就尊重用户 —— 不做"猜测意图"。
+if ($MaxRps -and -not $PSBoundParameters.ContainsKey('Threads')) {
+    $Threads = $MAXRPS_DEFAULT_THREADS
 }
 $effectivePaths = $Paths
 if (-not $effectivePaths -and $NormalOnly) { $effectivePaths = $NORMAL_PATHS }
 if (-not $effectivePaths -and $WithDeps) { $effectivePaths = $DEPS_PATHS }
 if (-not $effectivePaths -and $AllEndpoints) { $effectivePaths = $ALL_PATHS }
+if (-not $effectivePaths -and $MaxRps) { $effectivePaths = $MAXRPS_PATHS }
 $pathsText = if ($effectivePaths) { $effectivePaths } else { "(HttpLoadTest 内置默认:混合,含 error)" }
 
 function Get-DriveRoot { return 'D:' }
@@ -366,11 +398,15 @@ if ($errorPaths.Count -gt 0) {
         Write-Host "     本档含 5xx,而 Tomcat 对 5xx 响应强制发 \`Connection: close\` → 每个失败请求"
         Write-Host "     泄漏一条连接。**打满后本机任何新建连接都会失败**,仪表盘会白屏(ERR_INVALID_ARGUMENT)。"
         Write-Host "     强烈建议先清空再跑(需管理员):"
-        Write-Host "         netsh int tcp reset"
-        Write-Host "     或改用不含 5xx 的档: -NormalOnly / -WithDeps"
-    } elseif ($tw -gt 0) {
+    Write-Host "         netsh int tcp reset"
+    Write-Host "     或改用不含 5xx 的档: -NormalOnly / -MaxRps / -WithDeps"
+} elseif ($tw -gt 0) {
         Write-Host "     (当前 TIME_WAIT=$tw,尚安全;若压测中途仪表盘白屏,先看这个值)"
     }
+} elseif ($MaxRps) {
+    Write-Host "[ok] **极限 RPS 档**:只压 ms 级、只 2xx 的端点"
+    Write-Host "     → 不触发告警自环,无 5xx 的 Connection:close 连接泄漏,无需 netsh int tcp reset"
+    Write-Host "     → 这一档的数字就是应用吞吐上限(别和 -AllEndpoints / -NormalOnly 比,那两档含慢端点)"
 } else {
     Write-Host "[ok] 本档不含错误端点 → 不会触发告警自环(错误端点只在 -AllEndpoints 与显式 -Paths 里)"
     Write-Host "     也不存在 5xx 的 Connection:close 连接泄漏,无需 netsh int tcp reset。"

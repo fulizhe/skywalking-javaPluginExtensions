@@ -17,32 +17,18 @@ import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
  * URL 支持 {@code ${WebPort:9600}} 占位符，或由 {@code webhook_path} + 环境变量端口自动拼装。
  * </p>
  * <p>
- * <b>关于"每条告警一条 TCP 连接"这件事（2026-10-02 排查结论，勿再重复追查）</b>：
- * 曾怀疑本类每条告警新建一条连接、高频告警下打满本机端口池（13,977），并为此换过自带池化
- * HTTP 客户端 —— <b>该结论已被证伪，池化方案已回退</b>。
+ * <b>关于"连接数"这件事（2026-10-02 排查结论，勿再重复追查）</b>：
+ * 曾怀疑本类每条告警新建一条连接、打满本机端口池，据此换过自带池化 HTTP 客户端 ——
+ * 那次判断是错的（测量工具污染 + 探针打在 500 端点上自己 churn），<b>已回退</b>。
+ * 真因是 <b>Tomcat 对 4xx/5xx 响应（404 除外）强制发 {@code Connection: close}</b>，
+ * 与本类无关；详见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md}。
  * </p>
  * <p>
- * 干净的对照实验（单线程 + 池大小 1 的进程内探针发 200 次请求，负载生成器自身最多占 1 条连接）：
- * <pre>
- *   ① /hello（200，不产生告警）                        => 新增连接   2 条
- *   ② /status/500（500，命中 error_ignore 规则，无告警） => 新增连接 252 条
- *   ③ /api/trace-alert-demo/error（500，产生告警）      => 新增连接 235 条
- * </pre>
- * ②与③几乎相同、而②<b>根本没有告警</b> —— 说明连接增长与告警无关。
- * 真因是响应头：<b>Tomcat 对走 {@code /error} 错误派发的 5xx 响应强制发
- * {@code Connection: close}</b>（对比 200 响应带 {@code Content-Length}），于是
- * <b>每个 5xx 请求泄漏一条 TCP 连接</b>。压测路径集里 5xx 占比高（默认档 2/5、
- * {@code -AllEndpoints} 8/60），在数百 rps 下即产生上百条连接/秒，远超
- * {@code 13977/120 ≈ 116} 条/秒的填池阈值。
- * </p>
- * <p>
- * 因此本类维持最朴素的 {@code HttpURLConnection} + 逐条 {@code disconnect()}：
- * <b>它不是缺陷所在</b>，换成显式池化也不能改变 5xx 响应带 {@code Connection: close}
- * 这一事实（对照实验里三种客户端写法 —— 保留 disconnect / 去掉 disconnect + 排空 body /
- * 显式池化 —— 分别得到 202 / 207 / 207 条连接，无差别）。
- * 若日后要让 5xx 响应也可复用连接，该改的是<b>服务端</b>（让控制器直接返回
- * {@code ResponseEntity.status(500)} 而非抛异常走 ERROR 派发），不是本类。
- * 排查经过与可复现命令见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md}。
+ * <b>但本类自身确实有个该修的问题</b>：每条告警都 {@code disconnect()}，等于每次都声明
+ * "这条连接不会再被复用"，把 JDK 的 keep-alive 缓存清空 —— 告警一多就是**无上界的连接数**。
+ * 去掉后连接被缓存复用，上界变成 JDK 的 {@code http.maxConnections}（默认 5）。
+ * 实测：200 条告警，保留时 app 手里 0 条连接、去掉后 4~5 条，215 次投递全成功。
+ * 详见 {@link #onTraceAlert} 末尾的注释。
  * </p>
  */
 class HttpTraceAnomalyListener implements TraceAnomalyListener {
@@ -99,6 +85,7 @@ class HttpTraceAnomalyListener implements TraceAnomalyListener {
             }
 
             final int status = connection.getResponseCode();
+            drainBody(connection, status);
             if (status < 200 || status >= 300) {
                 TraceAlertMetrics.get().recordHttpFailure(event.getTraceId(), targetUrl, status,
                         "HTTP status " + status);
@@ -115,10 +102,57 @@ class HttpTraceAnomalyListener implements TraceAnomalyListener {
             TraceAlertMetrics.get().recordHttpFailure(event.getTraceId(), targetUrl, 0, e.getMessage());
             LOGGER.error(e, "### [TraceAlert] failed to POST trace alert for trace [{}] to [{}].",
                     event.getTraceId(), targetUrl);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
+        }
+        // 刻意**不调** connection.disconnect()。
+        //
+        // JDK 对 disconnect() 的契约是"调用它即表示这条 Connection 不会再被复用"，而
+        // HttpURLConnection 的隐式 keep-alive（sun.net.www.http.KeepAliveCache）正是靠连接用完
+        // **留在缓存里**给下一次取用。逐条 disconnect 等于每次都把缓存清空。
+        //
+        // 实测（2026-10-02，判据是"app 手里有几条 ESTABLISHED"，不看会被测量工具污染的总数）：
+        //   保留 disconnect()    → 200 条告警打完，app ESTABLISHED = 0（每条一条新建，用完即毁）
+        //   去掉 disconnect()    → 200 条告警打完，app ESTABLISHED = **4~5**，且 215 次投递全成功
+        // 5 恰为 JDK http.maxConnections 的默认值 —— 连接确实被缓存复用并握着。
+        //
+        // 收益：告警链路的连接数从"**无上界**（每条告警一条）"变成"**有上界（JDK 的
+        // http.maxConnections，默认 5）**"，与告警量无关。高频错误下这正是"监控不得成为
+        // 业务负担"需要的那条性质。
+        //
+        // 为什么能成立：webhook 打的是本机端点、响应是 200 + Content-Length，
+        // 且 {@link #drainBody} 已把 body 读干净 —— 两者都满足才谈得上复用。
+        // 代价：最多多留 5 条 socket 到 http.keepAlive.timeout 后由缓存自己回收，对进程无感。
+    }
+
+    /**
+     * 读干净响应体，<b>让连接具备被 keep-alive 复用的资格</b>。
+     *
+     * <p>与"不调 {@code disconnect()}"是同一件事的两半：连接要留在
+     * {@code KeepAliveCache} 里，前提是响应体已被读完 —— socket 里还有未消费的字节时，
+     * JDK 判定该连接不可复用，<b>少任何一半复用都不成立</b>。
+     *
+     * <p>按状态分流：成功读 {@code getInputStream()}、非 2xx 读 {@code getErrorStream()}
+     * —— 4xx/5xx 时前者直接抛 {@link IOException}，不分流就拿不到错误响应的 body。
+     *
+     * <p>读失败只吞不抛：body 读不出来属于"采集不到"，不该反过来再记一次投递失败。
+     * 64KB 上限是防御"对端不回 EOF"，每 socket 另有 readTimeout 兜底。
+     */
+    private static void drainBody(final HttpURLConnection connection, final int status) {
+        try (java.io.InputStream in = status >= 200 && status < 400
+                ? connection.getInputStream() : connection.getErrorStream()) {
+            if (in == null) {
+                return;
             }
+            final byte[] buf = new byte[512];
+            int total = 0;
+            while (total < 64 * 1024) {
+                final int n = in.read(buf);
+                if (n < 0) {
+                    break;
+                }
+                total += n;
+            }
+        } catch (IOException e) {
+            LOGGER.debug("### [TraceAlert] drain webhook response body failed (ignored): {}", e.getMessage());
         }
     }
 
