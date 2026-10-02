@@ -5,19 +5,20 @@
 > **证据类型**：`【源码】`；无【实测】（本仓库未运行 Glowroot）。
 > **姊妹篇**：整体范式（采集/写入/查询/保留）见 `glowroot-trace-storage.md`；本文聚焦**存储拆分与 CappedDatabase 文件机制**。
 > **本项目的落地（ADR-03）**：已按本文 §5 的"最小形态"实现（去掉 resize/future/统计，载荷改为每块 GZIP）——见实现笔记 `agent/logfile-reporter-plugin/src/main/java/org/apache/skywalking/apm/agent/core/reporter/logfile/storage/CappedFileStorage-20260923.md` 与决策记录 `docs/adr/adr-03-capped-file-payload-for-trace-details.md`。
-> **已核实**：文件格式、块写入/读取、覆盖判定、压缩、fsync、resize、统计指标、`TraceDao` 的读写与 `Existence` 语义。
-> **未核实**（见 §6）：capped 文件默认大小/配置键与默认值、resize 的触发入口、rollup capped db（非 trace）的用途细节。
+> **已核实**：文件格式、块写入/读取、覆盖判定、压缩、fsync、resize、统计指标、`TraceDao` 的读写与 `Existence` 语义；H2 行的时间淘汰（Reaper / `deleteBefore`，**单档** `traceExpirationHours`）；`.mv.db` 空间归还（**Analyze** 逐表 `disk_space_used` → **Compact** 跑 `shutdown compact`，**手动**、阈值 64 MB 或 10%）；H2 page cache 的配置与 clamp。
+> **未核实**（见 §6）：resize 的触发入口。
 
 ---
 
 ## 0. 一句话结论
 
 1. **拆法**：H2 `trace` 行只放**可索引的小字段**（时间 / 耗时 / 类型 / 错误 + header protobuf）；大 payload（entries / queries / shared query texts / profiles）写进**环形封顶文件**（`*-capped.db`），H2 行里只存 `*_capped_id` **指针**。
-2. **两套保留机制互补**：H2 行按**时间**删（Reaper `deleteBefore(capture_time)`）；capped 文件按**空间**自淘汰（写满覆盖最旧块）。磁盘上限 = H2 大小 + capped 固定大小，**可预测**。
+2. **两套保留机制互补**：H2 行按**时间**删（Reaper `deleteBefore(capture_time)`，单档）；capped 文件按**空间**自淘汰（写满覆盖最旧块）。⚠️ **H2 侧不是硬上限，而是"活数据高水位 + 手动 compact"**——详见 §4.2。磁盘占用 = H2（高水位，随写入速率与留存时长决定）+ capped 固定大小，**可预测但不封顶**。
 3. **`cappedId` 不是文件偏移**，而是"逻辑块起始索引"；文件头含 `currIndex` / `sizeKb` / `lastResizeBaseIndex`，物理位置按 `sizeKb` 取模，块可跨文件尾环绕。
 4. **先写 payload、后写指针**：`writeMessages` 拿到 id 后才 `merge into trace`；读到已被覆盖的 id → `Existence.EXPIRED`，只少 payload，不会脏读。
-5. 解决的核心问题是 **H2 大 CLOB 膨胀且删了不缩**（issue #755：曾出现 H2 库文件涨到 31G）。
+5. 解决的核心问题是 **H2 大 CLOB 膨胀且删了不缩**（[issue #755：曾出现 H2 库文件涨到 31G](https://github.com/glowroot/glowroot/issues/755)）。
 6. **一 JVM 多实例**：`1 个 trace 环 + N 个 rollup 环`（默认 N=4，共 5 个环，各封顶 500MB），MBean 分别暴露。详见 §3.7。
+7. **`.mv.db` 的持续增长靠三层治，不是靠封顶**：① payload 出 H2（§1~§3）；② Reaper 按时间删行把**活数据量**限住；③ 删掉的页**空间留在文件里**，由 H2 自动 compaction **复用**（不是缩容），要真正缩小只能跑 `shutdown compact`——Glowroot 把它做成**手动按钮**，且先 Analyze 判据（§4.2）。
 
 ---
 
@@ -25,11 +26,13 @@
 
 把大 payload 直接塞 H2（`CLOB`/`MEDIUMTEXT`）的代价：
 
-- **文件只涨不缩**：行被删后空闲页未必归还给 OS，H2 库文件（`data.mv.db`）会长期保持峰值体积（issue #755 即此类）。
+- **文件只涨不缩**：行被删后空闲页未必归还给 OS，H2 库文件（`data.mv.db`）会长期保持峰值体积（issue #755 即此类）。⚠️ **口径纠正**：H2 官方文档——*"H2 Database automatically reclaims empty space. By default, it **compacts the database for up to 200 milliseconds when closing**."* MVStore 文件格式——*"Chunks without live pages are marked as **free** and their space can be **re-used**."* 所以自动 compaction **一直在跑**，但它只是**复用**文件内的空闲 chunk，**不会把已经涨大的文件缩回去**；文件停在"活数据高水位"。真正缩容要 `SHUTDOWN COMPACT`，见 §4.2。
 - **读写放大**：每次查询 header 都可能触碰含大列的页；备份/复制整个库的成本高。
 - **没有硬上限**：增长由数据量决定，边缘场景（异常大 JSON / 长 SQL / 堆栈）不可控。
 
 Glowroot 的需求组合：**按 traceId 点读全量 payload**（无 SQL 过滤需求）+ **磁盘必须有硬上限**（本地 APM、无人运维）→ 于是把"索引进 DB、blob 进自管文件"。
+
+⚠️ **注意分工**：拆法只封顶了 **payload 那一半**。H2 里剩下的 header/聚合那一半**没有封顶**，靠"时间留存 + 手动 compact"（§4.2）。Glowroot 自己的 wiki 也明说 *「Capped files do **not** replace H2 retention」*。
 
 ---
 
@@ -194,6 +197,97 @@ enum Existence {
 - 若写入量极大，payload 可能比 H2 行**更早**被覆盖（空间先满）——读到 `EXPIRED` 属于预期行为，UI 降级展示。
 - 反之 H2 行先被 Reaper 删掉后，capped 块仍占空间直到被覆盖（不会立即释放）。
 
+### 4.1 H2 行怎么被删：Reaper + `deleteBefore`（单档时间留存）
+
+`agent/embedded/.../repo/ReaperRunnable.java`：
+
+```text
+if (storageConfig.traceExpirationHours() != 0) {
+    long traceCaptureTime = currentTime - HOURS.toMillis(traceExpirationHours);
+    traceDao.deleteBefore(traceCaptureTime);
+}
+```
+
+→ `TraceDao.deleteBefore` 连带清 `trace` / `trace_attribute` / `trace_attribute_name` 三张表。
+
+- **trace 是单档留存，不分档**（`traceExpirationHours` 一个值管全部 trace）。`aggregate_*_rollup_*` / `gauge_value_rollup_*` 按 `rollupLevel` 各自取 `DEFAULT_ROLLUP_EXPIRATION_HOURS = [72h, 336h, 2160h, 2160h]`（即 3d / 14d / 90d / 90d）。
+- 少数表走 `deleteBeforeUsingLock` 并**额外减 1 天**（`transaction_types` / `gauge_name` / `full_query_text` / `trace_attribute_name`），源码注释：*"subtracting 1 day to account for rate limiting of updates"*（这些行按"更新时刻"记账，留 1 天缓冲）。
+
+**批删纪律**（`DataSource.deleteBefore`，本项目实现时值得对照）：
+
+```text
+delete 100 at a time, which is both faster than deleting all at once, and doesn't
+lock the single jdbc connection for one large chunk of time
+  ↓
+do { deleted = update("delete from " + tableName + " where " + columnName
+                      + " < ? fetch first 100 rows only", captureTime);
+} while (deleted > 0);
+```
+
+### 4.2 `.mv.db` 的空间怎么还：Analyze（判据）→ Compact（手动执行）
+
+**这是 Glowroot 回答"H2 文件会不会一直涨"的完整机制，共两步，都是手动。**
+
+**第一步 · Analyze —— 算 live vs reclaimable**（`ui/src/main/java/org/glowroot/ui/AdminJsonService.java`）：
+
+```text
+long h2DataFileSize = repoAdmin.getH2DataFileSize();
+List<H2Table> tables = repoAdmin.analyzeH2DiskSpace();   // 逐表 bytes()，来自 H2 的 disk_space_used
+long liveBytes       = Σ table.bytes();
+long reclaimableBytes = max(0, h2DataFileSize - liveBytes);
+```
+
+源码注释自己承认它是近似：*"Approximate live footprint from H2 disk_space_used; file − sum ≈ Compact reclaimable. **Can overstate reclaimable slightly** (indexes / overhead outside per-table totals)."*
+
+**第二步 · Compact —— 什么时候值得跑**：判据**硬编码在 UI 控制器**里（`ui/app/scripts/controllers/admin/storage.js`，**不是** storage 配置项）：
+
+```js
+$scope.showCompactCta = $scope.h2ReclaimableBytes >= 64 * 1024 * 1024
+    || (file > 0 && $scope.h2ReclaimableBytes / file >= 0.1);
+```
+
+即 **`reclaimable ≥ 64 MB` 或 `reclaimable / 文件 ≥ 10%`**。UI 在此基础上显示（Glowroot 自己写的两句话，是整个问题的最锋利表述）：
+
+> *"Compact recommended (~{{h2ReclaimableBytes}}). **Lowering retention does not shrink the file until Compact runs.**"*
+> *"Glowroot does not capture new data while this runs."*
+
+**Compact 怎么执行**（`agent/embedded/.../util/DataSource.java`，`compact` 与 `defrag` 两处实现相同）：
+
+```java
+synchronized (lock) {
+    checkConnectionUnderLock();
+    execute("shutdown compact");
+    connection = createConnection(dbFile, cacheSizeKb);   // 重连
+    preparedStatementCache.invalidateAll();
+}
+```
+
+**Defrag 是 Compact 的同义词**：H2 官方 `SHUTDOWN DEFRAG` *is currently equivalent to `SHUTDOWN COMPACT`*；Glowroot 保留两个按钮只是照顾运维找"defrag"这个词的习惯（*"Kept for operators who look for a 'defrag' action."*）。
+
+**Analyze 的代价**（UI help 原文）：*"Capture may be impacted while it runs; on large files this can take several minutes."*
+
+**⚠️ 架构前提（照搬时最容易漏的一点）**：那把 `synchronized (lock)` **覆盖 Glowroot 的全部读写**，所以"compact 期间不采集"是天然结果，不需要额外造机制——连 §4.1 的 Reaper 都必须每次只删 100 行以免长时间占住它。H2 官方语义：**`SHUTDOWN` 会关闭所有活动连接**。若某个存储的写侧与读侧各自独立、不共享一把连接级锁，则"compact 期间无写入"是**需要额外解决的前置条件**，不是免费的。
+
+> **搬到别处时这条要逐个自查，不能反推**。本项目**不落在该前提里**：`H2TraceSegmentStorage` 早已用一把 `synchronized (this)` 串行化全部 H2 读写（逐方法核对见 ADR-05 决策 4），因此我们缺的不是"一把锁"，而是"把 `SHUTDOWN COMPACT` + 重连整体落进锁内"外加写队列处置策略。
+
+**本项目的对照与决策**：见 `docs/adr/adr-05-h2-mem-as-terminal-with-file-mode-reentry.md` 决策 3（复入配方：单档时间留存 + `start_time` 索引 + `AUTO_COMPACT_FILL_RATE` 调参 + 64 MB / 10% 阈值）与决策 4（我们要无人值守定期 compact，但**已有 `synchronized (this)`**，缺的是锁内 `SHUTDOWN COMPACT` + 重连临界区与写队列处置策略，该缺口当前不可执行）。
+
+### 4.3 H2 page cache（与业务抢同一个堆）
+
+In-memory H2 **page cache**，跑在**被监控应用的同一个 JVM 堆**里。官方明确：*"This is **not** disk storage and does not replace retention or capped sizes."*
+
+| 模式 | 行为 |
+| --- | --- |
+| Fixed MB（默认） | 新装 **32 MB**（clamp 之前） |
+| Auto | 目标 **128 MB** |
+| % of -Xmx | 目标 = 最大堆的百分比（clamp 之前） |
+
+**Clamp（UI 控件存在时始终生效）**：实际大小夹在 **16 ~ 256 MB** 之间，且**不超过 `-Xmx` 的 5%**。JVM 参数 `-Dglowroot.internal.h2.cacheSize=<kilobytes>` **优先于** UI；清掉该参数才回到 Administration → Storage。
+
+> *"Raise the cache only if H2 looks I/O-bound and the heap can spare the memory. **Too large steals heap from the monitored application.**"*
+
+UI 控件自 **0.14.8-beta.4+** 才提供；0.14.7 stable 无此 UI（保持历史小默认值，除非设了上面的 JVM 参数）。
+
 ---
 
 ## 5. 对本项目（H2 化）的启示
@@ -209,8 +303,9 @@ enum Existence {
 **可借鉴的最小形态**（都比 Glowroot 简化）：
 
 1. H2 只留 header/索引列，payload 写**单个环形文件**（可参考同样的 `<8B len><payload>` 块 + 逻辑索引 + 覆盖判定，但去掉 resize/future/统计）；
-2. 或按级别分治：**error/slow 的 payload 进 H2（量小、要审计）**，normal 不回 H2（只进内存 + metrics）——本项目当前决策方向，磁盘压力天然小；
-3. 定期 `SHUTDOWN COMPACT` / 重建 H2 文件来回收空间（对极简实现更友好，但有停写窗口）。
+2. 或按级别分治：**error/slow 的 payload 进 H2（量小、要审计）**，normal 不回 H2（只进内存 + metrics）——⚠️ **本项目已不走这条路**（ADR-04 起全量 trace 含 normal 都入 H2），此条仅留作对照；
+3. 回收 `.mv.db` 空间：**Analyze 求 live vs reclaimable → 仅当 reclaimable ≥ 64 MB 或 ≥ 10% 才跑 `SHUTDOWN COMPACT`**（照 Glowroot 判据，§4.2）；或对极简实现更友好的**重建表**。⚠️ 二者都要求"compact 期间无写入"，而 H2 `SHUTDOWN` 会**关闭所有活动连接**——若读写两侧不共享一把连接级锁（Glowroot 靠 `DataSource` 的单一 `synchronized (lock)` 天然满足），这是**需额外解决的前置条件**。
+   - 本项目自查结果：`H2TraceSegmentStorage` 已共享一把 `synchronized (this)`，故此条**不构成阻塞**；复入时只需在锁内补"compact + 重连"临界区（详见 ADR-05 决策 4）。
 
 **照抄时的坑**（Glowroot 已处理、自研需自担）：
 
@@ -233,6 +328,8 @@ enum Existence {
 4. central（Cassandra）侧没有这个机制：trace 直接进 Cassandra（TTL 由 `USING TTL` 控制），仅在 embedded 模式使用 capped 文件。
 5. 未运行 Glowroot 实测压缩率 / 实际读写延迟。
 6. **已核实（2026-09-27）**：一 JVM 多实例 = `1 trace + N rollup`；`Existence` 三态；H2 库文件名为 `data.mv.db`。见 §3.7 / §3.8 / §0.6。
+7. **已核实（2026-10-02）**：H2 行的时间淘汰（`ReaperRunnable` + 单档 `traceExpirationHours` + `deleteBefore` 每次 100 行批删）、`.mv.db` 空间归还（`DataSource` 的 `shutdown compact` **手动**、`AdminJsonService` 的 Analyze、UI 里硬编码的 **64 MB / 10%** 阈值）、H2 page cache 的三种模式与 clamp。见 §4.1 / §4.2 / §4.3。
+8. **仍开放**：`resize` 的**触发入口**（配置保存 → RepoAdmin → resize？）未逐行核实；未运行 Glowroot 实测压缩率 / 实际读写延迟 / compact 前后文件尺寸对比（§4.2 的回收效果只有源码与官方文档背书，无实测）。
 
 ---
 
@@ -248,3 +345,16 @@ enum Existence {
 | MBean 注册（TraceCappedDatabase / RollupCappedDatabase{n} / H2Database） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/SimpleRepoModule.java> |
 | 默认容量配置（500MB × 4 rollup） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/common2/src/main/java/org/glowroot/common2/config/EmbeddedStorageConfig.java> |
 | `Existence` 三态（YES/NO/EXPIRED） | <https://github.com/glowroot/glowroot/blob/456b1910bbeeb152efd78103043d71c08b183975/common/src/main/java/org/glowroot/common/live/LiveTraceRepository.java> |
+
+**§4.1 / §4.2 / §4.3 锚点（2026-10-02 核实，行号随 main 漂移，以类/方法名为准）**
+
+| 主题 | 文件 |
+| --- | --- |
+| H2 行时间淘汰循环 / 单档 `traceExpirationHours` | <https://github.com/glowroot/glowroot/blob/main/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/ReaperRunnable.java> |
+| `deleteBefore` 100 行批删；**`shutdown compact` + 重连**（单一 `synchronized (lock)` 覆盖读写） | <https://github.com/glowroot/glowroot/blob/main/agent/embedded/src/main/java/org/glowroot/agent/embedded/util/DataSource.java> |
+| trace 三张表的 `deleteBefore` 落点 | <https://github.com/glowroot/glowroot/blob/main/agent/embedded/src/main/java/org/glowroot/agent/embedded/repo/TraceDao.java> |
+| Analyze：live/reclaimable 口径与近似性说明 | <https://github.com/glowroot/glowroot/blob/main/ui/src/main/java/org/glowroot/ui/AdminJsonService.java> |
+| Compact 判据（64 MB / 10%，硬编码在 UI 控制器） | <https://github.com/glowroot/glowroot/blob/main/ui/app/scripts/controllers/admin/storage.js> |
+| "Lowering retention does not shrink the file until Compact runs." | <https://github.com/glowroot/glowroot/blob/main/ui/app/views/admin/storage.html> |
+| Analyze / Reclaim 的官方帮助文案（含停采集与耗时警告） | <https://github.com/glowroot/glowroot/blob/main/ui/app/template/help/storage-analyze.html> · [`storage-reclaim.html`](https://github.com/glowroot/glowroot/blob/main/ui/app/template/help/storage-reclaim.html) |
+| 官方 Storage wiki（留存天数 / capped MB / H2 cache / Maintenance） | <https://github.com/glowroot/glowroot/wiki/Administration-Storage> |
