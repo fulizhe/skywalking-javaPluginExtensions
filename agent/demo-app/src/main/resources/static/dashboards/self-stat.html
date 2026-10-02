@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>监控的监控 · 自身开销与健康</title>
+<link rel="stylesheet" href="dashboard.css">
+<style>
+    /* 结论卡：一句话 + 四个数字，全部读自 /inner/sw/self-stat，页内无手写常量 */
+    .verdict { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+    .verdict-text { font-size: 15px; font-weight: 700; }
+    .verdict-why { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.7; }
+    .kv { display: grid; grid-template-columns: auto auto; gap: 3px 14px; font-size: 13px; }
+    .kv dt { color: var(--muted); }
+    .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
+    /* 环形占用条：环写满即覆盖最旧块，所以封顶 100% */
+    .bar { height: 10px; background: #eef1f4; border-radius: 5px; overflow: hidden; margin: 6px 0 2px; }
+    .bar > i { display: block; height: 100%; background: var(--accent); }
+    .bar.is-warn > i { background: #f59f00; }
+    .bar.is-err > i { background: var(--err); }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+    details.caveats { margin-top: 4px; }
+    details.caveats summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+    details.caveats table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 12px; }
+    details.caveats th, details.caveats td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; vertical-align: top; }
+    details.caveats th { background: #f6f8fa; color: var(--muted); font-weight: 600; }
+    .est { color: var(--warn); }
+    .off { color: var(--muted); font-style: italic; }
+    td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">监控的监控</div>
+    <nav class="page-nav">
+        <a href="index.html">导航</a>
+        <a href="metrics.html">Trace 指标</a>
+        <a href="slow-topn.html">慢调用 TopN</a>
+        <a href="topology.html">依赖拓扑</a>
+        <a href="dashboard.html?p=alert">Trace 告警</a>
+        <a class="active" href="self-stat.html">自身开销</a>
+    </nav>
+    <div class="topbar-right">
+        <span id="pollState" class="poll-state">—</span>
+        <span id="stamp" class="poll-state">—</span>
+    </div>
+</header>
+
+<main>
+    <div class="page-title-row">
+        <h2>监控系统自身是否轻量、健康、没拖垮主业务</h2>
+    </div>
+
+    <div id="absent" class="hint hidden"></div>
+
+    <section class="panel">
+        <div class="verdict">
+            <div>
+                <div class="verdict-text" id="verdictText">读取中…</div>
+                <div class="verdict-why" id="verdictWhy"></div>
+            </div>
+            <dl class="kv" id="verdictKv"></dl>
+        </div>
+    </section>
+
+    <div class="chips" id="chips"></div>
+
+    <div class="grid2">
+        <section class="panel">
+            <h3>① 采集入口 · DataCarrier 缓冲区</h3>
+            <div id="carrier"></div>
+        </section>
+        <section class="panel">
+            <h3>② 消费线程 · 插件自身开销</h3>
+            <div id="pipeline"></div>
+        </section>
+        <section class="panel">
+            <h3>③ H2 内存库（trace_segment）</h3>
+            <div id="h2"></div>
+        </section>
+        <section class="panel">
+            <h3>④ 未提交 segment 积压（异步写队列）</h3>
+            <div id="backlog"></div>
+        </section>
+        <section class="panel">
+            <h3>⑤ 环形载荷文件 CappedFileStorage</h3>
+            <div id="capped"></div>
+        </section>
+        <section class="panel">
+            <h3>⑥ JVM 堆（与 H2 争同一个堆）</h3>
+            <div id="heap"></div>
+        </section>
+    </div>
+
+    <section class="panel">
+        <details class="caveats">
+            <summary>口径说明（先看这一段再引用上面的数字）</summary>
+            <table>
+                <tr><th>数字</th><th>口径</th></tr>
+                <tr>
+                    <td><code>丢段总数</code></td>
+                    <td>两个来源相加：<b>采集入口丢</b>（DataCarrier 缓冲区满，{@code produce()} 返回 false）
+                        与<b>存储队列丢</b>（写队列 4096 满）。两者都是"宁丢不阻塞业务"设计下的正常取舍，
+                        但丢了就是丢了，所以单点给一个总数。</td>
+                </tr>
+                <tr>
+                    <td><code>ignored</code> / <code>skippedWhenDisabled</code></td>
+                    <td><b>不是故障</b>：前者是 agent 采样标记为 ignore 的段，后者是运行时开关
+                        <code>/toggle?enable=false</code> 期间主动跳过的段。两者都是"按设计不采"。</td>
+                </tr>
+                <tr>
+                    <td><code>单批消费耗时</code></td>
+                    <td>DataCarrier 消费线程处理<b>一批</b>段（transform + 按 traceId 合入 + 指标聚合 + 影子 accept）
+                        的墙钟耗时。它跑在插件自己的线程上，<b>不在业务线程上</b>；业务线程只做一次入队。
+                        峰值是插件开销的上界证据。</td>
+                </tr>
+                <tr>
+                    <td><code>积压 depth</code></td>
+                    <td>已入队但尚未写进 H2 的段数 = 队列待处理 + 正在写。持续上涨说明存储侧跟不上采集速度；
+                        顶到容量就开始丢段。</td>
+                </tr>
+                <tr>
+                    <td><code>H2 约占用</code> <span class="est">（估算）</span></td>
+                    <td><b>行数 × 单行成本</b>的单行估算，不是 H2 自报的字节数：H2 2.x 没有内存读口
+                        （<code>INFORMATION_SCHEMA.SESSIONS</code> 无 <code>MEMORY_USED</code>、
+                        <code>Session</code> 无 <code>getMemoryUsage</code>，已在 2.1.212 / 2.3.232 上实测确认）。
+                        单行成本取自 <code>docs/notes/2026-09-27-h2-mem-capacity-estimate.md</code> §7.3 的实测
+                        ≈800 B/行（同实例两点差分，偏上估计）。要精确值只能带外 <code>jmap -histo:live</code>。
+                        页内 <code>JVM 堆</code> 那一栏是<b>精确值</b>，两者不要混读。</td>
+                </tr>
+                <tr>
+                    <td><code>环形占用率</code> / <code>覆盖轮次</code></td>
+                    <td>写指针 <code>currIndex</code> 是只增不减的逻辑字节游标（不是行号、不是文件偏移）；
+                        物理落点对它取模，所以"占用率"绕圈后封顶 100%。<code>wrapCount</code> = 已完整绕过的圈数。
+                        写指针本身持久化在文件头 16B，重启后接着走。</td>
+                </tr>
+                <tr>
+                    <td><code>过期读 expiredReadCount</code></td>
+                    <td>读回 <code>null</code> 且原因是"已被环覆盖"。这是<b>预期行为</b>（环写满的正常结果），
+                        与"从未写入"（<code>missReadCount</code> 减去它）分开计数——后者往往意味着写指针或 fsync 出过问题。</td>
+                </tr>
+                <tr>
+                    <td>重启即失</td>
+                    <td>本页除写指针外全部是进程内计数，重启清零（与 H2 内存层同语义，ADR-04）。
+                        唯一跨重启存在的是环形文件本身与它的游标。</td>
+                </tr>
+            </table>
+        </details>
+    </section>
+</main>
+
+<script src="poll.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  function esc(s) {
+    if (s === null || s === undefined) return "";
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function n(v) { return (v === null || v === undefined || isNaN(v)) ? "—" : Number(v).toLocaleString(); }
+  function f(v, d) { return (v === null || v === undefined || isNaN(v)) ? "—" : Number(v).toFixed(d === undefined ? 2 : d); }
+  function pct(v) { return (v === null || v === undefined || isNaN(v)) ? "—" : f(v * 100, 1) + "%"; }
+  function bytes(v) {
+    if (v === null || v === undefined || isNaN(v)) return "—";
+    var u = ["B", "KB", "MB", "GB"], i = 0, x = Number(v);
+    while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+    return (i === 0 ? x : f(x, 2)) + " " + u[i];
+  }
+  function dur(ms) {
+    if (ms === null || ms === undefined || isNaN(ms)) return "—";
+    if (ms < 1) return f(ms, 3) + " ms";
+    if (ms < 1000) return f(ms, 1) + " ms";
+    return f(ms / 1000, 2) + " s";
+  }
+  function ago(ms) {
+    if (!ms) return "—";
+    var s = Math.floor((Date.now() - ms) / 1000);
+    if (s < 60) return s + " 秒";
+    if (s < 3600) return Math.floor(s / 60) + " 分";
+    if (s < 86400) return f(s / 3600, 1) + " 小时";
+    return f(s / 86400, 1) + " 天";
+  }
+  function badge(cls, text) { return '<span class="badge ' + cls + '">' + esc(text) + "</span>"; }
+
+  /** 一行「标签 …… 值」；值缺失时给一个灰字说明，绝不留空让人误读成 0。 */
+  function row(label, value, cls) {
+    return "<tr><td>" + esc(label) + '</td><td class="num ' + (cls || "") + '">' + value + "</td></tr>";
+  }
+  function table(rows) { return '<table style="width:100%;border-collapse:collapse;font-size:13px">' + rows.join("") + "</table>"; }
+  function bar(ratio, warn, err) {
+    var p = Math.max(0, Math.min(1, ratio || 0));
+    var cls = err ? " is-err" : (warn ? " is-warn" : "");
+    return '<div class="bar' + cls + '"><i style="width:' + (p * 100).toFixed(2) + '%"></i></div>';
+  }
+
+  function renderVerdict(s) {
+    var loss = s.dataLoss || {};
+    var pipe = s.pipeline || {};
+    var h2 = s.h2 || {};
+    var capped = s.capped || {};
+    var mounted = !!s.reporterEnabled && !!s.carrier;
+    var total = loss.total || 0;
+    var maxMs = pipe.maxConsumeMillis || 0;
+    // 三个健康判据都取"缺失即 0"的口径：存储未启用时 ioErrorCount 是 undefined，
+    // 直接比 === 0 会把"没启用"误判成"有损耗"。
+    var ioErr = (capped.stats || {}).ioErrorCount || 0;
+    var healthy = total === 0 && (h2.errorCount || 0) === 0 && ioErr === 0;
+
+    if (!mounted) {
+      document.getElementById("verdictText").innerHTML = badge("warn", "未挂载") + " 读不到插件自身的运行指标";
+    } else {
+      document.getElementById("verdictText").innerHTML = healthy
+        ? badge("ok", "健康") + " 零丢段 · 存储零错误 · 消费线程无异常"
+        : badge("err", "有损耗") + " 请看下面标红的计数";
+    }
+    document.getElementById("verdictWhy").innerHTML =
+      "这一页只回答一件事：<b>监控系统自己有没有给主业务添麻烦</b>。"
+      + "业务线程上只发生一次入队（O(1)，缓冲区满则丢弃不阻塞），"
+      + "所有落盘、压缩、聚合都在插件自己的线程上跑完。";
+
+    document.getElementById("verdictKv").innerHTML =
+      row("丢段总数", '<b>' + n(total) + "</b>", total > 0 ? "err" : "")
+      + row("采集入口丢", n(loss.carrierDropped))
+      + row("存储队列丢", n(loss.storageDropped))
+      + row("单批消费峰值", dur(maxMs))
+      + row("H2 行数 / 水位", n(h2.rows) + " / " + n(h2.maxRows))
+      + row("环形文件占用", pct(capped.usedRatio));
+  }
+
+  function renderChips(s) {
+    var h2 = s.h2 || {}, capped = s.capped || {}, backlog = s.backlog || {}, heap = s.jvmHeap || {};
+    var st = capped.stats || {};
+    var chips = [
+      { label: "已采集段（入队成功）", value: n((s.carrier || {}).produced) },
+      { label: "丢段总数", value: n((s.dataLoss || {}).total) },
+      { label: "单批消费峰值", value: dur((s.pipeline || {}).maxConsumeMillis) },
+      { label: "未提交积压", value: n(backlog.depth) },
+      { label: "H2 行数", value: n(h2.rows) },
+      { label: "H2 约占用（估算）", value: bytes(h2.estimatedBytes) },
+      { label: "环形写指针", value: bytes(capped.currIndex) },
+      { label: "载荷压缩率", value: pct(st.compressionRatio) },
+      { label: "JVM 堆", value: bytes(heap.usedBytes) + " / " + bytes(heap.maxBytes) }
+    ];
+    document.getElementById("chips").innerHTML = chips.map(function (c) {
+      return '<div class="chip"><div class="label">' + esc(c.label) + '</div><div class="value">' + c.value + "</div></div>";
+    }).join("");
+  }
+
+  function renderCarrier(s) {
+    var c = s.carrier || {};
+    var dropCls = (c.dropped || 0) > 0 ? "err" : "";
+    document.getElementById("carrier").innerHTML = table([
+      row("成功入队段数", n(c.produced)),
+      row("缓冲区满丢弃", n(c.dropped), dropCls),
+      row("被 agent 标记 ignore", n(c.ignored)),
+      row("开关关闭期间跳过", n(c.skippedWhenDisabled)),
+      row("缓冲区形态", esc(c.strategy || "—")),
+      row("通道数 × 缓冲槽", n(c.channelSize) + " × " + n(c.bufferSize))
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "缓冲区是<b>定长环形</b>：满了就丢新段（IF_POSSIBLE），绝不让业务线程等。"
+      + "所以这里的丢弃数是「宁丢不阻塞」的直接证据，而不是 bug。</div>";
+  }
+
+  function renderPipeline(s) {
+    var p = s.pipeline || {};
+    var maxCls = (p.maxConsumeMillis || 0) > 200 ? "warn" : "";
+    document.getElementById("pipeline").innerHTML = table([
+      row("消费批次数", n(p.consumeBatches)),
+      row("已消费段数", n(p.consumedSegments)),
+      row("最近一批耗时", dur(p.lastConsumeMillis)),
+      row("单批耗时峰值", dur(p.maxConsumeMillis), maxCls),
+      row("孤段过滤（无 Entry 无 ref）", n(p.orphanSegments)),
+      row("Trace 告警", p.alertEnabled ? badge("ok", "已启用") : badge("info", "未启用")),
+      row("Trace 指标聚合", s.metricsEnabled ? badge("ok", "已启用") : badge("info", "未启用"))
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "整批耗时 = transform + 按 traceId 合入 + 指标聚合 + 影子 accept，<b>全在这条插件线程上</b>。"
+      + "孤段是被<b>主动过滤</b>的（无 Entry 且无 ref 的段不属于任何真实请求），不算丢弃、不算错误。</div>";
+  }
+
+  function renderH2(s) {
+    var h = s.h2 || {};
+    if (!h.enabled) {
+      document.getElementById("h2").innerHTML = '<div class="off">未启用（h2.enabled=false 或连接初始化失败）</div>';
+      return;
+    }
+    var ratio = h.rowUsageRatio || 0;
+    document.getElementById("h2").innerHTML = bar(ratio, ratio > 0.8, false) + table([
+      row("存活行数", n(h.rows)),
+      row("行数水位上限", n(h.maxRows) + "（占用 " + pct(ratio) + "）"),
+      row("累计插入 / 被水位清理", n(h.insertedRows) + " / " + n(h.evictedRows)),
+      row("约占用 <span class='est'>估算</span>", bytes(h.estimatedBytes) + " × " + n(h.bytesPerRowEstimate) + " B/行"),
+      row("存储侧错误", n(h.errorCount), (h.errorCount || 0) > 0 ? "err" : ""),
+      row("审计表水位", n(h.auditWaterLevel))
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "行数是<b>增量口径</b>（插入数 − 被清理数），O(1) 不扫表；H2 无内存读口，"
+      + "所以字节数只能按实测单行成本折算（见下方口径说明）。"
+      + "payload 不在这里 —— 它在环形文件里，堆外。</div>";
+  }
+
+  function renderBacklog(s) {
+    var b = s.backlog || {};
+    if (!b.capacity) {
+      document.getElementById("backlog").innerHTML = '<div class="off">存储未启用，无积压概念</div>';
+      return;
+    }
+    var ratio = b.capacity ? (b.depth || 0) / b.capacity : 0;
+    document.getElementById("backlog").innerHTML = bar(ratio, ratio > 0.5, ratio > 0.8) + table([
+      row("当前积压（待写 + 在写）", n(b.depth)),
+      row("队列容量", n(b.capacity) + "（占用 " + pct(ratio) + "）"),
+      row("队列满丢弃", n(b.dropped), (b.dropped || 0) > 0 ? "err" : "")
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "这一格是「存储侧还能不能跟上采集」的<b>先行指标</b>：它在丢段发生<b>之前</b>就会涨。"
+      + "持续上涨 → 顶到容量 → 出现丢弃。</div>";
+  }
+
+  function renderCapped(s) {
+    var c = s.capped || {};
+    if (!c.enabled) {
+      document.getElementById("capped").innerHTML = '<div class="off">未启用（payload 不落环形文件，H2 行的 payload_id 为 NULL）</div>';
+      return;
+    }
+    var st = c.stats || {};
+    document.getElementById("capped").innerHTML = bar(c.usedRatio, c.usedRatio > 0.9, false) + table([
+      row("写指针 currIndex（逻辑字节）", n(c.currIndex)),
+      row("数据区 / 文件定长", bytes(c.dataLenBytes) + " / " + bytes(c.sizeBytes)),
+      row("物理占用（绕圈后封顶 100%）", pct(c.usedRatio)),
+      row("已完整覆盖圈数", n(c.wrapCount)),
+      row("最老幸存块 id", n(c.oldestLiveIndex)),
+      row("文件路径", '<span style="font-size:12px">' + esc(c.file || "—") + "</span>"),
+      row("写次数 / 读回次数", n(st.writeCount) + " / " + n(st.readCount)),
+      row("压缩率", pct(st.compressionRatio) + "（" + n(st.avgBytesPerWriteBefore) + " B → " + n(st.avgBytesPerWriteAfter) + " B）"),
+      row("单次写 / 读 平均耗时", dur(st.avgMillisPerWrite) + " / " + dur(st.avgMillisPerRead)),
+      row("累计写耗时", dur(st.totalWriteMillis)),
+      row("实际 fsync 次数", n(st.fsyncCount)),
+      row("读不到（其中已被环覆盖）", n(st.missReadCount) + "（" + n(st.expiredReadCount) + "）",
+        (st.expiredReadCount || 0) > 0 ? "warn" : ""),
+      row("超环容量拒写", n(st.oversizedRejectedCount), (st.oversizedRejectedCount || 0) > 0 ? "warn" : ""),
+      row("IO 错误", n(st.ioErrorCount), (st.ioErrorCount || 0) > 0 ? "err" : "")
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "这块是 <b>堆外</b>的：文件定长、写满覆盖最旧块，所以磁盘占用有<b>硬上限</b>（默认 128 MB），"
+      + "不随流量增长。H2 行数被清理后，载荷还可能多活一会儿（覆盖按空间走，不按时间）；"
+      + "反之载荷先被覆盖时，读口会标 <code>payloadExpired</code> 而不是脏读。</div>";
+  }
+
+  function renderHeap(s) {
+    var h = s.jvmHeap || {};
+    var ratio = h.usedRatio || 0;
+    document.getElementById("heap").innerHTML = bar(ratio, ratio > 0.75, ratio > 0.9) + table([
+      row("已用", bytes(h.usedBytes) + "（" + pct(ratio) + "）"),
+      row("已提交", bytes(h.committedBytes)),
+      row("上限 -Xmx", bytes(h.maxBytes)),
+      row("进程已运行", ago(s.uptimeMs))
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "H2 内存库跑在<b>被监控应用的同一个堆</b>里，所以这一栏是它的天花板。"
+      + "这就是为什么 payload 要挪到堆外环形文件、指标要做保留期清理："
+      + "监控占的是业务的堆，量必须可预测。</div>";
+  }
+
+  function load() {
+    fetch("/inner/sw/self-stat", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        s = s || {};
+        var absent = !s.reporterEnabled || !s.carrier;
+        document.getElementById("absent").className = absent ? "hint" : "hint hidden";
+        if (absent) {
+          document.getElementById("absent").textContent =
+            s.hint || "未检测到 logfile-reporter-plugin：请确认已挂载插件且 agent 正常加载。";
+        }
+        renderVerdict(s);
+        renderChips(s);
+        renderCarrier(s);
+        renderPipeline(s);
+        renderH2(s);
+        renderBacklog(s);
+        renderCapped(s);
+        renderHeap(s);
+        document.getElementById("stamp").textContent = "更新于 " + new Date().toLocaleTimeString();
+        document.getElementById("pollState").textContent =
+          (SWPoll ? "每 " + (SWPoll.intervalMs("selfstat", 5000) / 1000) + "s · " : "")
+          + (SWPoll && SWPoll.isPaused("selfstat", 5000) ? "已暂停" : "自动刷新");
+      })
+      .catch(function (e) {
+        document.getElementById("verdictText").innerHTML = badge("err", "读不到") + " " + esc(e);
+      });
+  }
+
+  var pollTimer = null;
+  function startPolling() {
+    if (pollTimer === null) {
+      pollTimer = setInterval(load, SWPoll ? SWPoll.intervalMs("selfstat", 5000) : 5000);
+    }
+  }
+  function stopPolling() {
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  if (SWPoll) {
+    SWPoll.attach({ key: "selfstat", defaultMs: 5000, start: startPolling, stop: stopPolling, once: load });
+  } else {
+    load();
+    startPolling();
+  }
+})();
+</script>
+</body>
+</html>

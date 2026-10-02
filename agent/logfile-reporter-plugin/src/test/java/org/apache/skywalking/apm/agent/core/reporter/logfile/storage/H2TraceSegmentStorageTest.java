@@ -182,6 +182,64 @@ public class H2TraceSegmentStorageTest {
                 snapshot.containsKey("t" + capCheckInterval));
     }
 
+    // ========== 自身状态快照（/inner/sw/self-stat 的数据源）============
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_liveRowCountMatchesSizeAndCarriesCappedGeometry() {
+        storage.storeLog(createLog("t1", "s1", 1000L, false));
+        storage.storeLog(createLog("t2", "s2", 2000L, false));
+        storage.storeLog(createLog("t2", "s3", 3000L, false));
+
+        final Map<String, Object> snapshot = storage.selfStatSnapshot();
+        final Map<String, Object> h2 = (Map<String, Object>) snapshot.get("h2");
+        final Map<String, Object> backlog = (Map<String, Object>) snapshot.get("backlog");
+        final Map<String, Object> capped = (Map<String, Object>) snapshot.get("capped");
+
+        Assert.assertEquals(Boolean.TRUE, h2.get("enabled"));
+        Assert.assertEquals("存活行数（段数）应与插入数一致", Long.valueOf(3L), h2.get("rows"));
+        Assert.assertEquals("行数水位上限回显配置", Integer.valueOf(2000), h2.get("maxRows"));
+        Assert.assertEquals("估算字节 = 行数 × 单行成本", Long.valueOf(3L * 800L), h2.get("estimatedBytes"));
+        Assert.assertEquals("队列容量有界", Integer.valueOf(storage.getWriteQueueCapacity()), backlog.get("capacity"));
+
+        Assert.assertEquals(Boolean.TRUE, capped.get("enabled"));
+        Assert.assertTrue("写指针应已前进", ((Long) capped.get("currIndex")).longValue() > 0L);
+        Assert.assertTrue("数据区 = 1MB - 16B",
+                ((Long) capped.get("dataLenBytes")).longValue() == 1024L * 1024L - 16L);
+        final Map<String, Object> cappedStats = (Map<String, Object>) capped.get("stats");
+        Assert.assertEquals("每段一个载荷块", Long.valueOf(3L), cappedStats.get("writeCount"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_afterRowCap_liveRowCountConvergesToCap() {
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 3, true, new File(cappedDir, "payload3.capped.db"), 1024L * 1024L);
+        storage.clear();
+        for (int i = 1; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        Assert.assertEquals("增量口径的存活行数应与实际行数一致（不能只增不减）",
+                Long.valueOf(storage.size()), h2.get("rows"));
+        Assert.assertEquals("清理掉的行数应被记下", Long.valueOf(1021L), h2.get("evictedRows"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_disabledStorage_reportsDisabledShapes() {
+        storage.close();
+        storage = new H2TraceSegmentStorage(false, 2000, false, null, 0L);
+
+        final Map<String, Object> snapshot = storage.selfStatSnapshot();
+        final Map<String, Object> h2 = (Map<String, Object>) snapshot.get("h2");
+        final Map<String, Object> capped = (Map<String, Object>) snapshot.get("capped");
+        Assert.assertEquals(Boolean.FALSE, h2.get("enabled"));
+        Assert.assertEquals(Boolean.FALSE, capped.get("enabled"));
+        Assert.assertEquals("未启用时不应有任何行", Long.valueOf(0L), h2.get("rows"));
+    }
+
     // ========== disabled storage ==========
 
     @Test

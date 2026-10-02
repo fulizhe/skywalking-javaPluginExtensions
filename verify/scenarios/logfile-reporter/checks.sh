@@ -181,8 +181,27 @@ run_checks() {
   assert_jq "不回归:影子对账读口仍可用" "$(http_get_or_empty "/inner/sw/trace-parity")" \
     'has("orphanSegments")'
 
+  # 「监控的监控」读口:证明监控系统自己没添麻烦。
+  # 只断言**形状与自洽性**,不断言具体数值 —— 丢弃数/积压深度随机器与负载浮动,
+  # 写成固定值就成了对环境敏感的假断言(这组断言要在任何 CI runner 上都成立)。
+  local selfStat
+  selfStat=$(http_get_or_empty "/inner/sw/self-stat")
+  assert_jq "自身读口:四段齐备(carrier/pipeline/h2/capped)+ 丢段总数单点可读" "$selfStat" \
+    'has("carrier") and has("pipeline") and has("h2") and has("capped") and (.dataLoss | has("total"))'
+  assert_jq "自身读口:已采集段数 > 0(证明 produce 入队路径确实在跑)" "$selfStat" \
+    '(.carrier.produced // 0) > 0'
+  assert_jq "自身读口:消费线程已处理过批次且单批耗时非负" "$selfStat" \
+    '(.pipeline.consumeBatches // 0) > 0 and (.pipeline.maxConsumeMillis // -1) >= 0'
+  assert_jq "自身读口:环形载荷文件写指针已前进、统计含压缩率" "$selfStat" \
+    '(.capped.enabled == true) and (.capped.currIndex > 0) and ((.capped.stats.compressionRatio // -1) >= 0)'
+  assert_jq "自身读口:积压量在队列容量之内(有界背压成立)" "$selfStat" \
+    '(.backlog.depth >= 0) and (.backlog.capacity > 0) and (.backlog.depth <= .backlog.capacity)'
+  assert_jq "自身读口:H2 行数不超过水位上限" "$selfStat" \
+    '(.h2.enabled == true) and (.h2.rows >= 0) and (.h2.maxRows > 0) and (.h2.rows <= .h2.maxRows)'
+
   # 页面可达(不测渲染 —— 本仓验证回路只打读口、从不看页面 HTML,无先例不新建基建)
   assert_eq "依赖拓扑页 HTTP 200" 200 "$(http_code "/dashboards/topology.html")"
+  assert_eq "监控的监控页 HTTP 200" 200 "$(http_code "/dashboards/self-stat.html")"
 
   log ""
   log "---- 断言 F: 依赖面造数端点(组件识别 / 超时不挂住 / 白名单)----"

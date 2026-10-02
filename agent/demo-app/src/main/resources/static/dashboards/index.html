@@ -86,6 +86,11 @@
         <div class="nav-title">依赖拓扑</div>
         <div class="nav-desc">self → 外部依赖的二部图:总览档只到组件类型(可截图),明细档带出口操作名;边上有调用量/错误率/耗时分位,点节点下钻慢查询</div>
     </a>
+    <a class="nav-card" href="self-stat.html">
+        <div class="nav-num">14</div>
+        <div class="nav-title">监控的监控</div>
+        <div class="nav-desc">监控系统自身:DataCarrier 丢弃数、消费线程单批耗时、未提交 segment 积压、H2 行数与内存估算、环形载荷文件写指针与压缩率、JVM 堆</div>
+    </a>
 </main>
 <section class="nav-endpoints">
     <h2>原始读口（JSON，点击直开）</h2>
@@ -95,6 +100,7 @@
         <li><a href="/inner/sw/trace-memory?traceId=" target="_blank">/inner/sw/trace-memory?traceId=&lt;id&gt;</a> —— 内存热层取整条链路（参照）</li>
         <li><a href="/inner/sw/trace-slow?endpoint=GET%3A%2Fhello&amp;minLatencyMs=0&amp;limit=50" target="_blank">/inner/sw/trace-slow?endpoint=&amp;minLatencyMs=&amp;limit=</a> —— 慢查询行列表</li>
         <li><a href="/inner/sw/trace-parity" target="_blank">/inner/sw/trace-parity</a> —— 影子对账 / 孤段 / H2 状态</li>
+        <li><a href="/inner/sw/self-stat" target="_blank">/inner/sw/self-stat</a> —— 监控自身：丢弃数 / 消费耗时 / 积压 / H2 与环形文件</li>
         <li><a href="/inner/sw/metrics" target="_blank">/inner/sw/metrics</a> —— 指标实时快照（含 QPS）</li>
         <li><a href="/inner/sw/metrics/query?endpoint=%2A&amp;limit=20" target="_blank">/inner/sw/metrics/query?endpoint=*&amp;limit=20</a> —— 指标条件查询（加 &amp;aggregate=true 出每端点一行）</li>
         <li><a href="/inner/sw/metrics/extremes" target="_blank">/inner/sw/metrics/extremes</a> —— 每端点最大耗时那次的 traceId</li>

@@ -26,6 +26,13 @@ import java.util.zip.GZIPOutputStream;
  * 文件布局：文件头 16B = {@code currIndex(long 8B)} + {@code sizeBytes(long 8B)}；
  * 数据区 = {@code [16, sizeBytes)}；逻辑 index 到物理位置的映射为 {@code 16 + (index % dataLen)}。
  * </p>
+ *
+ * <p>
+ * 观测：{@link #stats()} 暴露 {@link CappedFileStorageStats}（写指针、压缩率、过期读、fsync…），
+ * 供 {@code /inner/sw/self-stat} 读口回答"环形文件写到哪了、健康吗"——对应 Glowroot 的
+ * {@code CappedDatabaseStats} + MBean 组合，本仓改为经读口暴露（无 JMX 注册中心，见
+ * {@code docs/reference/glowroot-capped-database.md} §3.6）。
+ * </p>
  */
 class CappedFileStorage implements Closeable {
 
@@ -50,6 +57,8 @@ class CappedFileStorage implements Closeable {
     private boolean dirty;
     private long writesSinceFsync;
     private long lastFsyncTime;
+    /** 运行统计（压缩率 / 耗时 / 过期读 / fsync），构造即有，读口只读 */
+    private final CappedFileStorageStats stats = new CappedFileStorageStats();
 
     public CappedFileStorage(final File file, final long sizeBytes) throws IOException {
         this.file = file;
@@ -106,19 +115,34 @@ class CappedFileStorage implements Closeable {
         if (payload == null) {
             return -1L;
         }
-        final byte[] compressed = gzip(payload);
+        // 端到端计时：压缩在锁外、IO 在锁内，两段合起来才是调用方感受到的单次写耗时
+        final long startNanos = System.nanoTime();
+        final byte[] compressed;
+        try {
+            compressed = gzip(payload);
+        } catch (IOException e) {
+            stats.recordIoError();
+            throw e;
+        }
         synchronized (lock) {
             if ((long) compressed.length + BLOCK_HEADER_BYTES > dataLen) {
+                stats.recordOversizedRejected();
                 throw new IOException("payload too large for capped file: compressed=" + compressed.length
                         + ", max=" + (dataLen - BLOCK_HEADER_BYTES));
             }
             final long blockStart = currIndex;
-            writeAt(blockStart, longToBytes(compressed.length));
-            writeAt(blockStart + BLOCK_HEADER_BYTES, compressed);
-            currIndex = blockStart + BLOCK_HEADER_BYTES + compressed.length;
-            writeHeader();
-            dirty = true;
-            maybeFsync();
+            try {
+                writeAt(blockStart, longToBytes(compressed.length));
+                writeAt(blockStart + BLOCK_HEADER_BYTES, compressed);
+                currIndex = blockStart + BLOCK_HEADER_BYTES + compressed.length;
+                writeHeader();
+                dirty = true;
+                maybeFsync();
+            } catch (IOException e) {
+                stats.recordIoError();
+                throw e;
+            }
+            stats.recordWrite(payload.length, compressed.length, System.nanoTime() - startNanos);
             return blockStart;
         }
     }
@@ -129,8 +153,11 @@ class CappedFileStorage implements Closeable {
      * @return 原始载荷；id 尚未写入或被覆盖（过期）时返回 {@code null}
      */
     public byte[] readMessage(final long id) throws IOException {
+        final long startNanos = System.nanoTime();
         synchronized (lock) {
             if (id < 0 || id >= currIndex) {
+                // 从未写入（或 fsync 丢过游标）：不是环覆盖，故 expired=false
+                stats.recordMiss(false);
                 return null;
             }
             final long smallestNonOverwrittenId = Math.max(0L, currIndex - dataLen);
@@ -138,21 +165,32 @@ class CappedFileStorage implements Closeable {
             // 物理位置被新块复用后，旧 id 若不做这道拦截就会读到新块的数据（脏读最坏路径）。
             // 落在窗口内的 id 必然完整可读，窗口外的必然整块被覆盖，没有中间态。
             if (id < smallestNonOverwrittenId) {
+                stats.recordMiss(true); // 已被环覆盖 → 过期（预期行为，非故障）
                 return null; // 已被环覆盖 → 过期
             }
-            final byte[] lenBytes = readAt(id, BLOCK_HEADER_BYTES);
-            if (lenBytes == null) {
-                return null;
+            try {
+                final byte[] lenBytes = readAt(id, BLOCK_HEADER_BYTES);
+                if (lenBytes == null) {
+                    stats.recordMiss(false);
+                    return null;
+                }
+                final long len = bytesToLong(lenBytes);
+                if (len <= 0 || len + BLOCK_HEADER_BYTES > dataLen) {
+                    stats.recordMiss(false);
+                    return null;
+                }
+                final byte[] compressed = readAt(id + BLOCK_HEADER_BYTES, (int) len);
+                if (compressed == null) {
+                    stats.recordMiss(false);
+                    return null;
+                }
+                final byte[] payload = gunzip(compressed);
+                stats.recordRead(System.nanoTime() - startNanos);
+                return payload;
+            } catch (IOException e) {
+                stats.recordIoError();
+                throw e;
             }
-            final long len = bytesToLong(lenBytes);
-            if (len <= 0 || len + BLOCK_HEADER_BYTES > dataLen) {
-                return null;
-            }
-            final byte[] compressed = readAt(id + BLOCK_HEADER_BYTES, (int) len);
-            if (compressed == null) {
-                return null;
-            }
-            return gunzip(compressed);
         }
     }
 
@@ -161,6 +199,42 @@ class CappedFileStorage implements Closeable {
         synchronized (lock) {
             return currIndex;
         }
+    }
+
+    /**
+     * 数据区字节数（{@code sizeBytes - 16}），即环的"周长"。
+     * <p>与 {@link #getCurrIndex()} 相除即得覆盖轮次——读口用它算"环写过几圈了"。</p>
+     */
+    public long getDataLenBytes() {
+        return dataLen;
+    }
+
+    /** 环形文件路径（读口展示用，便于运维直接找到那个文件）。 */
+    public String getFilePath() {
+        return file.getAbsolutePath();
+    }
+
+    /** 最老幸存块的逻辑 id（{@code max(0, currIndex - dataLen)}），即当前可读窗口的左端。 */
+    public long getOldestLiveIndex() {
+        synchronized (lock) {
+            return Math.max(0L, currIndex - dataLen);
+        }
+    }
+
+    /** 已完整覆盖的轮次（{@code currIndex / dataLen}）：0 = 还没绕过一圈。 */
+    public long getWrapCount() {
+        synchronized (lock) {
+            return dataLen <= 0L ? 0L : currIndex / dataLen;
+        }
+    }
+
+    /**
+     * 运行统计（压缩率 / 耗时 / 过期读 / fsync…）。
+     * <p>暴露实例而非快照，是为了让 {@link H2TraceSegmentStorage} 能把它并进自己的读口快照；
+     * 真正跨 ClassLoader 出插件的仍然是 {@code snapshot()} 的 JDK 原生 Map。</p>
+     */
+    CappedFileStorageStats stats() {
+        return stats;
     }
 
     /** 指定逻辑 id 是否已被覆盖（过期）。 */
@@ -222,6 +296,7 @@ class CappedFileStorage implements Closeable {
         if (dirty) {
             raf.getChannel().force(false);
             dirty = false;
+            stats.recordFsync();
         }
         writesSinceFsync = 0;
         lastFsyncTime = System.currentTimeMillis();

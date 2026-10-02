@@ -325,6 +325,64 @@ public class CappedFileStorageTest {
         Assert.assertEquals(256, storageFile().length());
     }
 
+    @Test
+    public void stats_trackWritesReadsEvictionAndGeometry() throws IOException {
+        final long dataLen = 256L - FILE_HEADER_BYTES;
+        final CappedFileStorage s = open(256);
+        final long anchorId = s.writeMessage(payload("anchor-block-" + repeat('a', 200)));
+
+        Assert.assertEquals("数据区 = 文件大小 - 16B 文件头", dataLen, s.getDataLenBytes());
+        Assert.assertEquals("刚写过一块，还没绕圈", 0L, s.getWrapCount());
+        Assert.assertTrue("最老幸存 id 在未绕圈时应为 0", s.getOldestLiveIndex() == 0L);
+        Assert.assertTrue("写指针已前进", s.getCurrIndex() > 0L);
+        Assert.assertEquals(1L, s.stats().getWriteCount());
+        Assert.assertTrue("可压缩载荷的压缩率应为正", s.stats().getCompressionRatio() > 0d);
+        Assert.assertTrue("单次写耗时非负", s.stats().getAverageMillisPerWrite() >= 0d);
+        Assert.assertTrue("文件路径应可读", s.getFilePath().endsWith("payload.capped.db"));
+
+        // 绕圈：写到游标超过一整圈，anchor 必被覆盖
+        for (int i = 0; i < 40; i++) {
+            s.writeMessage(payload("block-" + i + "-" + repeat('b', 200)));
+        }
+        Assert.assertTrue("游标应已绕过至少一圈", s.getWrapCount() >= 1L);
+        Assert.assertEquals("绕圈后最老幸存 id = currIndex - dataLen", s.getCurrIndex() - dataLen,
+                s.getOldestLiveIndex());
+        Assert.assertTrue("anchor 应已被覆盖", s.isOverwritten(anchorId));
+        Assert.assertNull("被覆盖后读回 null", s.readMessage(anchorId));
+        Assert.assertEquals("过期读应被单独计数", 1L, s.stats().getExpiredReadCount());
+        Assert.assertEquals("读不到合计 = 1 次过期", 1L, s.stats().getMissReadCount());
+        Assert.assertEquals("0 次写入失败", 0L, s.stats().getIoErrorCount());
+        Assert.assertEquals("0 次超容拒写", 0L, s.stats().getOversizedRejectedCount());
+
+        // 未写入的 id 读回 null，但原因不是"环覆盖"
+        Assert.assertNull(s.readMessage(s.getCurrIndex() + 1000L));
+        Assert.assertEquals("过期读数不应因'从未写入'而增加", 1L, s.stats().getExpiredReadCount());
+        Assert.assertEquals(2L, s.stats().getMissReadCount());
+
+        // 成功读回才计入 readCount
+        final long lastId = s.writeMessage(payload("readback-" + repeat('c', 100)));
+        Assert.assertNotNull(s.readMessage(lastId));
+        Assert.assertTrue("读回次数应至少 1", s.stats().getReadCount() >= 1L);
+    }
+
+    @Test
+    public void stats_countOversizedRejectionAndIoErrorSeparately() throws IOException {
+        final CappedFileStorage s = open(128);
+        final byte[] incompressible = new byte[4096];
+        new Random(7).nextBytes(incompressible);
+
+        try {
+            s.writeMessage(incompressible);
+            Assert.fail("expected IOException for oversized payload");
+        } catch (IOException expected) {
+            Assert.assertTrue(expected.getMessage().contains("payload too large"));
+        }
+
+        Assert.assertEquals("超容拒写单独计数", 1L, s.stats().getOversizedRejectedCount());
+        Assert.assertEquals("拒写不是 IO 错误", 0L, s.stats().getIoErrorCount());
+        Assert.assertEquals("拒写不推进写指针", 0L, s.getCurrIndex());
+    }
+
     private static String repeat(final char c, final int n) {
         final StringBuilder sb = new StringBuilder(n);
         for (int i = 0; i < n; i++) {

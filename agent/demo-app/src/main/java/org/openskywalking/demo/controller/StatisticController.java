@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.skywalking.apm.toolkit.SWLogfileReporterUtils;
 import org.apache.skywalking.apm.toolkit.SWMetricsUtils;
+import org.apache.skywalking.apm.toolkit.SWSelfStatUtils;
 import org.apache.skywalking.apm.toolkit.SWTraceParityUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,6 +54,19 @@ public class StatisticController {
     @GetMapping("/inner/sw/trace-parity")
     public Map<String, Object> traceParity() {
         return SWTraceParityUtils.statisticParity();
+    }
+
+    /**
+     * 监控自身的运行指标:/inner/sw/self-stat 返回「采集入口丢弃数 / 消费线程单批耗时 /
+     * 未提交 segment 积压 / H2 行数与内存估算 / 环形载荷文件写指针与压缩率 / JVM 堆」。
+     * <p>
+     * 与上面几个读口的关系：那些回答<b>被监控的业务发生了什么</b>，这一个回答
+     * <b>监控系统自己是否轻量、健康、没拖垮主业务</b>——落进页面 {@code /dashboards/self-stat.html}。
+     * </p>
+     */
+    @GetMapping("/inner/sw/self-stat")
+    public Map<String, Object> selfStat() {
+        return SWSelfStatUtils.statisticSelf();
     }
 
     /** 按 traceId 从 H2/环形文件取回整条链路(与旧 data[traceId].logs 同契约),供人工查看 */

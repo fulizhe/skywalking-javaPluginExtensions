@@ -143,6 +143,31 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	private static final long PARITY_INTERVAL_MS = 5_000L;
 	private static final long PARITY_LOG_INTERVAL_MS = 30_000L;
 
+	// ==================== 自我统计（/inner/sw/self-stat）====================
+	// 这一段回答"监控系统自己健康吗"：采集入口丢了多少段、消费线程每批花多久、
+	// 存储侧积压多少。全部是计数器读数，不做任何 I/O —— 读口不能自己变成耗时点。
+	/** 成功入 DataCarrier 缓冲区的段数 */
+	private final AtomicLong selfProduced = new AtomicLong(0);
+	/** <b>因缓冲区满被丢弃的段数</b>（原实现丢掉 produce() 的返回值，丢多少完全不可见） */
+	private final AtomicLong selfCarrierDropped = new AtomicLong(0);
+	/** 被 agent 自身标记为 ignore 而未上报的段数（采样丢弃，正常存在） */
+	private final AtomicLong selfIgnoredSegments = new AtomicLong(0);
+	/** 运行时开关关闭期间被跳过的段数（切到"不监控"的代价，非故障） */
+	private final AtomicLong selfSkippedWhenDisabled = new AtomicLong(0);
+	/** DataCarrier 消费批次数 */
+	private final AtomicLong selfConsumeBatches = new AtomicLong(0);
+	/** DataCarrier 已消费段数 */
+	private final AtomicLong selfConsumedSegments = new AtomicLong(0);
+	/** 单批消费耗时峰值（纳秒）；插件自身开销的上界证据 */
+	private final AtomicLong selfConsumeMaxNanos = new AtomicLong(0);
+	/** 最近一批消费耗时（毫秒） */
+	private volatile double selfConsumeLastMillis = 0d;
+	/** 缓冲区满丢段的限速日志时间戳（同文件其它告警一律 30s 最多一条） */
+	private volatile long selfDropLastLogTime = 0;
+	private static final long SELF_DROP_LOG_INTERVAL_MS = 30_000L;
+	/** 进程内该组件的启动时刻（读口据此算 uptime） */
+	private final long selfStartedAtMs = System.currentTimeMillis();
+
 	public LogFileTraceSegmentServiceClient() {
 		this.enable = new AtomicBoolean(true);
 	}
@@ -382,7 +407,111 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
-	 * 指标条件查询（供 {@code SWMetricsUtils.queryMetrics(condition)} 经拦截器反射调用）。
+	 * 监控自身的运行指标（供 {@code SWSelfStatUtils.statisticSelf()} 经拦截器反射调用，
+	 * 宿主侧暴露为 {@code GET /inner/sw/self-stat}）。
+	 *
+	 * <p>
+	 * <b>要回答的问题只有一句：监控系统本身是否轻量、健康、绝不拖垮主业务。</b>
+	 * 于是只放四类证据，不放业务语义：
+	 * </p>
+	 * <ol>
+	 *   <li>{@code carrier} — 采集入口：成功入队 / <b>缓冲区满丢弃</b> / ignore / 开关关闭跳过。
+	 *       丢弃数此前是<b>完全不可见</b>的（{@code produce()} 的返回值被丢掉）。</li>
+	 *   <li>{@code pipeline} — 消费线程：批次数、段数、单批耗时（最近/峰值）。
+	 *       这是插件对被监控应用施加的 CPU/内存开销的<b>上界证据</b>。</li>
+	 *   <li>{@code h2} / {@code backlog} / {@code capped} — 存储侧：行数水位、未提交积压、
+	 *       环形文件写指针与压缩率（{@link H2TraceSegmentStorage#selfStatSnapshot()} 产出）。</li>
+	 *   <li>{@code jvmHeap} — JVM 堆（精确值）。H2 自身字节数 H2 2.x 不提供读口，
+	 *       只能给"行数 × 实测单行成本"的估算，口径写在页面上。</li>
+	 * </ol>
+	 *
+	 * <p>全链路<b>不执行 SQL、不加存储锁、不做文件 IO</b>：读口按 10s 轮询，
+	 * 它自己必须比它要观测的东西更轻。返回 JDK 原生 Map，不暴露 Agent 自定义类型。</p>
+	 */
+	public Map<String, Object> getSelfStat() {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>(8);
+		result.put("startedAtMs", Long.valueOf(selfStartedAtMs));
+		result.put("uptimeMs", Long.valueOf(System.currentTimeMillis() - selfStartedAtMs));
+		result.put("reporterEnabled", Boolean.valueOf(isEnableLogfileReporter()));
+		result.put("h2Enabled", Boolean.valueOf(traceSegmentStorage != null));
+		result.put("metricsEnabled", Boolean.valueOf(metricsEnabled));
+
+		final Map<String, Object> carrierStats = new LinkedHashMap<String, Object>(8);
+		carrierStats.put("strategy", "IF_POSSIBLE");
+		carrierStats.put("channelSize", Integer.valueOf(CHANNEL_SIZE));
+		carrierStats.put("bufferSize", Integer.valueOf(BUFFER_SIZE));
+		carrierStats.put("produced", Long.valueOf(selfProduced.get()));
+		carrierStats.put("dropped", Long.valueOf(selfCarrierDropped.get()));
+		carrierStats.put("ignored", Long.valueOf(selfIgnoredSegments.get()));
+		carrierStats.put("skippedWhenDisabled", Long.valueOf(selfSkippedWhenDisabled.get()));
+		result.put("carrier", carrierStats);
+
+		final Map<String, Object> pipeline = new LinkedHashMap<String, Object>(8);
+		pipeline.put("consumeBatches", Long.valueOf(selfConsumeBatches.get()));
+		pipeline.put("consumedSegments", Long.valueOf(selfConsumedSegments.get()));
+		pipeline.put("lastConsumeMillis", Double.valueOf(selfConsumeLastMillis));
+		pipeline.put("maxConsumeMillis", Double.valueOf(selfConsumeMaxNanos.get() / 1000000d));
+		pipeline.put("orphanSegments", Long.valueOf(orphanSegments.get()));
+		pipeline.put("alertEnabled", Boolean.valueOf(traceAlertDispatcher != null));
+		result.put("pipeline", pipeline);
+
+		// 丢段总数 = 采集入口丢 + 存储队列满丢。页面据此给"数据有没有丢"一个单点答案。
+		final long storageDropped = traceSegmentStorage != null ? traceSegmentStorage.getWriteQueueDropped() : 0L;
+		final Map<String, Object> dataLoss = new LinkedHashMap<String, Object>(4);
+		dataLoss.put("carrierDropped", Long.valueOf(selfCarrierDropped.get()));
+		dataLoss.put("storageDropped", Long.valueOf(storageDropped));
+		dataLoss.put("total", Long.valueOf(selfCarrierDropped.get() + storageDropped));
+		result.put("dataLoss", dataLoss);
+
+		if (traceSegmentStorage != null) {
+			result.putAll(traceSegmentStorage.selfStatSnapshot());
+		} else {
+			result.put("h2", disabledMap("rows", Long.valueOf(0L)));
+			result.put("backlog", disabledMap("depth", Integer.valueOf(0)));
+			result.put("capped", disabledMap("file", ""));
+		}
+
+		final Runtime rt = Runtime.getRuntime();
+		final long heapMax = rt.maxMemory();
+		final long heapCommitted = rt.totalMemory();
+		final long heapUsed = heapCommitted - rt.freeMemory();
+		final Map<String, Object> jvmHeap = new LinkedHashMap<String, Object>(4);
+		jvmHeap.put("usedBytes", Long.valueOf(heapUsed));
+		jvmHeap.put("committedBytes", Long.valueOf(heapCommitted));
+		jvmHeap.put("maxBytes", Long.valueOf(heapMax));
+		jvmHeap.put("usedRatio", Double.valueOf(heapMax <= 0L ? 0d : (double) heapUsed / heapMax));
+		result.put("jvmHeap", jvmHeap);
+		return result;
+	}
+
+	/** 存储层未启用时的占位段：形状与真实段一致，读口不必判空（仍用 {@code enabled=false} 表明未启用）。 */
+	private static Map<String, Object> disabledMap(final String key, final Object value) {
+		final Map<String, Object> m = new LinkedHashMap<String, Object>(2);
+		m.put("enabled", Boolean.FALSE);
+		m.put(key, value);
+		return m;
+	}
+
+	/**
+	 * 记一批消费的耗时：更新最近值与峰值（CAS 递增，避免写者竞争时丢峰值）。
+	 * <p>在 {@code finally} 里调用——消费中抛异常也算一次开销，必须被记上。</p>
+	 */
+	private void recordConsumeCost(final long startNanos, final int segmentCount) {
+		final long elapsed = System.nanoTime() - startNanos;
+		selfConsumeBatches.incrementAndGet();
+		selfConsumedSegments.addAndGet(segmentCount);
+		selfConsumeLastMillis = elapsed / 1000000d;
+		long prev = selfConsumeMaxNanos.get();
+		while (elapsed > prev) {
+			if (selfConsumeMaxNanos.compareAndSet(prev, elapsed)) {
+				break;
+			}
+			prev = selfConsumeMaxNanos.get();
+		}
+	}
+
+	/**
+	 * Trace 指标条件查询（供 {@code SWMetricsUtils.queryMetrics(condition)} 经拦截器反射调用）。
 	 * <p>
 	 * condition 支持：{@code endpoint}（含保留键 {@code "*"}，缺省不限）、{@code fromBucket} /
 	 * {@code toBucket}（分钟桶，缺省最近 24h）、{@code resolution}（缺省按跨度自动选）、
@@ -853,7 +982,6 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		// 触发时机：由 DataCarrier（数据传输队列）批量消费时触发。DataCarrier 会把队列里的 TraceSegment 批量取出，调用
 		// consume(List<TraceSegment> data)。
 		// 你可以在这里做“批量 TraceSegment 的统一处理”，比如：批量序列化、写日志、落盘、上报等。
-		
 
 		// TODO 处理profile. 参考基类的consume方法
 
@@ -861,9 +989,22 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			LOGGER.info(
 					"###consume. disable the logfile-reporter [ {} ] which save data to log-file. the collection size of data is [ {} ]",
 					Config.Agent.SERVICE_NAME, data.size());
+			selfSkippedWhenDisabled.addAndGet(data.size());
 			return;
 		}
 
+		// 自身开销计量：整批耗时（transform + 合入 + 指标聚合 + 影子 accept）是插件对被监控应用
+		// 施加的成本，在 finally 里记——消费中抛异常也必须被算进去。
+		final long startNanos = System.nanoTime();
+		try {
+			doConsume(data);
+		} finally {
+			recordConsumeCost(startNanos, data.size());
+		}
+	}
+
+	/** {@link #consume} 的实际批处理体（开关已判、耗时已计）。 */
+	private void doConsume(final List<TraceSegment> data) {
 		if (LOGGER.isDebugEnable()) {
 			LOGGER.debug(
 					"### current logfile-reporter status [ {} ] is [ {} ], the colletion size of data is [ {} ], the colletion size of cache is [ {} ]",
@@ -1119,16 +1260,31 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		}
 
 		if (traceSegment.isIgnore()) {
+			selfIgnoredSegments.incrementAndGet();
 			LOGGER.debug("Trace[TraceId={}] is ignored.", traceSegment.getTraceSegmentId());
 			return;
 		}
 
 		if (!isEnableLogfileReporter()) {
+			selfSkippedWhenDisabled.incrementAndGet();
 			LOGGER.info("### afterFinished. disable the logfile-reporter [ {} ] which save data to log-file.",
 					Config.Agent.SERVICE_NAME);
 			return;
 		}
-		carrier.produce(traceSegment);
+
+		// produce() 返回 false = 缓冲区满，这一段被<b>静默丢弃</b>。原实现丢掉返回值，
+		// 于是"丢了多少"完全不可见——这正是 self-stat 读口要补的第一个洞。
+		if (carrier.produce(traceSegment)) {
+			selfProduced.incrementAndGet();
+		} else {
+			final long dropped = selfCarrierDropped.incrementAndGet();
+			final long now = System.currentTimeMillis();
+			if (now - selfDropLastLogTime > SELF_DROP_LOG_INTERVAL_MS) {
+				selfDropLastLogTime = now;
+				LOGGER.warn("### [SelfStat] DataCarrier buffer is full, trace segments are being dropped (total dropped: {}). "
+						+ "The plugin cannot keep up with the traffic; see /inner/sw/self-stat for backlog depth.", dropped);
+			}
+		}
 //
 //		// =====================================================================
 //		final SegmentObject segment = traceSegment.transform();

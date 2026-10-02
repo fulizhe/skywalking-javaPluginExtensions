@@ -65,6 +65,17 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
 
     private static final int AUDIT_WATER_LEVEL = 1000;
 
+    /**
+     * {@code trace_segment} 单行堆成本估算（字节/行），用于把行数折成"约多少 MB"。
+     * <p>
+     * 取自实测 {@code docs/notes/2026-09-27-h2-mem-capacity-estimate.md} §7.1/§7.3：
+     * 同实例两点差分 {@code Δheap 18.07 MB ÷ Δrows 23,587} ≈ 804 B/行（偏上估计，含 metrics 行增长）。
+     * 刻意取整成 800 并<b>在读口页面写明这是估算</b>——H2 2.x 不提供内存读口，真实字节数
+     * 只能带外 {@code jmap -histo:live} 测；给一个标了口径的估算，胜过给一个假装精确的数字。
+     * </p>
+     */
+    private static final long H2_BYTES_PER_ROW_ESTIMATE = 800L;
+
     private static final Gson GSON = new Gson();
 
     private final boolean enabled;
@@ -79,7 +90,9 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     private volatile boolean writerRunning;
     private Thread writerThread;
     /** 已成功写入 trace 表的行数；仅由写线程在 {@code synchronized(this)} 内自增，用于水位校验节流。 */
-    private long insertCount;
+    private volatile long insertCount;
+    /** 被行数水位清理掉的累计行数（与 {@link #insertCount} 相减即当前存活行数，避免读口做全表 COUNT）。 */
+    private volatile long deletedByRowCap;
     private final AtomicLong writeQueueDropped = new AtomicLong(0);
     private final AtomicInteger inFlight = new AtomicInteger(0);
     private static final int WRITE_QUEUE_CAPACITY = 4096;
@@ -301,6 +314,125 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     /** 异步写队列因满而丢弃的段数。 */
     public long getWriteQueueDropped() {
         return writeQueueDropped.get();
+    }
+
+    /** trace 表行数水位上限（{@code h2.shadow_max_rows}）。 */
+    public int getMaxRows() {
+        return shadowMaxRows;
+    }
+
+    /** 异步写队列容量（有界背压的硬上限）。 */
+    public int getWriteQueueCapacity() {
+        return WRITE_QUEUE_CAPACITY;
+    }
+
+    /**
+     * <b>未提交积压量</b>：已入队但尚未写进 H2 的段数 = 队列里待处理 + 正在写。
+     * <p>
+     * 这是"监控自己有没有被业务拖住"的核心数字：它持续上涨说明 H2 写入（含 payload 落盘）
+     * 已经跟不上采集速度，再涨就会顶到队列容量并开始丢段（{@link #getWriteQueueDropped()}）。
+     * 两个分量都取自并发容器/原子变量，读它不碰 H2 连接、不进 {@code synchronized(this)}。
+     * </p>
+     */
+    public int getBacklogDepth() {
+        final BlockingQueue<TraceSegment> q = writeQueue;
+        if (q == null) {
+            return 0;
+        }
+        return q.size() + inFlight.get();
+    }
+
+    /**
+     * trace 表当前存活行数（增量口径：成功插入数 − 被水位清理数），{@code O(1)}。
+     * <p>
+     * <b>为什么不用 {@code COUNT(*)}</b>：十万行量级下那是一次全表扫，而读口按 10s 轮询；
+     * 插入数与删除数都在写路径上顺手累加，读口只是相减。
+     * </p>
+     * <p>
+     * 两个分量都是 {@code volatile} 读，读口不会阻塞写线程；代价是水位清理刚发生时
+     * 可能瞬时偏大，量级不超过一个节流窗口（1024 行），下轮刷新即收敛。
+     * 需要精确/权威行数仍走 {@link #size()}（{@code COUNT(DISTINCT trace_id)}）。
+     * </p>
+     */
+    public long getLiveRowCount() {
+        final long live = insertCount - deletedByRowCap;
+        return live < 0L ? 0L : live;
+    }
+
+    /**
+     * 自身状态快照（供 {@code /inner/sw/self-stat} 读口）：H2 段 + 环形文件段 + 积压段。
+     *
+     * <p>
+     * 三段都只读内存计数与文件头游标，<b>不执行任何 SQL</b>、不进 {@code synchronized(this)}——
+     * 读口是给人看"监控自己健康吗"的，绝不能自己变成一个把写线程堵住的耗时点。
+     * </p>
+     *
+     * <p>
+     * {@code estimatedBytes} 是<b>估算</b>（行数 × 单行实测成本），不是 H2 自报的字节数：
+     * H2 2.x 没有内存读口（{@code INFORMATION_SCHEMA.SESSIONS} 无 {@code MEMORY_USED}、
+     * {@code Session} 无 {@code getMemoryUsage}，已实测 2.1.212 / 2.3.232），
+     * 真实字节数只能靠 {@code jmap -histo:live} 在带外测。口径与实测来源见
+     * {@code docs/notes/2026-09-27-h2-mem-capacity-estimate.md} §7.1/§7.3。
+     * </p>
+     */
+    public Map<String, Object> selfStatSnapshot() {
+        final Map<String, Object> h2 = new LinkedHashMap<String, Object>(12);
+        final long rows = getLiveRowCount();
+        h2.put("enabled", Boolean.valueOf(enabled && connection != null));
+        h2.put("rows", Long.valueOf(rows));
+        h2.put("maxRows", Integer.valueOf(shadowMaxRows));
+        h2.put("rowUsageRatio", Double.valueOf(shadowMaxRows <= 0 ? 0d
+                : (double) rows / shadowMaxRows));
+        h2.put("bytesPerRowEstimate", Long.valueOf(H2_BYTES_PER_ROW_ESTIMATE));
+        h2.put("estimatedBytes", Long.valueOf(rows * H2_BYTES_PER_ROW_ESTIMATE));
+        h2.put("insertedRows", Long.valueOf(insertCount));
+        h2.put("evictedRows", Long.valueOf(deletedByRowCap));
+        h2.put("errorCount", Long.valueOf(errorCount.get()));
+        h2.put("auditWaterLevel", Integer.valueOf(AUDIT_WATER_LEVEL));
+
+        final Map<String, Object> backlog = new LinkedHashMap<String, Object>(6);
+        backlog.put("depth", Integer.valueOf(getBacklogDepth()));
+        backlog.put("capacity", Integer.valueOf(WRITE_QUEUE_CAPACITY));
+        backlog.put("dropped", Long.valueOf(getWriteQueueDropped()));
+
+        final Map<String, Object> result = new LinkedHashMap<String, Object>(4);
+        result.put("h2", h2);
+        result.put("backlog", backlog);
+        result.put("capped", cappedSnapshot());
+        return result;
+    }
+
+    /**
+     * 环形载荷文件段快照：写指针位置、物理占用、覆盖轮次 + {@link CappedFileStorageStats} 全部计数。
+     * <p>未启用或初始化失败时给 {@code enabled=false} 的空壳，读口据此显示"未启用"而非报错。</p>
+     */
+    private Map<String, Object> cappedSnapshot() {
+        final Map<String, Object> m = new LinkedHashMap<String, Object>(24);
+        m.put("enabled", Boolean.valueOf(cappedStorage != null));
+        if (cappedStorage == null) {
+            m.put("file", "");
+            m.put("currIndex", Long.valueOf(0L));
+            m.put("sizeBytes", Long.valueOf(0L));
+            m.put("dataLenBytes", Long.valueOf(0L));
+            m.put("usedRatio", Double.valueOf(0d));
+            m.put("wrapCount", Long.valueOf(0L));
+            m.put("oldestLiveIndex", Long.valueOf(0L));
+            m.put("stats", new LinkedHashMap<String, Object>());
+            return m;
+        }
+        final long currIndex = cappedStorage.getCurrIndex();
+        final long dataLen = cappedStorage.getDataLenBytes();
+        m.put("file", cappedStorage.getFilePath());
+        m.put("currIndex", Long.valueOf(currIndex));
+        m.put("sizeBytes", Long.valueOf(cappedStorage.getSizeBytes()));
+        m.put("dataLenBytes", Long.valueOf(dataLen));
+        // 占用率按"已写字节 vs 一圈"算，绕圈后封顶为 100%——文件大小恒定，故不存在 >100%
+        m.put("usedRatio", Double.valueOf(dataLen <= 0L ? 0d
+                : Math.min(1d, currIndex / (double) dataLen)));
+        m.put("wrapCount", Long.valueOf(cappedStorage.getWrapCount()));
+        m.put("oldestLiveIndex", Long.valueOf(cappedStorage.getOldestLiveIndex()));
+        m.put("stats", cappedStorage.stats().snapshot());
+        return m;
     }
 
     /**
@@ -632,10 +764,22 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         if (++insertCount % 1024 != 0) {
             return;
         }
-        enforceCap(shadowMaxRows, H2SqlStatements.MAX_ID_SQL, H2SqlStatements.DELETE_CAP_SQL, "enforceRowCap");
+        final int deleted = enforceCap(shadowMaxRows, H2SqlStatements.MAX_ID_SQL, H2SqlStatements.DELETE_CAP_SQL,
+                "enforceRowCap");
+        if (deleted > 0) {
+            deletedByRowCap += deleted;
+        }
     }
 
-    private void enforceCap(final int waterLevel, final String maxIdSql, final String deleteSql, final String op) {
+    /**
+     * 按水位删除多余行，返回<b>实际删除行数</b>（未触发或出错返回 {@code -1}）。
+     * <p>
+     * 返回值不是给 SQL 用，是给读口用：{@code trace_segment} 到十万行量级时
+     * {@code COUNT(*)} 是一次全表扫，而读口每 10s 轮询一次——用"插入数 − 删除数"
+     * 增量维护存活行数，O(1) 且不需要扫表。
+     * </p>
+     */
+    private int enforceCap(final int waterLevel, final String maxIdSql, final String deleteSql, final String op) {
         try (Statement stmt = connection.createStatement();
                 ResultSet rs = stmt.executeQuery(maxIdSql)) {
             if (rs.next()) {
@@ -644,12 +788,15 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                     final long threshold = maxId - waterLevel;
                     try (PreparedStatement ps = connection.prepareStatement(deleteSql)) {
                         ps.setLong(1, threshold);
-                        ps.executeUpdate();
+                        final int deleted = ps.executeUpdate();
+                        return deleted;
                     }
                 }
             }
+            return 0;
         } catch (SQLException e) {
             recordError(op, e);
+            return -1;
         }
     }
 
@@ -892,6 +1039,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
 
     /**
      * 清空所有行（包级可见，供单元测试隔离使用）。
+     * <p>连带复位行数计数——否则 {@link #getLiveRowCount()} 会一直停在清空前的水位。</p>
      */
     void clear() {
         if (connection == null) {
@@ -906,6 +1054,8 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             } catch (SQLException e) {
                 recordError("clear", e);
             }
+            insertCount = 0L;
+            deletedByRowCap = 0L;
         }
     }
 
