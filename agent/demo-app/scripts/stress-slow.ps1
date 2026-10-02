@@ -1,9 +1,21 @@
 # 慢端点专用压测（演示 / 讲解用，**手动执行**）
 #
-# 为什么单独一个脚本：慢端点与"稳定���压测"是**两种目的**，混在一个路径集里会互相污染。
-#   - 稳定��压测：`-AllEndpoints` / `-NormalOnly`，看吞吐、堆、插件计数是否健康
+# 为什么单独一个脚本：慢端点与"稳定性压测"是**两种目的**，混在一个路径集里会互相污染。
+#   - 稳定性压测：stress.ps1 默认档（只 ms 级）/ -AllEndpoints（求覆盖度）/ -NormalOnly
 #   - 慢端点演示（本脚本）：看"慢在哪、慢到什么量级"，是给领导/同事**看现象**用的
 # 把它们分开，慢端点就不会把稳定性压测的吞吐数字拖成一个没有参考价值的平均数。
+#
+# ★ **本档 = "所有慢端点"的唯一清单**。规则：`stress.ps1 -AllEndpoints`（60 条，覆盖度档，
+#   含慢端点）里凡是单请求 >1s 的，**这里都要有一条对应项**。反过来只在这里、
+#   `-AllEndpoints` 里没有的，是本档独有的造数手段（慢端点演示专用），不是漏配。
+#   改动任一侧的路径集时按这条对账，别让"慢端点"只存在于其中一处。
+#   实测基准（2026-10-02，Windows 本机，应用带 agent 运行中）：
+#     /api/export/report 裸调 65s → 本档用 ?ms={rand:1000,4000}（见下）
+#     /api/order/1 8.5s ｜ /api/trace-alert-demo/slow?ms=4000 4.0s ｜ /debug 3.1s
+#     /api/deps-demo/mysql?sleepMs=30 3.0s ｜ /fullSample 1.8s
+#     /api/deps-demo/kafka?op=produce 1.7s ｜ /longTimeTask 1.2s
+#   ⚠️ 别按参数名估耗时：`?sleepMs=30` 实测 3.0s（H2 的 SLEEP 有秒级下限），
+#     而 `/api/deps-demo/kafka?op=consume` 实测 0.31s（毫秒级，**不在**本档）。
 #
 # 这一档**会显著拉低吞吐**（单请求 0.3s ~ 8.5s），所以别拿它的 req/s 去和全量压测比。
 #
@@ -57,6 +69,9 @@ $demoAppDir = Split-Path -Parent $PSScriptRoot          # agent/demo-app
 $SLOW_PATHS = [ordered]@{
     # ---- 毫秒级:SQL 与外部依赖,用来对比"同一进程内不同依赖的差距" ----
     "/api/deps-demo/mysql?sleepMs=1000" = "MySQL 侧慢查询 1s(依赖侧造慢边)"
+    # 同一条路径的**另一档**参数：H2 的 SLEEP 有秒级下限,30ms 实测也要 3.0s。
+    # 留两档是为了压测时能同时看到"1s 档"和"明显更慢档"的分位差异。
+    "/api/deps-demo/mysql?sleepMs=30"   = "MySQL 慢查询 30ms 档(实测约 3.0s —— H2 的 SLEEP 有秒级下限,别按参数值估耗时)"
     "/api/deps-demo/kafka?op=produce"     = "Kafka 生产(broker 不可达时约 3s 超时,见拓扑页 caveats)"
     "/api/deps-demo/http?site=httpbin"   = "外呼 httpbin 约 1~2s(网络往返)"
     "/api/deps-demo/grpc"                = "进程内 gRPC 约 0.3s(首次建链约 4s)"
@@ -74,6 +89,7 @@ $SLOW_PATHS = [ordered]@{
     # 演示要"65s 那一版"就直接开 /api/export/report（不带参数）。
     "/api/export/report?ms={rand:1000,4000}" = "慢导出(默认 65s;这里每请求随机睡 1~4s,仍命中 Ant /api/export/**)"
     "/longTimeTask"                       = "长任务(约 1s)"
+    "/debug"                              = "睡 5s(HelloController.debug → HelloService.debug(5));实测 3.1s"
     "/fullSample"                         = "全貌入口:约 5s(中间件未起时),且**会带上三层依赖**"
 }
 

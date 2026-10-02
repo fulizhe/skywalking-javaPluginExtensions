@@ -3,6 +3,32 @@
 # 压测实现是自包含的 Java 类(demo-app 测试源码 org.openskywalking.demo.load.HttpLoadTest,
 # JUnit5,默认不参与 mvn test)。本脚本只做编排:起应用(可选) -> 跑压测 -> 打印指标摘要 -> 停应用(可选)。
 #
+# ★★★ 三档语义(改路径集前先读这段)★★★
+#   本脚本有两档,外加一个独立脚本,分工是**按单请求耗时**分的:
+#
+#   1) 默认档(留空 $Paths) = **只 ms 级**。
+#      实测 5 条:4.4 / 3.2 / 2.0 / 1.7 / 1.6 ms。16 线程约 500 RPS。
+#      用途:吞吐、稳定性、指标聚合。**要 QPS 数字就用这档。**
+#
+#   2) -AllEndpoints = **所有**端点,**含慢端点与 5xx**。
+#      慢端点(/api/export/report 裸调 65s、/api/order/1 8.5s、/fullSample 裸调 4.8s、
+#      /debug 5s、trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 1.5s)在这里是
+#      **故意留的** —— 本档求**覆盖度**(每个页面接口都打到),不求吞吐。
+#      实测 16 线程只有 ~40 QPS:那是秒级端点在等,不是插件慢。
+#      ⚠️ `/api/export/report` 裸调睡 65s,而本脚本 -TimeoutMs 默认 10s:客户端 10s 放弃后
+#      **服务端仍睡满 65s 并占住线程**,p99 会被拉到这个量级。同理见 stress-slow.ps1 的
+#      `?ms={rand:1000,4000}` 写法 —— 那边给这条路径加了随机 sleep 上限。
+#
+#   3) stress-slow.ps1 = **只放慢的**,且更多是**手动执行**(讲解 / 演示 / 看慢端点现象),
+#      不是稳定性压测的日常路径。它是"慢端点专用镜头",与 -AllEndpoints 的区别是:
+#      后者混杂快慢求覆盖,前者全是慢的、看得清每条多慢。
+#
+#   `deploy/deploy_remote.py` 的远程压测档是**第四份独立清单**,也故意含慢端点
+#   (它要的是 slow 统计列表),不受本脚本影响 —— 改 $ALL_GROUPS 不会改变它。
+#
+#   ⚠️ 别拿 -AllEndpoints 的 QPS 和默认档比:两者压的**不是同一批端点**,
+#      前者天花板由最慢那条决定。QPS 低先看路径集里混了什么。
+#
 # 三种模式:
 #   1) 请求数模式(默认):发够 -Requests 个请求即结束
 #      pwsh ./scripts/stress.ps1 -Requests 2000 -Threads 16
@@ -105,16 +131,22 @@ $DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps
 # 全部页面接口(-AllEndpoints):按"页"分组铺开,便于看出漏了哪一页。
 # 清单是**显式枚举**而不是从代码里反射 —— 反射要处理注解/参数/副作用,反而更不可控;
 # 显式清单还有一个好处:新增页面时"要不要进压测"变成一次显式决定。
+#
+# ★ 本档 = **所有**端点,**含慢端点与 5xx**(与默认档的根本区别就在这)。
+#   慢端点(/api/order/1 8.5s、/api/export/report 65s、/fullSample 裸调 4.8s、/debug 5s、
+#   trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 1.5s)在这里是**故意留的** ——
+#   本档求覆盖度,不求吞吐。实测 16 线程只有 ~40 QPS,那是秒级端点在等,不是插件慢。
+#   要吞吐数字用默认档(ms 级,16 线程 ~500 RPS);要单看慢端点用 stress-slow.ps1。
 $ALL_GROUPS = [ordered]@{
-    # 初学者演示页(/9527.html)与官方 sample
+    # 初学者演示页(/9527.html)与官方 sample。/helloBlock 在 0.6~2.0s 抖动,按 ms 级看待
     "hello"      = "/hello,/helloAsync,/helloAsync2,/helloAsync3,/helloAsyncServlet,/helloBlock,/helloException"
+    # /debug 睡 5s(HelloService.debug(5))
     "trace"      = "/debug,/log,/logError,/traceInvokePrivateMethod,/traceServiceMethodWithAnnotation,/traceServiceMethod2WithApi"
     "sql"        = "/queryDbByMybatis,/queryDbByJdbc"
-    # fullSample 是"全貌入口"(每种监控组件各一次),默认**带三层依赖**;压测里用 ?deps=false 关掉:
-    # 中间件未起时那四层约 8s(每层有超时、有界),否则单个请求就把吞吐拖垮。
-    # 想压三层,用 -WithDeps —— 那里有专门的三层单层端点(还能分别造慢边/失败)。
+    # fullSample 是"全貌入口"(每种监控组件各一次)。两条都在:毫秒级的 ?deps=false 与秒级的裸调 ——
+    # 本档求覆盖度,两个变体都要打到(裸调那条会带 Redis/MySQL/Kafka/外呼,中间件未起时约 8s)。
     "fullSample" = "/fullSample?deps=false,/fullSample"
-    # profile 采样页
+    # profile 采样页;/longTimeTask 固定 sleep ~1.5s
     "profile"    = "/profileData,/profileData2,/longTimeTask"
     # 各仪表盘的数据源读口(有界,不回全量)
     "readout"    = "/statisticJVM,/statisticMeter,/statisticLogs,/statisticInstanceProperties,/statisticTraceAlert"
@@ -122,12 +154,15 @@ $ALL_GROUPS = [ordered]@{
     "topology"   = "/inner/sw/topology"
     "traceq"     = "/inner/sw/trace-recent,/inner/sw/trace-parity,/inner/sw/trace-alert/recent"
     "httpclient" = "/httpclient/collect/status,/httpclient/collect/statistic"
-    # 告警演示页(慢 / 错 / 豁免 / 真实外呼)
+    # 告警演示页(慢 / 错 / 豁免 / 真实外呼);slow?ms=4000 睡 4s
     "alert"      = "/api/trace-alert-demo/ok,/api/trace-alert-demo/error,/api/trace-alert-demo/http500,/api/trace-alert-demo/slow?ms=4000,/api/trace-alert-demo/self-call,/api/trace-alert-demo/httpclient-post?value=x,/api/trace-alert-demo/httpclient-httpbin"
+    # /api/order/1 睡 8.5s;/api/export/report **裸调睡 65s** —— 本档故意含,它是"最坏情况"的下界样本
     "alertslow"  = "/api/order/1,/api/export/report,/api/exists/1,/status/500"
     # hutool override 插件演示(全部回环自调)
     "hutool"     = "/api/hutool-demo/get-query?marker=m,/api/hutool-demo/post-form?value=v&phase=P,/api/hutool-demo/post-json?value=v&phase=P,/api/hutool-demo/post-multipart?value=v,/api/hutool-demo/error-call,/api/hutool-demo/status/500"
     # 依赖面三层(单层端点;/api/deps-demo/all 不进压测:它是演示入口,四层耗时叠加)
+    # mysql?sleepMs=30 造一条明显慢于其余的边(实测约 3s);kafka 两条各约 3.3s(broker 不可达时
+    # 等满 max.block.ms);http?site=httpbin 约 0.7s —— 本档求覆盖度,慢边一并打进去。
     "deps"       = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/redis?op=del,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/kafka?op=consume,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc"
 }
 # **故意排除**的端点(附理由)—— 全量不等于无脑全打,这三类打了会把压测毁掉:
