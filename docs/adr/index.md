@@ -10,6 +10,7 @@
 - **ADR-02：有界本地存储的两种形态** —— 何时读：理解 trace 流键式存储与 JVM/meter/log/profile 追加式环形队列的分叉时。→ `adr-02-two-shapes-for-bounded-local-storage.md`
 - **ADR-03：trace 明细载荷拆为 H2 header + 环形封顶文件** —— 何时读：动 trace 持久层存储形态（payload 落盘、磁盘上限、H2 膨胀）时。→ `adr-03-capped-file-payload-for-trace-details.md`
 - **ADR-04：H2 内存模式作为全量 trace 持久层（含 normal），KeyedLocalStore 降为参照** —— 何时读：动"H2 收不收窄 / 存多少 trace / 内存热层与新持久层关系 / 双源核对"时。→ `adr-04-h2-mem-as-full-trace-persistence-tier.md`
+- **ADR-05：告警 webhook 改用自带池化 HTTP 客户端** —— 何时读：动告警 webhook 投递、`HttpTraceAnomalyListener`、插件 shade 依赖/重定位、或排查"高频错误下本机端口耗尽 / 仪表盘白屏"时。→ `adr-05-alert-webhook-uses-pooled-http-client.md`
 
 规则：
 

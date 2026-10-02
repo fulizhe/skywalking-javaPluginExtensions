@@ -14,3 +14,4 @@
 - **2026-09-30：依赖边聚合的三个取舍（只段内配对 / 双维上限 / 小样本池）** —— 何时读：有人想把异步出口纳进依赖图、想调边数上限、或问"为什么边不落库"时。→ `2026-09-30-edge-aggregator-tradeoffs.md`
 - **2026-10-01：依赖面造数实跑探针（连接失败不产生边 / 组件名按实测值 / 插件 support 范围 / Kafka 三个坑）** —— 何时读：改 `DepsDemoController`、给依赖拓扑加组件、或给 `checks.sh` 写依赖面断言前。→ `2026-10-01-deps-demo-topology-probe.md`
 - **2026-10-01：GitHub Actions 实跑经验（缓存 / matrix / 镜像分发 / paths 白名单 / 排错顺序）** —— 何时读：改 `.github/workflows/*.yml`、CI 跑得慢或莫名变红、想在动手前先判断某个写法能不能用时。→ `2026-10-01-github-actions-ci-pitfalls.md`
+- **2026-10-02：告警 webhook 把本机 TCP 端口池打爆（连带打挂仪表盘）** —— 何时读：仪表盘白屏 / 控制台一片 `ERR_INVALID_ARGUMENT` / `Xxx is not defined`、面板 QPS 明显低于压测脚本报的 RPS、或要改告警 webhook 投递时。→ `2026-10-02-alert-webhook-port-exhaustion.md`

@@ -31,6 +31,16 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- H2 版本与 OAP 9.4 / 实验环境一致;shade 重定位 org.h2 前缀以避免与业务自带 H2 冲突 -->
         <h2.version>2.1.212</h2.version>
+        <!-- 告警 webhook 的 HTTP 客户端。必须自带而不用 HttpURLConnection:
+             后者的连接复用依赖 JDK 隐式的 KeepAliveCache,在 agent 的 PluginClassLoader
+             运行时里实测失效(1 条告警 = 1 条新 TCP 连接,高频错误下打满本机动态端口池,
+             连带把不相关的仪表盘页面打挂)。详见 docs/adr/adr-05-*.md -->
+        <httpclient.version>4.5.13</httpclient.version>
+        <httpcore.version>4.4.13</httpcore.version>
+        <commons.logging.version>1.2</commons.logging.version>
+        <!-- 池化连接数上限。单线程消费 + 顺序发请求,2~4 条足够;定成小值是为了让
+             "连接数有硬上界"成为可验证的性质,而不是依赖对端行为 -->
+        <webhook.pool.max.total>4</webhook.pool.max.total>
     </properties>
 
 	<dependencies>
@@ -45,6 +55,26 @@
 			<groupId>com.h2database</groupId>
 			<artifactId>h2</artifactId>
 			<version>${h2.version}</version>
+		</dependency>
+		<!-- 告警 webhook 专用:显式池化,连接数有硬上界。必须 shade 重定位,
+		     否则会与业务 classpath 里的 httpclient 争版本(agent plugins/ 与应用 classpath 是两个 ClassLoader) -->
+		<dependency>
+			<groupId>org.apache.httpcomponents</groupId>
+			<artifactId>httpclient</artifactId>
+			<version>${httpclient.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.httpcomponents</groupId>
+			<artifactId>httpcore</artifactId>
+			<version>${httpcore.version}</version>
+		</dependency>
+		<!-- commons-logging 是 httpclient 的**运行期**硬依赖(org.apache.http.conn.ssl.AbstractVerifier
+		     静态初始化就要 LogFactory),不是可选传递依赖 —— 漏了会在 HttpClients.custom() 时抛
+		     NoClassDefFoundError。它同时也是最常与业务 classpath 撞车的包,故显式声明并一并 shade。 -->
+		<dependency>
+			<groupId>commons-logging</groupId>
+			<artifactId>commons-logging</artifactId>
+			<version>${commons.logging.version}</version>
 		</dependency>
 	</dependencies>
 
@@ -136,16 +166,29 @@
 							<shadedArtifactAttached>false</shadedArtifactAttached>
 							<!-- 不生成 dependency-reduced pom,避免 reactor 依赖解析混乱 -->
 							<createDependencyReducedPom>false</createDependencyReducedPom>
-							<!-- 只打 H2,不卷其他依赖 -->
+							<!-- 只打 H2 + httpclient/httpcore,不卷其他依赖 -->
 							<artifactSet>
 								<includes>
 									<include>com.h2database:h2</include>
+									<include>org.apache.httpcomponents:httpclient</include>
+									<include>org.apache.httpcomponents:httpcore</include>
+									<include>commons-logging:commons-logging</include>
 								</includes>
 							</artifactSet>
 							<relocations>
 								<relocation>
 									<pattern>org.h2</pattern>
 									<shadedPattern>org.apache.skywalking.apm.dependencies.h2</shadedPattern>
+								</relocation>
+								<!-- httpclient/httpcore 一并重定位:agent plugins/ 与应用 classpath 是两个 ClassLoader,
+								     但 httpclient 常被业务自带(且版本各异),不重定位迟早撞 NoSuchMethodError -->
+								<relocation>
+									<pattern>org.apache.http</pattern>
+									<shadedPattern>org.apache.skywalking.apm.dependencies.http</shadedPattern>
+								</relocation>
+								<relocation>
+									<pattern>org.apache.commons</pattern>
+									<shadedPattern>org.apache.skywalking.apm.dependencies.commons</shadedPattern>
 								</relocation>
 							</relocations>
 							<!-- 合并 META-INF/services(更新 JDBC Driver 服务注册到重定位后的类名) -->
