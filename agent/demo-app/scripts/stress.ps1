@@ -36,18 +36,15 @@
 #      QPS 低先看路径集里混了什么,别急着怀疑插件。
 #
 # ★★★ 硬约束:压测路径集里**含 500 这类状态码**的话,压之前必须先清空 TCP 端口 ★★★
-#   **Tomcat 在 prepareResponse() 里按状态码决定是否关连接** ——
-#   `Http11Processor.statusDropsConnection()`,8 个码:
-#   `{400, 408, 411, 413, 414, 500, 501, 503}`(与 Apache httpd 同一份清单)。
-#   **这是协议层行为,与错误派发无关** —— 不抛异常、正常 return 也照关。
-#   源码(tomcat 9.0.83):
-#   https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L190-L199
+#   **Tomcat 会按响应状态码强制发 `Connection: close`** —— 协议层行为,与错误派发无关
+#   (不抛异常、正常 return 也照关)。受影响的 8 个状态码、源码定位与 permalink 见:
+#       docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md  §2.2
 #   于是**每个这类响应都泄漏一条 TCP 连接**。而 TIME_WAIT 在 Windows 上挂 120 秒、
 #   本机动态端口池只有 13,977 个 → 临界速率 `13977/120 ≈ 116 条/秒`,超过就打满。
 #   打满后**本机任何**新建连接都失败( Winsock errno 10022 / "Invalid argument: connect"),
 #   表现为**仪表盘页面白屏**(js/css 加载不出来,报 `SRange is not defined` 之类)——
 #   那不是插件坏了,是端口池被压测自己打爆了。
-#   ⚠️ 404 **不在**清单里(语义上"资源不存在"说明请求本身是好的,连接可复用),
+#   ⚠️ 404 不在受影响清单里(语义上"资源不存在"说明请求本身是好的,连接可复用),
 #      所以返回 404 的端点(如 /api/exists/1)不会泄漏。
 #
 #   实测(同机、16 线程、180 秒,只换路径集):
@@ -401,9 +398,8 @@ if ($errorPaths.Count -gt 0) {
     if ($tw -ge 3000) {
         Write-Host ""
         Write-Host "[!!] TCP 端口池水位已高: TIME_WAIT=$tw (池 13,977)。"
-        Write-Host "     本档含返回 500 这类状态码的端点,Tomcat 对其强制发 \`Connection: close\`(协议层行为,"
-        Write-Host "     见 Http11Processor.statusDropsConnection)→ 每个这样的响应泄漏一条连接。"
-        Write-Host "     **打满后本机任何新建连接都会失败**,仪表盘会白屏(ERR_INVALID_ARGUMENT)。"
+        Write-Host "     本档含返回 500 这类状态码的端点,Tomcat 对其强制发 \`Connection: close\`(协议层行为)"
+        Write-Host "     → 每个这样的响应泄漏一条连接。**打满后本机任何新建连接都会失败**,仪表盘会白屏(ERR_INVALID_ARGUMENT)。"
         Write-Host "     强烈建议先清空再跑(需管理员):"
         Write-Host "         netsh int tcp reset"
         Write-Host "     或改用不含这类端点的档: -MaxRps / -NormalOnly / -WithDeps"
