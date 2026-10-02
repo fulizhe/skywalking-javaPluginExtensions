@@ -24,7 +24,9 @@ import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
  * —— {@code Http11Processor.statusDropsConnection()}，8 个码
  * {@code {400,408,411,413,414,500,501,503}}（与 Apache httpd 同一份清单；<b>协议层行为，
  * 与错误派发无关</b>，404 不在其中）。那是<b>业务端</b>的性质，与本类无关。
- * 源码定位见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md} §2.2。
+ * 源码（tomcat 9.0.83）：
+ * <a href="https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L190-L199">Http11Processor.java</a>
+ * 详见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md} §2.2。
  * </p>
  * <p>
  * <b>但本类自身确实有个该修的问题</b>：每条告警都 {@code disconnect()}，等于每次都声明

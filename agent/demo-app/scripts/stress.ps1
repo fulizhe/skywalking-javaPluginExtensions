@@ -40,6 +40,8 @@
 #   `Http11Processor.statusDropsConnection()`,8 个码:
 #   `{400, 408, 411, 413, 414, 500, 501, 503}`(与 Apache httpd 同一份清单)。
 #   **这是协议层行为,与错误派发无关** —— 不抛异常、正常 return 也照关。
+#   源码(tomcat 9.0.83):
+#   https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L190-L199
 #   于是**每个这类响应都泄漏一条 TCP 连接**。而 TIME_WAIT 在 Windows 上挂 120 秒、
 #   本机动态端口池只有 13,977 个 → 临界速率 `13977/120 ≈ 116 条/秒`,超过就打满。
 #   打满后**本机任何**新建连接都失败( Winsock errno 10022 / "Invalid argument: connect"),

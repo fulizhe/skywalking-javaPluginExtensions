@@ -102,28 +102,34 @@ TIME_WAIT 每条在 Windows 上挂 **120 秒**，所以新建速率超过
 ### 2.2 源码定位
 
 实测用的 tomcat-embed-core 版本是 **9.0.83**（Spring Boot 2.7.18 内嵌）。
-判据在 `Http11Processor`：
+判据在 `Http11Processor` 的 [`statusDropsConnection()`](https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L190-L199)：
 
 ```java
-// org/apache/coyote/http11/Http11Processor.java:195-204
+// org/apache/coyote/http11/Http11Processor.java:194-199（Tomcat 9.0.83）
 /**
- * Determine if we must drop the connection because of the HTTP status
- * code.  Use the same list of codes as Apache/httpd.
+ * Determine if we must drop the connection because of the HTTP status code. Use the same list of codes as
+ * Apache/httpd.
  */
 private static boolean statusDropsConnection(int status) {
-    return status == 400 /* SC_BAD_REQUEST */           || status == 408 /* SC_REQUEST_TIMEOUT */ ||
-           status == 411 /* SC_LENGTH_REQUIRED */       || status == 413 /* SC_REQUEST_ENTITY_TOO_LARGE */ ||
-           status == 414 /* SC_REQUEST_URI_TOO_LONG */  || status == 500 /* SC_INTERNAL_SERVER_ERROR */ ||
-           status == 501 /* SC_NOT_IMPLEMENTED */      || status == 503 /* SC_SERVICE_UNAVAILABLE */;
+    return status == 400 /* SC_BAD_REQUEST */ || status == 408 /* SC_REQUEST_TIMEOUT */ ||
+            status == 411 /* SC_LENGTH_REQUIRED */ || status == 413 /* SC_REQUEST_ENTITY_TOO_LARGE */ ||
+            status == 414 /* SC_REQUEST_URI_TOO_LONG */ || status == 500 /* SC_INTERNAL_SERVER_ERROR */ ||
+            status == 503 /* SC_SERVICE_UNAVAILABLE */ || status == 501 /* SC_NOT_IMPLEMENTED */;
 }
 ```
 
-调用点在 `prepareResponse()` 内、写响应头之前：
+主调用点在 `prepareResponse()` 内、写响应头之前 ——
+[`L989-996`](https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L989-L996)：
 
 ```java
-// Http11Processor.java:957
+// Http11Processor.java:989
 if (keepAlive && statusDropsConnection(statusCode)) {
-    keepAlive = false;          // → :960-965 写入 Connection: close
+    keepAlive = false;
+}
+if (!keepAlive) {
+    if (!connectionClosePresent) {                              // ← L994
+        headers.addValue(Constants.CONNECTION).setString(Constants.CLOSE);
+    }
 }
 ```
 
@@ -131,8 +137,11 @@ if (keepAlive && statusDropsConnection(statusCode)) {
 | --- | --- |
 | 码集合 | **400, 408, 411, 413, 414, 500, 501, 503**（8 个） |
 | 清单来源 | 与 **Apache httpd 同一份**（注释原文）—— 这是它反常的原因 |
-| 版本核对 | 读的是 9.0.52 sources，**行为经 9.0.83 运行时实测交叉验证** |
+| 版本核对 | 逐行读的是 **9.0.83** tag 源码；**行为经本机 9.0.83 运行时实测交叉验证**（不是"读 A 版、测 B 版"） |
 | 验证 | 35 个状态码扫描 + 补测 411/414 = **8/8 吻合**；`-AllEndpoints` 60 条逐条核对 = **0 处不一致** |
+
+> 行号会随 Tomcat 版本漂移（9.0.52 上同一段是 L195-204 / L957）。上面给的是 **9.0.83** 的
+> permalink，换版本请按方法名 `statusDropsConnection` 搜，别直接沿用行号。
 
 **三个推论**：
 
@@ -141,9 +150,12 @@ if (keepAlive && statusDropsConnection(statusCode)) {
    响应体仍是 controller 自己的 Map（不是 Spring Boot 错误 JSON），**照样关连接**。
 2. **404 为什么不关** —— 它根本不在 httpd 那份清单里。语义上"资源不存在"意味着
    **请求本身是好的**，连接可以继续复用。
-3. **应用层为什么盖不住** —— `Http11Processor.java:962` 是
-   `if (!connectionClosePresent)`，Tomcat 在 `prepareResponse()` 里**自己 `headers.addValue()`**，
+3. **应用层为什么盖不住** —— [`L994`](https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L994)
+   是 `if (!connectionClosePresent)`，Tomcat 在 `prepareResponse()` 里**自己 `headers.addValue()`**，
    应用层预先设的头挡不住（实测响应里两个 `Connection` 头并存，按 HTTP 语义 `close` 胜出）。
+
+**次要调用点**：[`service()` L396-398`](https://github.com/apache/tomcat/blob/9.0.83/java/org/apache/coyote/http11/Http11Processor.java#L396-L398)
+—— 请求处理抛 `ServletException` 时的兜底 `setErrorState(ErrorState.CLOSE_CLEAN, null)`。
 
 **两个"看着像错误但不是"的**（算比例时容易算错）：
 
