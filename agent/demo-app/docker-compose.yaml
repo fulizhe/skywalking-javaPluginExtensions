@@ -105,6 +105,17 @@ services:
       timeout: 5s
       retries: 30
       start_period: 90s
+    # ★ 长期跑必须有日志轮转:docker 的 json-file **默认无上限**,不加这段,
+    #   跑几天就把磁盘写满(日志在磁盘上,不在 mem_limit 里,OOM 也拦不住)。
+    #   stress / stress-slow 两个压测容器各自也有同款限制(它们的量级更大,各 10m×5)。
+    #   这里给到 50m×5 = 250MB:比压测容器宽,是因为**被观察对象就是它** ——
+    #   agent 日志(skywalking-agent.log / skywalking-api.log)与异常现场都在这里,
+    #   诊断长时间跑出的问题时那几行日志往往就是唯一线索,轮转太快会被冲掉。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---- deps profile:依赖拓扑演示用的三层中间件(默认不起,见文件头) ----
 

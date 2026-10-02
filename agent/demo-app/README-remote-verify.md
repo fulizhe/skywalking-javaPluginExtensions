@@ -31,12 +31,17 @@ graph LR
 | --- | --- | --- |
 | 只看效果 | `docker compose up --build -d demo-app` | 应用 + H2 控制台 |
 | 压测(指标) | `docker compose --profile stress up --build -d` | 上面 + `stress` 容器(无限压测) |
+| **长期跑(数天以上)** | 同上,但**另见 §5.1** | 同上;观测项是趋势与重启次数,不是峰值 |
 | 看依赖面分层 | `docker compose --profile deps up --build -d` | 应用 + redis/mysql/kafka |
 | **压测 + 依赖面** | `docker compose --profile stress --profile deps up --build -d` | 全套;**并按 §4 换掉 `loadtest.paths`** |
 | 跑断言回路 | `bash verify/run.sh --scenario logfile-reporter` | 另一条路(容器化,见 §6) |
 
 ⚠️ `stress` 与 `deps` 是**独立** profile:只起 `stress` 时 redis/mysql/kafka **并不在**,
 而 `demo-app` 的 `DEPS_*` 指向容器服务名 → 解析失败。这不是故障,见 §7 的坑 2/3。
+
+⚠️ **"压测"和"长期跑"不是同一件事**:`stress` 档本身是无限循环(`durationSec=-1`)、
+天生适合长期跑,但 §3 的观测项是给"跑一遍看峰值"用的。长期跑要盯的是
+**重启次数与内存趋势**,且 `docker compose ps` 在这里会骗你 —— 见 **§5.1**。
 
 ---
 
@@ -112,7 +117,14 @@ docker compose logs -f stress        # 每 10s 一行 [progress]
 | --- | --- | --- |
 | 吞吐 | req/s | 掉了先看路径集里是不是混了慢端点(坑 4) |
 | `plugin=` | `rowsUpserted` / `lateDropped` / `sampleOverflow` / `persistErrors` / `aggregateErrors` | **只看 `persistErrors` / `aggregateErrors` / `endpointOverflow` 是否恒 0**;`sampleOverflow` 增长是正常的(蓄水池抽样) |
-| `heap=` | 插件自身堆 | 是否在 GC 回落区间震荡;持续攀升 = 泄漏 |
+| `heap=` | ⚠️ **压测器自己的堆,不是应用的** —— 见下 | 别拿它判断插件泄漏 |
+
+> ⚠️ **`heap=` 不是插件的堆。** 它取自 `HttpLoadTest` 进程内的 `Runtime.getRuntime()`
+> (`HttpLoadTest.java:215`),而 `HttpLoadTest` 跑在 **stress 容器**的 surefire fork 里 ——
+> 那是**压测端**的内存,和插件、应用**完全无关**。拿它判断"插件是否泄漏内存"会得出
+> 相反的结论(压测器平稳、插件却在涨,正好被这个数字掩盖)。
+>
+> **要看内存泄漏,盯 demo-app 容器**,见 §5。
 
 已知的资源约束(容器里写死了,别改):`MAVEN_OPTS=-Xmx256m` + `-DargLine=-Xmx512m` + `mem_limit: 2g`。
 历史事故:maven JVM 与 surefire fork 都不带 `-Xmx`,在 cgroup 下被 OOM kill 后 `restart` 成循环
@@ -154,6 +166,48 @@ docker compose --profile stress --profile deps up --build -d
 | 告警事件 | `/dashboards/dashboard.html?p=alert` | 清空:`POST /inner/sw/trace-alert/clear`(GET 会 405,而 405 本身又变成一条新 ERROR 告警) |
 | 应用日志 | `docker compose logs demo-app` | |
 | agent 日志 | `docker compose exec demo-app tail -n 50 /opt/skywalking-agent/logs/skywalking-api.log` | 插件加载、告警判定 |
+
+### 5.1 长期跑（数天以上）与"跑一遍"的观测项不同
+
+跑一遍看的是**峰值**；长期跑看的是**趋势与异常**，而 compose 默认配置里有两处会让
+"看起来一切正常、实际早已在崩"——所以下面前两项不是可选项。
+
+| 观测项 | 命令 | 判据 |
+| --- | --- | --- |
+| **① demo-app 重启次数** | `docker inspect --format '{{.RestartCount}}' $(docker compose ps -q demo-app)` | **必须恒 0** |
+| **② demo-app 内存** | `docker stats --no-stream demo-app` | 在 GC 回落区间震荡 = 正常；**单调爬向 `mem_limit`(1g) = 泄漏** |
+| ③ 插件内部计数 | `curl -s http://127.0.0.1:9600/inner/sw/metrics \| jq .counters` | `persistErrors` / `aggregateErrors` / `endpointOverflow` / `lateDropped` **恒 0**；`sampleOverflow` 涨是正常的(蓄水池抽样) |
+| ④ 吞吐 | `docker compose logs stress \| grep progress \| tail` | `rps` 应平稳；**缓慢单调下滑 = 应用侧退化**，比"低于某个数"更值得警惕 |
+| ⑤ 指标连续性 | `/dashboards/slow-topn.html` 的 `bucketCount` 列 | 出现**断崖** = 那一分钟重启过(见下"重启会掩盖一切") |
+| ⑥ 磁盘 | `docker system df` | demo-app 日志 50m×5、stress 各 10m×5，都已封顶；maven 缓存卷会随首次构建长几 GB |
+
+**① 为什么排第一：`restart: unless-stopped` 会掩盖一切。** 容器被 OOM kill 后会自动起来，
+`docker compose ps` 显示 `Up`、页面照常能开——但 H2 影子库是 `jdbc:h2:mem:` **纯内存、
+进程退出即丢**（ADR-05 已定它是终态，不是缺陷）。于是重启一次：
+
+- 指标**归零**，曲线出现"归零后重新爬升"的假象，看起来像 GC 正常回收；
+- 泄漏被**清零**，正好掩盖"泄漏到 OOM"这个事实本身。
+
+所以**别只看 `docker compose ps`**，那个字段在这里是骗人的。
+
+**② 用 `docker stats` 而不是 `[progress]` 的 `heap=`**：后者是压测器的堆（见 §3 警告）。
+
+**无人值守**（跑几天没人盯日志 = 白跑）——挂一条 cron 把异常条件变成非零退出码 / 告警：
+
+```bash
+# 每 10 分钟巡检一次;任一项不达标就退出非 0,交给你的监控去告警
+R=$(docker inspect --format '{{.RestartCount}}' $(docker compose ps -q demo-app))
+[ "$R" = "0" ] || { echo "demo-app 重启了 $R 次(被 OOM kill?)"; exit 1; }
+M=$(docker stats --no-stream --format '{{.MemPerc}}' demo-app | tr -d '%')
+[ "$M" -lt 80 ] || { echo "demo-app 内存 $M%,接近 mem_limit 1g"; exit 1; }
+C=$(curl -s http://127.0.0.1:9600/inner/sw/metrics \
+     | jq '[.counters.persistErrors, .counters.aggregateErrors, .counters.endpointOverflow] | add')
+[ "$C" = "0" ] || { echo "插件计数非 0: $C"; exit 1; }
+echo "OK $(date -Is)"
+```
+
+⚠️ 这段**没有**校验 `lateDropped`：它是否增长取决于滚动间隔与到达时序，作为定时任务
+容易误报。要看它就人工翻日志。
 
 ---
 
