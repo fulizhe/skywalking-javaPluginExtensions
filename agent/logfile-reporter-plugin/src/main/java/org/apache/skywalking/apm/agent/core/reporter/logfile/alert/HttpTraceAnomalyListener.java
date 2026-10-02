@@ -20,8 +20,11 @@ import org.apache.skywalking.apm.dependencies.com.google.gson.Gson;
  * <b>关于"连接数"这件事（2026-10-02 排查结论，勿再重复追查）</b>：
  * 曾怀疑本类每条告警新建一条连接、打满本机端口池，据此换过自带池化 HTTP 客户端 ——
  * 那次判断是错的（测量工具污染 + 探针打在 500 端点上自己 churn），<b>已回退</b>。
- * 真因是 <b>Tomcat 对 4xx/5xx 响应（404 除外）强制发 {@code Connection: close}</b>，
- * 与本类无关；详见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md}。
+ * 真因是 <b>Tomcat 在 {@code prepareResponse()} 里按状态码强制发 {@code Connection: close}</b>
+ * —— {@code Http11Processor.statusDropsConnection()}，8 个码
+ * {@code {400,408,411,413,414,500,501,503}}（与 Apache httpd 同一份清单；<b>协议层行为，
+ * 与错误派发无关</b>，404 不在其中）。那是<b>业务端</b>的性质，与本类无关。
+ * 源码定位见 {@code docs/notes/2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md} §2.2。
  * </p>
  * <p>
  * <b>但本类自身确实有个该修的问题</b>：每条告警都 {@code disconnect()}，等于每次都声明
