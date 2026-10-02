@@ -148,6 +148,8 @@
           <code>endpoint / 分位 / 计数</code>，<b>没有 layer 字段</b>（Cache/Database/MQ 那种）。
           所以族 = 取路径前两段（如 <code>/api/deps-demo/*</code>），它<b>回答不了"哪一层慢"</b> ——
           层归类要看<a href="topology.html">依赖拓扑</a>。</li>
+    </ul>
+  </section>
 
   <section class="card">
     <h3 class="card-h" id="mainTitle">按前缀族看（端点很多时先收敛）</h3>

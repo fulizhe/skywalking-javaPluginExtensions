@@ -313,5 +313,24 @@ ok('无命中时给空态而不是空白', nodes.empty.innerHTML.indexOf('没有
 ok('无命中时不渲染任何族行', nodes.familyRows.innerHTML === '');
 M.setSearch('');
 
+console.log('== HTML 结构（演示模式靠它才不吞主表）==');
+// 2026-10-02 补的回归：<ul>/<section> 漏闭合时，<section class="card"> 会变成
+// .presenter-collapse 的**后代**，演示模式的 `max-height:28px; overflow:hidden`
+// 把主榜整块裁掉 —— 页面上只剩结论卡 + 一片空白。
+// 浏览器会自动纠错，所以控制台无报错、`node --check` 也过，只有演示模式肉眼看得见。
+const RAW = fs.readFileSync(PAGE, 'utf8');
+const BODY = RAW.slice(RAW.indexOf('<body>'), RAW.indexOf('<script>'));
+['ul', 'section', 'li', 'table'].forEach((t) => {
+  const o = (BODY.match(new RegExp('<' + t + '[\\s>]', 'g')) || []).length;
+  const c = (BODY.match(new RegExp('</' + t + '>', 'g')) || []).length;
+  ok('<' + t + '> 开闭配平（' + o + ' / ' + c + '）', o === c);
+});
+const cavAt = BODY.indexOf('class="caveats presenter-collapse"');
+const cavEnd = BODY.indexOf('</section>', cavAt);
+const cardAt = BODY.indexOf('<section class="card">');
+ok('caveats 先闭合、主榜是它的兄弟（不是后代）',
+   cavAt >= 0 && cavEnd > cavAt && cardAt > cavEnd,
+   'caveats@' + cavAt + ' 闭@' + cavEnd + ' card@' + cardAt);
+
 console.log(fails ? '\n断言失败 ' + fails + ' 条' : '\n全部通过');
 process.exit(fails ? 1 : 0);
