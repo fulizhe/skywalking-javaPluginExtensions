@@ -1,0 +1,162 @@
+name: Package plugins
+
+# 打包三个活跃插件的 jar。一个 build 承担两种角色:
+#   - 干跑(push / PR):jar 存成 workflow artifact 供下载自测,不发布任何东西
+#   - 发布(tag / release / 手动):jar 挂到该 tag 的 GitHub Release
+#
+# 触发面为什么这么选:
+#   tag 才是本仓的发布点 —— 1.0.0 / 1.0.0-maintN 都是 annotated tag 且约定永不移动
+#   (docs/repo/version-lines.md)。"推了 master"无法区分一次提交和一次发版,而往
+#   Release 挂资产不可撤销,所以发布只挂在人类显式打 tag 这件事上。
+#
+#   发布面同时挂 push:tags 与 release:published,因为这两个事件在 GitHub 上不对称:
+#     - git push 一个 tag              → 有 push 事件,**没有** release 事件
+#     - UI 上建 tag / 建 Release        → 有 release 事件,**没有** push 事件
+#     - UI 上用"已存在的 tag"建 Release → release 事件也可能不发(actions/runner#3532)
+#   两个都挂 + attach 里按 tag 名幂等上传,才能"怎么发都跑"。
+#
+#   paths 白名单对 tag push 不生效(GitHub 文档原话:"Path filters are not evaluated
+#   for pushes of tags"),所以同一个 push 上写 paths 与 tags 互不干扰。
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+      # 带自身路径:否则改这个 workflow 永远不触发它自己(同 build-and-test.yml)
+      - '.github/workflows/package.yml'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+      - '.github/workflows/package.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag;留空 = 用本次 run 的 ref'
+        required: false
+        type: string
+
+run-name: package ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || github.ref_name }}
+
+env:
+  # 三种触发面的 tag 取值:手动输入 > release 事件的 tag_name > 当前 ref。
+  TAG: ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || github.ref_name }}
+  # 只打这三个活跃插件(docs/repo/module-status.md)。把归档模块一起拖进来,
+  # 等于让发布链路 hostage 于它们在 JDK 17 下的编译状态。列表与 build-and-test.yml 一致。
+  MODULES: logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin
+
+permissions: {}   # 默认全关,每个 job 单独声明最小权限
+
+jobs:
+  build:
+    name: build jars
+    # 钉住 24.04:理由同另两个 workflow(ubuntu-latest 2026-10-19 迁 Ubuntu 26)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          # 发布场景按 tag 构建(手动跑时选中的是分支,要发的却是 tag 上的代码);
+          # PR 场景 ref_name 形如 "123/merge",不是合法 ref,退回默认 ref。
+          ref: ${{ inputs.tag || startsWith(github.ref, 'refs/tags/') && env.TAG || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # package 会跑单元测试 —— 也就是说发布路径自带一道测试门禁,
+      # 不必去 dependsOn build-and-test.yml 的结果(跨 workflow 没法 needs)。
+      - name: Build and package active plugins (release 8 bytecode)
+        working-directory: ./agent
+        run: mvn -B package -pl "$MODULES" -am
+
+      # 只从这三个模块的 target 里取,maxdepth 1 —— 不递归扫 agent/**,
+      # 免得哪天某个归档模块残留的 target 混进发布资产。
+      # jar 名里带的是 SkyWalking agent 版本(9.4.0,来自 pom 的 finalName),
+      # 不是插件版本 —— 它是用户判断"能不能装进我的 agent"的唯一依据,别改名。
+      - name: Collect jars
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for m in ${MODULES//,/ }; do
+            find "agent/$m/target" -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' \
+              -exec cp {} dist/ \;
+          done
+          ls -l dist/
+          # 收集不到就是 -pl 列表写错或构建没产出。让这一步红,而不是挂一个空 Release。
+          test -n "$(ls -A dist)" || { echo "::error::dist 为空,检查 MODULES 列表"; exit 1; }
+
+      - name: Upload jars
+        uses: actions/upload-artifact@v7
+        with:
+          name: plugin-jars
+          path: dist/*.jar
+          if-no-files-found: error
+
+  attach:
+    name: attach to release ${{ env.TAG }}
+    needs: build
+    # 只在发布场景跑。PR / push to master 时,build 产出的 artifact 就是全部产物。
+    if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # 建/改 Release 与上传资产
+    steps:
+      # 用 API 校验 tag 真的存在:手动跑时若没填 tag 而选的是分支,
+      # gh 会拿分支名当 release 名,结果是一个挂在分支上的假 release。
+      # GITHUB_REPOSITORY / TAG 走 env 传,不内插进脚本文本。
+      - name: Validate tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag '$TAG' 不存在。本 workflow 按 tag 发布;手动跑请填一个已存在的 tag 名。"
+            exit 1
+          fi
+          echo "发布目标 tag: $TAG"
+
+      - name: Download jars
+        uses: actions/download-artifact@v8
+        with:
+          name: plugin-jars
+          path: dist
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./*.jar > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # tag push 时 Release 还不存在 -> create;UI 上已经发过 Release -> upload。
+      # --clobber 让重跑幂等(同名资产覆盖),不会因为"上次跑过一半"卡住。
+      - name: Attach to release (create if missing)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.jar dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" dist/*.jar dist/SHA256SUMS.txt \
+              --title "$TAG" --generate-notes
+          fi
