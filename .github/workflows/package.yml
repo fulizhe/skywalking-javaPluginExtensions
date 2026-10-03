@@ -125,9 +125,14 @@ jobs:
       # 用 API 校验 tag 真的存在:手动跑时若没填 tag 而选的是分支,
       # gh 会拿分支名当 release 名,结果是一个挂在分支上的假 release。
       # GITHUB_REPOSITORY / TAG 走 env 传,不内插进脚本文本。
+      # GH_REPO 不能省:这个 job 故意不 checkout(不想为拿资产再下一份源码),
+      # 于是 workspace 里不是 git 仓库 —— gh 依次靠 --repo / GH_REPO / git remote
+      # 推断目标仓库,前两个都没有时 gh release 会直接失败。Validate tag 之所以
+      # 能过,是因为它把 repos/... 路径写进了参数里,不需要推断。
       - name: Validate tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
@@ -154,6 +159,7 @@ jobs:
       - name: Attach to release (create if missing)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}   # 同上:没有它 gh 不知道往哪个仓库发
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
