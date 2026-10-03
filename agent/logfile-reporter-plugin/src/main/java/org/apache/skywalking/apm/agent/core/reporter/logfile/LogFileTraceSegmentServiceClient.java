@@ -421,11 +421,16 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 *       这是插件对被监控应用施加的 CPU/内存开销的<b>上界证据</b>。</li>
 	 *   <li>{@code h2} / {@code backlog} / {@code capped} — 存储侧：行数水位、未提交积压、
 	 *       环形文件写指针与压缩率（{@link H2TraceSegmentStorage#selfStatSnapshot()} 产出）。</li>
+	 *   <li>{@code hotLayer} — 进程内内存热层（{@code KeyedLocalStore}）：存活 trace 数、
+	 *       段数、span 数、覆盖的时间段。<b>与 {@code h2} 是同一批数据的两个副本</b>，
+	 *       容量小得多、窗口短得多，口径与差异见 {@link #hotLayerSnapshot}。</li>
 	 *   <li>{@code jvmHeap} — JVM 堆（精确值）。H2 自身字节数 H2 2.x 不提供读口，
 	 *       只能给"行数 × 实测单行成本"的估算，口径写在页面上。</li>
 	 * </ol>
 	 *
-	 * <p>全链路<b>不执行 SQL、不加存储锁、不做文件 IO</b>：读口按 10s 轮询，
+	 * <p>除 {@code hotLayer} 外全链路<b>不执行 SQL、不加存储锁、不做文件 IO</b>；
+	 * {@code hotLayer} 例外——它要读内存热层的快照（一次浅拷贝 + 一次遍历，见该方法说明），
+	 * 但仍然<b>不碰 SQL、不碰文件</b>，且量级远小于遍历 H2。读口按 10s 轮询，
 	 * 它自己必须比它要观测的东西更轻。返回 JDK 原生 Map，不暴露 Agent 自定义类型。</p>
 	 */
 	public Map<String, Object> getSelfStat() {
@@ -481,7 +486,108 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		jvmHeap.put("maxBytes", Long.valueOf(heapMax));
 		jvmHeap.put("usedRatio", Double.valueOf(heapMax <= 0L ? 0d : (double) heapUsed / heapMax));
 		result.put("jvmHeap", jvmHeap);
+		result.put("hotLayer", hotLayerSnapshot(traceStore == null ? null : traceStore.snapshot(), maxLogSize));
 		return result;
+	}
+
+	/**
+	 * 内存热层（{@code KeyedLocalStore traceStore}）的统计快照，供 {@code /inner/sw/self-stat} 展示。
+	 *
+	 * <p><b>为什么是「读时派生」而不是像 {@code h2} 那样维护增量水位</b>：同一个需求
+	 * （"这批数据覆盖了多长时间"），两层实现方式必须相反，原因是成本不对称——
+	 * <ul>
+	 *   <li>H2 有 10 万行且 {@code start_time} 无索引，取最老时间要全表扫
+	 *       （实测中位 23ms / p90 44ms），只能在写路径旁路维护增量水位 + 定期主键 seek。</li>
+	 *   <li>热层最多 {@code maxLogSize}（默认 1000）条 trace，数据本来就在堆里，
+	 *       遍历一次的代价（实测约 1 万次 hash 查找、亚毫秒级）远小于一次全表扫。</li>
+	 * </ul>
+	 * 于是这一层<b>不引入任何新增状态</b>，也<b>不需要给 {@code KeyedLocalStore} 加任何方法</b>
+	 * （{@code snapshot()} 已是它的全部公开读口）。更关键的是：<b>快照即真相</b>，
+	 * 结构上不可能出现 H2 侧那个"增量 min 不带删除补偿、残留指向已淘汰行"的 staleness bug。
+	 *
+	 * <p><b>口径</b>：时间取所有存活段、所有 span 的 {@code startTime} 的 min/max。
+	 * {@code Log} 本身<b>没有段级时间戳</b>（见 {@link Log#toMap()}，时间在
+	 * {@code spans[i].startTime}），所以这一层给的是"有 span 活动的时间范围"，
+	 * 与 H2 的"段起始时间范围"不是同一个口径，页面上已分别写明。
+	 *
+	 * <p><b>粗略估算</b>：{@code estimatedBytes} 是 {@code 段数 × 800B + span 数 × 200B}
+	 * 的<b>量级</b>估算，不是实测字节数（{@code LinkedHashMap} 节点、{@code HashMap} table
+	 * 与字符串的实际开销随字段长度浮动，精确值只能带外 {@code jmap -histo:live}）。
+	 * 精确值在页内 {@code jvmHeap} 那一栏，两者不要混读。
+	 *
+	 * @param snapshot {@code KeyedLocalStore#snapshot()} 的结果；{@code null} 表示热层未初始化
+	 * @param maxTraces 容量上限（{@code max_log_size}），用于页面显示"离淘汰还有多远"
+	 */
+	static Map<String, Object> hotLayerSnapshot(final Map<String, Map<String, Object>> snapshot, final int maxTraces) {
+		final Map<String, Object> m = new LinkedHashMap<String, Object>(8);
+		m.put("maxTraces", Integer.valueOf(maxTraces));
+		if (snapshot == null) {
+			m.put("enabled", Boolean.FALSE);
+			m.put("traces", Integer.valueOf(0));
+			m.put("segments", Integer.valueOf(0));
+			m.put("spans", Integer.valueOf(0));
+			m.put("oldestSpanTimeMs", Long.valueOf(-1L));
+			m.put("newestSpanTimeMs", Long.valueOf(-1L));
+			m.put("coveredSpanMs", Long.valueOf(-1L));
+			m.put("estimatedBytes", Long.valueOf(0L));
+			return m;
+		}
+		m.put("enabled", Boolean.TRUE);
+
+		long segments = 0L;
+		long spans = 0L;
+		long oldest = Long.MAX_VALUE;
+		long newest = Long.MIN_VALUE;
+		for (final Map<String, Object> entry : snapshot.values()) {
+			if (entry == null) {
+				continue;
+			}
+			final Object logsObj = entry.get("logs");
+			if (!(logsObj instanceof List)) {
+				continue;
+			}
+			for (final Object logObj : (List<?>) logsObj) {
+				if (!(logObj instanceof Map)) {
+					continue;
+				}
+				segments++;
+				final Object spansObj = ((Map<?, ?>) logObj).get("spans");
+				if (!(spansObj instanceof List)) {
+					continue;
+				}
+				for (final Object spanObj : (List<?>) spansObj) {
+					if (!(spanObj instanceof Map)) {
+						continue;
+					}
+					spans++;
+					// 时间只认 Number 且 > 0：0 与负值都不是有效 epoch ms（缺字段也会落到这里）
+					final Object startTime = ((Map<?, ?>) spanObj).get("startTime");
+					if (!(startTime instanceof Number)) {
+						continue;
+					}
+					final long t = ((Number) startTime).longValue();
+					if (t <= 0L) {
+						continue;
+					}
+					if (t < oldest) {
+						oldest = t;
+					}
+					if (t > newest) {
+						newest = t;
+					}
+				}
+			}
+		}
+
+		final boolean hasTime = oldest != Long.MAX_VALUE && newest != Long.MIN_VALUE;
+		m.put("traces", Integer.valueOf(snapshot.size()));
+		m.put("segments", Long.valueOf(segments));
+		m.put("spans", Long.valueOf(spans));
+		m.put("oldestSpanTimeMs", Long.valueOf(hasTime ? oldest : -1L));
+		m.put("newestSpanTimeMs", Long.valueOf(hasTime ? newest : -1L));
+		m.put("coveredSpanMs", Long.valueOf(hasTime ? newest - oldest : -1L));
+		m.put("estimatedBytes", Long.valueOf(segments * 800L + spans * 200L));
+		return m;
 	}
 
 	/** 存储层未启用时的占位段：形状与真实段一致，读口不必判空（仍用 {@code enabled=false} 表明未启用）。 */

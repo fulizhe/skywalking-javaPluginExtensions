@@ -88,6 +88,7 @@ module.exports = {
   renderVerdict: renderVerdict, renderChips: renderChips, renderCarrier: renderCarrier,
   renderPipeline: renderPipeline, renderH2: renderH2, renderBacklog: renderBacklog,
   renderCapped: renderCapped, renderHeap: renderHeap, renderCrossCheck: renderCrossCheck,
+  renderHotLayer: renderHotLayer,
   load: load
 };
 `, 'utf8');
@@ -126,7 +127,30 @@ const LIVE = {
                      avgBytesPerWriteBefore: 660, avgBytesPerWriteAfter: 99,
                      avgMillisPerWrite: 0.0015, avgMillisPerRead: 1.7, totalWriteMillis: 41000 } },
   jvmHeap: { usedBytes: 353374208, committedBytes: 996432232, maxBytes: 7570000000, usedRatio: 0.0467 },
+  // 热层已打满 1000/1000 → FIFO 正在淘汰；窗口 22.5 min 远短于 H2 的 48 min
+  hotLayer: { enabled: true, maxTraces: 1000, traces: 1000,
+              segments: 2381, spans: 10442,
+              oldestSpanTimeMs: NOW - 25 * 60000, newestSpanTimeMs: NOW - 2.5 * 60000,
+              coveredSpanMs: 22.5 * 60000, estimatedBytes: 2381 * 800 + 10442 * 200 },
 };
+
+/** 热层刚启动、还没攒够：窗口与 H2 同量级。 */
+const HOT_WIDE = JSON.parse(JSON.stringify(LIVE));
+HOT_WIDE.hotLayer = { enabled: true, maxTraces: 1000, traces: 12,
+                      segments: 15, spans: 61,
+                      oldestSpanTimeMs: NOW - 50 * 60000, newestSpanTimeMs: NOW - 2 * 60000,
+                      coveredSpanMs: 48 * 60000, estimatedBytes: 15 * 800 + 61 * 200 };
+
+/** 热层尚无 span：时间三端 -1，估算 0。 */
+const HOT_EMPTY = JSON.parse(JSON.stringify(LIVE));
+HOT_EMPTY.hotLayer = { enabled: true, maxTraces: 1000, traces: 0, segments: 0, spans: 0,
+                       oldestSpanTimeMs: -1, newestSpanTimeMs: -1,
+                       coveredSpanMs: -1, estimatedBytes: 0 };
+
+/** 热层未初始化。 */
+const HOT_OFF = JSON.parse(JSON.stringify(LIVE));
+HOT_OFF.hotLayer = { enabled: false, maxTraces: 1000, traces: 0, segments: 0, spans: 0,
+                     oldestSpanTimeMs: -1, newestSpanTimeMs: -1, coveredSpanMs: -1, estimatedBytes: 0 };
 
 /** 载荷全部可读（刚写完、环没绕圈）时，交叉验证必须给"可读"而不是"过期"。 */
 const NOT_EXPIRED = JSON.parse(JSON.stringify(LIVE));
@@ -149,10 +173,10 @@ const DISABLED = Object.assign({}, LIVE, {
 });
 
 function renderAll(s) {
-  ['verdictText', 'verdictWhy', 'verdictKv', 'chips', 'carrier', 'pipeline', 'h2', 'backlog', 'capped', 'heap', 'absent']
+  ['verdictText', 'verdictWhy', 'verdictKv', 'chips', 'carrier', 'pipeline', 'h2', 'backlog', 'capped', 'heap', 'hotLayer', 'absent']
     .forEach((id) => { nodes[id] = stubNode(); });
   M.renderVerdict(s); M.renderChips(s); M.renderCarrier(s); M.renderPipeline(s);
-  M.renderH2(s); M.renderBacklog(s); M.renderCapped(s); M.renderHeap(s);
+  M.renderH2(s); M.renderBacklog(s); M.renderCapped(s); M.renderHeap(s); M.renderHotLayer(s);
   return nodes;
 }
 function textOf(html) { return String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
@@ -264,11 +288,69 @@ ok('本页 CSS 定义了 td.num.err', /\.num\.err|\.v\.err/.test(CSS));
 ok('本页 CSS 定义了 td.num.warn', /\.num\.warn|\.v\.warn/.test(CSS));
 ok('结论卡容器不是 <dl class="kv"', !/<dl class="kv"/.test(src));
 
+// ---------------------------------------------------------------- 内存热层面板（⑦）
+console.log('\n== 内存热层：把 traceStore 里存的东西摊开 ==');
+{
+  let n = renderAll(LIVE);
+  let t = textOf(n.hotLayer.innerHTML);
+  ok('热层：trace 数与容量都渲染出来', t.indexOf('1,000 / 1,000') >= 0, t);
+  ok('热层：段数与 span 数都渲染出来', t.indexOf('2,381 段') >= 0 && t.indexOf('10,442 span') >= 0, t);
+  ok('热层：覆盖跨度 22.5 分钟', t.indexOf('22.5 分钟') >= 0, t);
+  ok('热层：估算占用渲染成人类可读', /MB|KB|B/.test(t), t);
+  ok('热层：口径写明时间取自 spans[i].startTime',
+     t.indexOf('spans[i].startTime') >= 0, t);
+  ok('热层：口径写明与 H2 时间口径不同', t.indexOf('不是同一个口径') >= 0, t);
+  ok('热层：写明残缺 trace 无法识别', t.indexOf('残缺') >= 0, t);
+  ok('热层：写明未改动历史实现', t.indexOf('未改动它') >= 0, t);
+
+  // 窗口只有 H2 的 ~47% → 必须说清"这是预期结果，不是故障"
+  ok('热层窗口远短于 H2 时判「窗口短得多」并说明是 max_log_size 的预期结果',
+     t.indexOf('窗口短得多') >= 0 && t.indexOf('预期结果') >= 0
+     && t.indexOf('不是故障') >= 0, t);
+  ok('热层与 H2 的两个跨度都出现在对比行里',
+     t.indexOf('热层覆盖 22.5 分钟') >= 0 && t.indexOf('H2 覆盖 48.0 分钟') >= 0, t);
+
+  n = renderAll(HOT_WIDE);
+  t = textOf(n.hotLayer.innerHTML);
+  ok('热层窗口与 H2 同量级时判「量级相当」而非报警',
+     t.indexOf('量级相当') >= 0 && t.indexOf('窗口短得多') < 0, t);
+
+  n = renderAll(HOT_EMPTY);
+  t = textOf(n.hotLayer.innerHTML);
+  ok('热层无 span：时间显示 —，不显示 1970',
+     t.indexOf('—') >= 0 && t.indexOf('1970') < 0, t);
+  ok('热层无 span：跨度显示 — 而非 0 秒', t.indexOf('0.00 s') < 0, t);
+  // 逐格断言：面板里恰好三处时间（最早 / 最新 / 跨度），都必须是 —。
+  // 只断言"出现过 —"太松，`fmtTime(x || 0)` 把 0 当缺省就会渲染出 1970 而仍带着别处的 —。
+  ok('热层无 span：三处时间档全是 —（最早/最新/跨度）',
+     (t.match(/最早 span 的时间 — 最新 span 的时间 — 热层覆盖跨度 —/g) || []).length === 1, t);
+
+  n = renderAll(HOT_OFF);
+  t = textOf(n.hotLayer.innerHTML);
+  ok('热层未初始化：显示「未初始化」', t.indexOf('未初始化') >= 0, t);
+  ok('热层未初始化：不做跨层对比（不出现窗口短得多）', t.indexOf('窗口短得多') < 0, t);
+
+  // hotLayer 整个字段缺失（旧插件 jar / 读口未升级）不能把页面打空
+  const NO_HOT = JSON.parse(JSON.stringify(LIVE));
+  delete NO_HOT.hotLayer;
+  n = renderAll(NO_HOT);
+  t = textOf(n.hotLayer.innerHTML);
+  ok('读口没有 hotLayer 字段时降级为「未初始化」而不是抛错',
+     t.indexOf('未初始化') >= 0 && !/NaN|undefined/.test(t), t);
+
+  // 上面最后一次 renderAll 是 NO_HOT，所以下面这两条要重新渲染 LIVE 再断言
+  n = renderAll(LIVE);
+  ok('结论卡也带一行热层覆盖', textOf(nodes.verdictKv.innerHTML).indexOf('热层覆盖') >= 0,
+     textOf(nodes.verdictKv.innerHTML));
+  ok('chips 里有「热层覆盖」', textOf(nodes.chips.innerHTML).indexOf('热层覆盖') >= 0,
+     textOf(nodes.chips.innerHTML));
+}
+
 // ---------------------------------------------------------------- load() 端到端（走 fetch → 渲染）
 // `absent` 不在这份清单里：它是"未挂载"提示条，正常情况下只改 className（隐藏），
 // 不填内容 —— 对它单独断言 className。
 const RENDER_IDS = ['verdictText', 'verdictWhy', 'verdictKv', 'chips', 'carrier', 'pipeline',
-  'h2', 'backlog', 'capped', 'heap', 'stamp', 'pollState'];
+  'h2', 'backlog', 'capped', 'heap', 'hotLayer', 'stamp', 'pollState'];
 RENDER_IDS.concat(['absent']).forEach((id) => { nodes[id] = stubNode(); });
 
 global.fetch = () => Promise.resolve({ json: () => Promise.resolve(LIVE) });

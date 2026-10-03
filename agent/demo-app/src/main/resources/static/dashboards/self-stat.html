@@ -101,6 +101,10 @@
             <h3>⑥ JVM 堆（与 H2 争同一个堆）</h3>
             <div id="heap"></div>
         </section>
+        <section class="panel">
+            <h3>⑦ 内存热层（进程内 KeyedLocalStore）</h3>
+            <div id="hotLayer"></div>
+        </section>
     </div>
 
     <section class="panel">
@@ -144,6 +148,18 @@
                     <td>写指针 <code>currIndex</code> 是只增不减的逻辑字节游标（不是行号、不是文件偏移）；
                         物理落点对它取模，所以"占用率"绕圈后封顶 100%。<code>wrapCount</code> = 已完整绕过的圈数。
                         写指针本身持久化在文件头 16B，重启后接着走。</td>
+                </tr>
+                <tr>
+                    <td><code>热层覆盖跨度</code> <span class="est">（粗略）</span></td>
+                    <td>取所有存活段、所有 <code>span</code> 的 <code>startTime</code> 的 min/max，
+                        <b>读时派生</b>（遍历一次热层快照，亚毫秒级），<b>不维护增量水位</b>——
+                        与上面 H2 那栏的机制刻意相反：H2 取最老时间要全表扫（实测 p90 44ms）只能走增量，
+                        热层数据本就在堆里、遍历比扫表便宜得多，且<b>快照即真相</b>，
+                        结构上不会出现"增量值残留指向已淘汰行"的 staleness。
+                        <br>另注：<code>Log</code> 没有段级时间戳，所以这里是「有 span 活动的时间范围」，
+                        与 H2 的「段起始时间范围」口径不同；<code>estimatedBytes</code> 是
+                        <code>段 × 800B + span × 200B</code> 的<b>量级</b>估算，非实测
+                        （精确值看 <code>JVM 堆</code>）。</td>
                 </tr>
                 <tr>
                     <td><code>过期读 expiredReadCount</code></td>
@@ -236,6 +252,7 @@
     var loss = s.dataLoss || {};
     var pipe = s.pipeline || {};
     var h2 = s.h2 || {};
+    var hl = s.hotLayer || {};
     var capped = s.capped || {};
     var mounted = !!s.reporterEnabled && !!s.carrier;
     var total = loss.total || 0;
@@ -263,11 +280,12 @@
       + kvRow("存储队列丢", n(loss.storageDropped))
       + kvRow("单批消费峰值", dur(maxMs))
       + kvRow("H2 行数 / 水位", n(h2.rows) + " / " + n(h2.maxRows))
-      + kvRow("环形文件占用", pct(capped.usedRatio));
+      + kvRow("环形文件占用", pct(capped.usedRatio))
+      + kvRow("热层覆盖", dur(hl.coveredSpanMs) + "（" + n(hl.traces) + " 条 trace）");
   }
 
   function renderChips(s) {
-    var h2 = s.h2 || {}, capped = s.capped || {}, backlog = s.backlog || {}, heap = s.jvmHeap || {};
+    var hl = s.hotLayer || {}, h2 = s.h2 || {}, capped = s.capped || {}, backlog = s.backlog || {}, heap = s.jvmHeap || {};
     var st = capped.stats || {};
     var chips = [
       { label: "已采集段（入队成功）", value: n((s.carrier || {}).produced) },
@@ -278,7 +296,8 @@
       { label: "H2 约占用（估算）", value: bytes(h2.estimatedBytes) },
       { label: "环形写指针", value: bytes(capped.currIndex) },
       { label: "载荷压缩率", value: pct(st.compressionRatio) },
-      { label: "JVM 堆", value: bytes(heap.usedBytes) + " / " + bytes(heap.maxBytes) }
+      { label: "JVM 堆", value: bytes(heap.usedBytes) + " / " + bytes(heap.maxBytes) },
+      { label: "热层覆盖", value: dur((s.hotLayer || {}).coveredSpanMs) }
     ];
     document.getElementById("chips").innerHTML = chips.map(function (c) {
       return '<div class="chip"><div class="label">' + esc(c.label) + '</div><div class="value">' + c.value + "</div></div>";
@@ -435,6 +454,50 @@
       + "监控占的是业务的堆，量必须可预测。</div>";
   }
 
+  /**
+   * 内存热层面板：把进程内 {@code KeyedLocalStore} 里存的东西摊开给人看。
+   *
+   * <p>它和 H2 是<b>同一批数据的两个副本</b> —— 热层容量只有 {@code max_log_size}
+   * （默认 1000 条 trace）且 FIFO 淘汰，H2 是十万行级，所以热层的"覆盖时间段"
+   * 天然比 H2 短得多。真正有用的是把两个窗口并排比：短是<b>预期结果</b>，
+   * 只有"热层比 H2 还空"或"热层的时间不随进程推进"才需要查。</p>
+   */
+  function renderHotLayer(s) {
+    var hl = s.hotLayer || {}, h2 = s.h2 || {};
+    if (!hl.enabled) {
+      document.getElementById("hotLayer").innerHTML = '<div class="off">未初始化（插件尚未 prepare）</div>';
+      return;
+    }
+    var ratio = hl.maxTraces ? (hl.traces || 0) / hl.maxTraces : 0;
+    var cmp = "";
+    if (h2.enabled && hl.coveredSpanMs > 0 && h2.coveredSpanMs > 0) {
+      var k = hl.coveredSpanMs / h2.coveredSpanMs;
+      cmp = '<div style="color:var(--muted);font-size:12px;line-height:1.8;margin-top:10px;padding-top:8px;'
+        + 'border-top:1px solid #f1f3f5">'
+        + "<b>和 H2 比</b>：热层覆盖 " + dur(hl.coveredSpanMs) + "，H2 覆盖 " + dur(h2.coveredSpanMs)
+        + "（约 " + (k >= 1 ? f(k, 1) + "×" : pct(k)) + "）。"
+        + (k < 0.5
+          ? badge("warn", "窗口短得多") + " 这是 <code>max_log_size=" + n(hl.maxTraces)
+            + "</code> 的<b>预期结果</b>——热层按 trace 条数 FIFO 淘汰，不是故障。"
+          : badge("ok", "量级相当") + " 两个窗口接近，说明热层还没被淘汰填满。")
+        + "</div>";
+    }
+    document.getElementById("hotLayer").innerHTML = bar(ratio, ratio > 0.8, false) + table([
+      row("存活 trace / 容量", n(hl.traces) + " / " + n(hl.maxTraces) + "（占用 " + pct(ratio) + "）"),
+      row("存活段数 · span 数", n(hl.segments) + " 段 · " + n(hl.spans) + " span"),
+      row("最早 span 的时间", fmtTime(hl.oldestSpanTimeMs)),
+      row("最新 span 的时间", fmtTime(hl.newestSpanTimeMs)),
+      row("热层覆盖跨度", dur(hl.coveredSpanMs)),
+      row("约占用（估算）", bytes(hl.estimatedBytes))
+    ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
+      + "历史实现，本次只做展示、<b>未改动它</b>。淘汰规则是<b>插入序 FIFO</b>：满了就丢最旧插入的 trace。"
+      + "<br><b>口径提醒</b>：时间取自 <code>spans[i].startTime</code>（<code>Log</code> 没有段级时间戳），"
+      + "所以是「有 span 活动的时间范围」，与上面 H2 的「段起始时间范围」不是同一个口径。"
+      + "<br>存活 trace 可能是<b>残缺</b>的：一条还在写入的 trace 被淘汰后，后续段会重新开一个新条目，"
+      + "只剩最后一轮的段——而它和一条天生就短的 trace 长得一样，无法识别。"
+      + "</div>" + cmp;
+  }
+
   function load() {
     fetch("/inner/sw/self-stat", { cache: "no-store" })
       .then(function (r) { return r.json(); })
@@ -454,6 +517,7 @@
         renderBacklog(s);
         renderCapped(s);
         renderHeap(s);
+        renderHotLayer(s);
         document.getElementById("stamp").textContent = "更新于 " + new Date().toLocaleTimeString();
         document.getElementById("pollState").textContent =
           (SWPoll ? "每 " + (SWPoll.intervalMs("selfstat", 5000) / 1000) + "s · " : "")
