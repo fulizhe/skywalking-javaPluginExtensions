@@ -90,6 +90,12 @@ jobs:
 
       # 只从这三个模块的 target 里取,maxdepth 1 —— 不递归扫 agent/**,
       # 免得哪天某个归档模块残留的 target 混进发布资产。
+      # 两个排除项都是实测踩到的:
+      #   *-sources.jar  —— sources jar
+      #   original-*.jar  —— logfile-reporter 用了 maven-shade-plugin
+      #     (shadedArtifactAttached=false),shade 会把打包前那份改名成
+      #     original-<finalName>.jar 留在 target 里。它是**没做 H2 重量定位**的
+      #     那一份,挂上去等于给用户发一个装不上的 jar。
       # jar 名里带的是 SkyWalking agent 版本(9.4.0,来自 pom 的 finalName),
       # 不是插件版本 —— 它是用户判断"能不能装进我的 agent"的唯一依据,别改名。
       - name: Collect jars
@@ -97,7 +103,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           for m in ${MODULES//,/ }; do
-            find "agent/$m/target" -maxdepth 1 -name '*.jar' ! -name '*-sources.jar' \
+            find "agent/$m/target" -maxdepth 1 -name '*.jar' \
+              ! -name '*-sources.jar' ! -name 'original-*.jar' \
               -exec cp {} dist/ \;
           done
           ls -l dist/
