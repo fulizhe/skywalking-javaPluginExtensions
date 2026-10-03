@@ -6,4 +6,8 @@
 - **同步方式**：两线已分叉（`master` 领先约 139 提交、类结构不同），**bugfix 用 cherry-pick，不 merge**。
 - **版本号**：两条线各自保持 `1.0.0` / `2.0.0` 不变（内部使用，保持下游流程不变）；靠 tag/commit + jar 内 `pom.properties` 构建时间戳区分构建。
 - **改动范围**：冻结线只接 bugfix / 必要诊断小改，**新增功能一律进 2.0.0 开发线（`master`）**。
+- **例外（诊断读口）**：为让冻结线具备"能不能自证健康"的排查能力，允许**只加诊断读口**——
+  不改既有契约、不加配置项、不动既有行为，且**不带 UI**。已记录的先例：
+  `release/1.0.0` 的 `getHotLayerStat()`（同步自 master 的 `hotLayerSnapshot`，commit `382ee50`，
+  2026-10-03）。UI 留在 master 的 self-stat 面板 ⑦。
 - **分支现状**：`javaSWExtend` 为未清理旧分支，**不要动**。
