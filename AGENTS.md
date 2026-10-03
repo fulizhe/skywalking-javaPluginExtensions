@@ -35,7 +35,7 @@
 - **Code style / 纯重构规范** — 何时读：写新 Java 代码、改既有代码、拆分大方法、对齐代码风格时。→ `docs/repo/index.md`
 - **教学空间页面格式** — 何时读：新增或修改 `docs/tutorial/` 下的教学页面（入口页 / 课程 / 参考）；格式规则见上面「写作规则与教学页面格式」§2，页面骨架照 `docs/tutorial/index.html` 抄。
 - **排错清单（compose / 中间件 / 代理 / 端口）** — 何时读：本地或远程把 compose 跑起来时出错。→ `agent/demo-app/NOTES-docker-stress.md`（第 13~16 条）与 `agent/demo-app/README-remote-verify.md`（远程 Linux 压测 runbook）
-- **GitHub Actions（CI 缓存 / matrix / 镜像分发 / 排错顺序）** —— 何时读：改 `.github/workflows/*.yml`、CI 跑得慢或莫名变红、或想在动手前判断某个写法能不能用时。→ `docs/notes/2026-10-01-github-actions-ci-pitfalls.md`
+- **GitHub Actions（缓存 / matrix / 镜像分发 / paths 白名单 / schema 校验 / 排错顺序）** —— 何时读：改或抄 `.github/workflows/*.yml` 的写法、CI 跑得慢或莫名变红、**run 出现 0 job / job 名显示成表达式 / 资产挂错**时。→ `docs/notes/2026-10-01-github-actions-ci-pitfalls.md`
 
 ## Task routing
 

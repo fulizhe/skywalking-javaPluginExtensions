@@ -1,7 +1,7 @@
 # GitHub Actions：缓存、矩阵、镜像分发与排错（本轮实跑经验）
 
 - **何时读**：改 `.github/workflows/*.yml`、CI 跑得慢或莫名变红、看到看不懂的报错想在动手前先判断时。
-- **性质**：**经验沉淀，不是规范**。每条都来自 2026-10-01 那一轮实跑（10 个提交、4 次红 6 次绿），数字是当次实测。
+- **性质**：**经验沉淀，不是规范**。§一~§四 与 §六 来自 2026-10-01 那一轮（10 个提交、4 次红 6 次绿），§五 来自 2026-10-03 加 `package.yml` 那一轮，数字均为当次实测。
   规范性的约定在 `docs/repo/` 与 `AGENTS.md`。
 - **读者假设**：知道 CI 大概是什么，但没系统碰过 Actions。
 
@@ -175,13 +175,43 @@ push 之后 GitHub 上**根本没有 run**——当时误以为是 Gitee→GitHu
 
 ---
 
-## 五、怎么读一次失败的 run
+## 五、workflow 文件的契约：GitHub 的 schema，不是 YAML 语法
+
+2026-10-03 加 `package.yml` 那一轮，本地过了三道校验（YAML 能解析、5 个 `run` 块过 `bash -n`、collect 脚本在假目录里跑通），推上去仍然**炸了两次**（一次 run 秒红且 job 数 = 0，一次卡在最后一步），另有两处**不报错但结果是错的**。**四次都不是 YAML 语法问题** —— GitHub 对 workflow 文件另有一套契约，本地那三道校验一道都不覆盖。
+
+下表按"炸"排在前面两行、"静默"排在后面两行 —— **静默那两条更贵**：红的时候你知道要查，job 名和资产列表没人看。
+
+| 症状 | 真正的契约 | 本地为什么看不见 |
+| --- | --- | --- |
+| run 立刻红，且 **job 数 = 0** | `jobs.*.name` 不接受 `env` 上下文（只允许 `github`/`inputs`/`needs`/`strategy`/`matrix`/`vars`） | 这是 schema 约束，YAML 解析器照单全收 |
+| job 名原样显示 `attach to release ${{ (inputs.tag \|\| …` | `jobs.*.name` **不插值**；只有 `run-name` 插值 | actionlint 按上下文可用性表放行了，文档没写会不会插值 |
+| 前 4 步绿、最后 `gh release create` 挂 | gh 依次靠 `--repo` / `GH_REPO` / git remote 推断目标仓库 | 那个 job 故意不 checkout，workspace 里不是 git 仓库；而本地永远在 git 仓库里 |
+| Release 多挂一个 `original-*.jar`（479KB） | shade（`shadedArtifactAttached=false`）把打包前那份改名留在 `target/` | 假目录里没这个文件；本地那次只看了 maven 日志，没 `ls target/` |
+
+三道本地校验各管一段契约，互不替代：`bash -n` 对齐 **bash 的契约**（抓 `run` 块语法错），actionlint 对齐 **GitHub 的契约**（抓 schema 与上下文可用性），collect 脚本对齐 **文件系统的事实**（抓选错文件）。上表第 1 行只有 actionlint 抓得到，第 4 行只有拿真实 `target/` 跑才抓得到。
+
+```bash
+# 本地入口：三个 workflow 一起过一遍，exit 0 才推
+actionlint .github/workflows/build-and-test.yml .github/workflows/verify.yml .github/workflows/package.yml
+```
+
+> **失败步骤与通过步骤的差别往往就是根因。** 第 3 行里 `gh api "repos/$GITHUB_REPOSITORY/…"`（路径写死，不需要推断）过了，`gh release create "$TAG"`（靠推断）挂了 —— 对照这两行不必猜。而拿不到日志时（见 §六 的环境限制）这条路尤其管用：同一个 job 里"哪几步绿、哪一步挂"本身就是判据。
+
+**还有一条与触发面直接相关的约束：workflow 文件是从被推送的那个 ref 的树里读的**，不是从默认分支。tag 指向的提交里没有那个 workflow，就没有任何东西会跑 —— GitHub 连 run 都不建（不是建了 run 然后失败）。
+
+> 实证：`1.0.0-maint2` 指向 `955fa4e`（1.0.0 冻结线、早于 `package.yml` 的一天），那棵树里只有 `.github/workflows/build-and-push-jar.yml`，没有 `package.yml` → tag 推上去后 CI 一片安静，Actions 页上连一条记录都没有。同一天推的探针 tag 指向含 `package.yml` 的 master 提交，正常触发。
+>
+> **推论**：两条版本线分叉后（`docs/repo/version-lines.md`），冻结线的提交天生不含后来加的 workflow。两条出路 —— 把 workflow cherry-pick 到那条线（tag 面就原生可用了），或从默认分支用 `workflow_dispatch` + `tag` 输入发（本仓 `package.yml` 已支持，见其输入说明）。
+
+---
+
+## 六、怎么读一次失败的 run
 
 按这个顺序，能少走弯路：
 
 | 顺序 | 看什么 | 判读 |
 | --- | --- | --- |
-| 1 | **哪些 job 存在** | "少了一个 job" ≠ 卡住，常见于矩阵展开失败或 `if` 把 job 跳过了 |
+| 1 | **哪些 job 存在** | "少了一个 job" ≠ 卡住，常见于：矩阵展开失败、`if` 把 job 跳过了、**文件没过校验（job 数 = 0，见 §五）** |
 | 2 | **Annotations**（run 页和 job 页都有） | 那是真正的失败原因；**报错常挂在 workflow 级而不是出错的 job 上** |
 | 3 | 步骤级耗时 | 几十秒就失败 = 配置/权限/语法问题；几分钟才失败 = 真在构建或跑测试 |
 | 4 | 具体日志行 | 报错原文进代码块，别转述 |
@@ -209,7 +239,7 @@ docker run --rm -v "D:\repo:/src" -w /src alpine:latest \
 
 ---
 
-## 六、版本与迁移：怎么判断 major 能不能升
+## 七、版本与迁移：怎么判断 major 能不能升
 
 Actions 的 major 版本跳动大多是 runtime 与依赖升级，**但仍要查再升**——本轮为消两条弃用告警升了四个：
 
@@ -230,18 +260,19 @@ curl -s https://api.github.com/repos/<owner>/<action>/releases/tags/v<N>.0.0 \
 
 ---
 
-## 七、本仓现状（指针，不重复数字）
+## 八、本仓现状（指针，不重复数字）
 
 | 想知道 | 看哪 |
 | --- | --- |
 | verify 回路怎么跑、场景怎么声明 | `verify/README.md` |
 | 场景与矩阵 | `verify/scenarios/*/scenario.conf` + `support-version.list` |
-| 两个 workflow 的完整形态 | `.github/workflows/verify.yml` / `build-and-test.yml` |
+| 三个 workflow 的完整形态 | `.github/workflows/verify.yml` / `build-and-test.yml` / `package.yml` |
+| 改 workflow 之前的本地校验 | `actionlint .github/workflows/*.yml`（§五） |
 | 编排约定（脚本入口、端口） | `AGENTS.md` 的 Task routing / 验证节奏 |
 
 ---
 
-## 八、这一轮最该记住的一条
+## 九、这一轮最该记住的一条
 
 三次失败（`ignore-error` 挡不住 driver、`build-push-action` 不认证 registry、matrix 不收裸数组）
 有一个共同点：
@@ -257,13 +288,23 @@ curl -s https://api.github.com/repos/<owner>/<action>/releases/tags/v<N>.0.0 \
 | `docker buildx build --push` 的参数 | build-push-action **自己**会不会认证 registry | run #18 403 |
 
 **教训不是"多小心"，是"验证的边界要对齐被验证对象的契约"。**
-本轮三次都能在推上去之前抓到——只要验证时用的是**目标系统同款工具 + 同款输入形状**，
+10-01 那轮三次都能在推上去之前抓到——只要验证时用的是**目标系统同款工具 + 同款输入形状**，
 而不是"我本地跑通了"。第 3 条尤其：**本地 Bash / PowerShell 通过 ≠ Linux runner 上通过**
 （`jq` 在本机 WSL 里就没有）。
 
-## 九、还没验的
+但 10-03 那轮给了这条一个上限：**"提前抓到"的前提是本地有那个同款工具。**
+§五 第 1 行（schema / 上下文可用性）在装上 actionlint 之前没有任何本地手段能抓 ——
+YAML 解析器、`bash -n`、跑一遍脚本，全都放行。所以新 workflow 的第一个动作不是"再检查一遍"，
+是**先确认校验手段本身到位**。
+
+## 十、还没验的
 
 - **`cache: maven` 的真实收益**：`build-and-test` 首跑 48s 落在历史区间内，需第二次命中后才可比。
 - **GHCR 在缓存失效时的表现**：层缓存与 GHCR 拉取同时冷启动时，总耗时没测过。
 - **`actions/cache` 的 10GB 上限是否够用**：当前 m2 约 1GB + 层缓存若干，估算够，但没量过层缓存实际占用。
 - **fork PR 的端到端行为**：只确认了"保存失败降级成 warning"（文档保证），没真拉一个 fork PR 试过。
+- **`package.yml` 只验了 `push: tags` 一条发布面**：`release: published` 与 `workflow_dispatch`（尤其"UI 用已有 tag 建 Release"会不会触发）都没跑过。
+- **`jobs.*.name` 的插值行为只在一处实测**：actionlint 放行、GitHub 原样显示。其它 job 名未逐一确认，但按"静态文本总是安全"处理。
+- **`--clobber` 不删旧资产**：同一个 tag 重跑且这轮少产出一个资产时，旧资产会留在 Release 上（实测留下一个 `original-*.jar`）。是否在 `attach` 里加"清理不在本轮清单里的资产"未定。
+- **Gitee → GitHub 镜像延迟**：分支 0~60s、tag 一次约 4 分钟，各 1 个样本。排查"没触发"时先排掉它（§四 同类误判）。镜像**会**传播 tag 删除。
+- **`1.0.0` 冻结线上的 `build-and-push-jar.yml` 是死代码**：分支名写成 `main`（本仓是 `master`）、没有 `tags` 触发、`-DskipTests`、用 JDK 8（与 ADR-01 的 JDK 17 工具链冲突，`<release>8` 需要 javac 9+）、`[ ! -f ".../target/*.jar" ]` 里glob 没展开所以断言恒假、`./mvnw` 大概率不存在。名字里的"Push to Artifact Repo"也没有对应步骤。待定：删掉，还是改成能用的。
