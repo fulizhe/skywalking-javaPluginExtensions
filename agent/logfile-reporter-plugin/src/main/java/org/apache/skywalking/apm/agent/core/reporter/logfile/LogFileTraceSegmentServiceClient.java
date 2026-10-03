@@ -97,6 +97,119 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	}
 
 	/**
+	 * 内存热层统计快照：进程内缓存里存了多少、覆盖了多长时间。
+	 *
+	 * <p><b>诊断用只读接口</b>，与 {@link #getLogfileStatMap()} 同级但形状不同——后者返回
+	 * 全量原始数据（调用方自己遍历），本方法直接给汇总数字与时间范围，避免每个调用方
+	 * 各写一遍遍历与口径。</p>
+	 *
+	 * <p><b>读时派生，不维护增量水位</b>：数据本就在堆里，一次遍历（每条 trace 的每个段
+	 * 的每个 span 各取一次 {@code startTime}）即可，无需像持久层那样旁路维护增量值。
+	 * 代价是要付一次 {@link #getLogfileStatMap()} 的浅拷贝，与该读口本身的代价同级；
+	 * 收益是<b>快照即真相</b>，不存在增量值残留指向已淘汰条目的问题。</p>
+	 *
+	 * <p><b>口径</b>：时间取所有存活段、所有 span 的 {@code startTime} 的 min/max。
+	 * {@link Log} <b>没有段级时间戳</b>（时间在 {@code spans[i].startTime}），
+	 * 所以这是"有 span 活动的时间范围"，不是段级时间范围。</p>
+	 *
+	 * <p><b>粗略估算</b>：{@code estimatedBytes} 是 {@code 段数 × 800B + span 数 × 200B}
+	 * 的量级估算，不是实测字节数（{@code LinkedHashMap} 节点与字符串开销随字段长度浮动）。
+	 * {@code oldest/newest/covered} 在无数据时为 {@code -1}（不是 0，避免被当成 epoch）。</p>
+	 *
+	 * <p><b>已知口径限制</b>：本缓存按<b>插入序</b> FIFO 淘汰（{@code max_log_size}），
+	 * 一条还在写入的 trace 被淘汰后，后续段会重新开一个新条目，于是它的存活部分<b>可能残缺</b>，
+	 * 且与一条天生就短的 trace <b>无法区分</b>。</p>
+	 *
+	 * @return JDK 原生 Map，不暴露 Agent 自定义类型；{@code logfileStatMap} 未初始化时
+	 *         返回 {@code enabled=false} 的同形状占位
+	 */
+	public Map<String, Object> getHotLayerStat() {
+		return hotLayerSnapshot(getLogfileStatMap(), maxLogSize);
+	}
+
+	/**
+	 * 内存热层统计的纯函数实现，与 {@link #getHotLayerStat()} 同契约。
+	 *
+	 * <p>抽成静态方法是为了能脱离 agent 容器直接单测（本类构造需要 {@code ServiceManager}）。</p>
+	 *
+	 * @param snapshot {@link #getLogfileStatMap()} 的结果；{@code null} 视为未初始化
+	 * @param maxTraces 容量上限（{@code max_log_size}），供调用方显示"离淘汰还有多远"
+	 */
+	static Map<String, Object> hotLayerSnapshot(final Map<String, Map<String, Object>> snapshot, final int maxTraces) {
+		final Map<String, Object> m = new LinkedHashMap<String, Object>(8);
+		m.put("maxTraces", Integer.valueOf(maxTraces));
+		if (snapshot == null) {
+			m.put("enabled", Boolean.FALSE);
+			m.put("traces", Integer.valueOf(0));
+			m.put("segments", Integer.valueOf(0));
+			m.put("spans", Integer.valueOf(0));
+			m.put("oldestSpanTimeMs", Long.valueOf(-1L));
+			m.put("newestSpanTimeMs", Long.valueOf(-1L));
+			m.put("coveredSpanMs", Long.valueOf(-1L));
+			m.put("estimatedBytes", Long.valueOf(0L));
+			return m;
+		}
+		m.put("enabled", Boolean.TRUE);
+
+		long segments = 0L;
+		long spans = 0L;
+		long oldest = Long.MAX_VALUE;
+		long newest = Long.MIN_VALUE;
+		for (final Map<String, Object> entry : snapshot.values()) {
+			if (entry == null) {
+				continue;
+			}
+			final Object logsObj = entry.get("logs");
+			if (!(logsObj instanceof List)) {
+				continue;
+			}
+			for (final Object logObj : (List<?>) logsObj) {
+				if (!(logObj instanceof Map)) {
+					continue;
+				}
+				segments++;
+				final Object spansObj = ((Map<?, ?>) logObj).get("spans");
+				if (!(spansObj instanceof List)) {
+					continue;
+				}
+				for (final Object spanObj : (List<?>) spansObj) {
+					if (!(spanObj instanceof Map)) {
+						continue;
+					}
+					spans++;
+					// 时间只认Number 且 > 0：0 与负值都不是有效 epoch ms（缺字段也会落到这里）
+					final Object startTime = ((Map<?, ?>) spanObj).get("startTime");
+					if (!(startTime instanceof Number)) {
+						continue;
+					}
+					final long t = ((Number) startTime).longValue();
+					if (t <= 0L) {
+						continue;
+					}
+					if (t < oldest) {
+						oldest = t;
+					}
+					if (t > newest) {
+						newest = t;
+					}
+				}
+			}
+		}
+
+		final boolean hasTime = oldest != Long.MAX_VALUE && newest != Long.MIN_VALUE;
+		// traces 取 snapshot.size()（key 数），不是"数出来的 entry 数"：
+		// 一个 null value 的 key 仍然占着容量，显示必须与容量口径一致。
+		m.put("traces", Integer.valueOf(snapshot.size()));
+		m.put("segments", Long.valueOf(segments));
+		m.put("spans", Long.valueOf(spans));
+		m.put("oldestSpanTimeMs", Long.valueOf(hasTime ? oldest : -1L));
+		m.put("newestSpanTimeMs", Long.valueOf(hasTime ? newest : -1L));
+		m.put("coveredSpanMs", Long.valueOf(hasTime ? newest - oldest : -1L));
+		m.put("estimatedBytes", Long.valueOf(segments * 800L + spans * 200L));
+		return m;
+	}
+
+	/**
 	 * 慢/错链路告警运行指标与配置快照。
 	 * <p>
 	 * 须由 Agent ClassLoader 侧调用（与 {@link AsyncTraceAlertDispatcher} 同一副本）；
