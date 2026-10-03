@@ -90,6 +90,7 @@
 <div class="bar">
   <h1>慢调用 TopN 榜</h1>
   <a class="home" href="metrics.html">← 指标大屏</a>
+  <a class="home" href="metrics-troubleshoot.html">指标排障 · 最差分钟 ↗</a>
   <span class="field presenter-hide">时间窗
     <span class="seg" id="ranges">
       <span data-r="1h">1h</span><span data-r="6h">6h</span><span data-r="24h" class="on">24h</span><span data-r="7d">7d</span><span data-r="30d">30d</span>
@@ -148,6 +149,18 @@
           <code>endpoint / 分位 / 计数</code>，<b>没有 layer 字段</b>（Cache/Database/MQ 那种）。
           所以族 = 取路径前两段（如 <code>/api/deps-demo/*</code>），它<b>回答不了"哪一层慢"</b> ——
           层归类要看<a href="topology.html">依赖拓扑</a>。</li>
+      <li><b>按 P95 / 最差 P95 / P99 排序时，分位算不出来的端点会被整行剔掉——而"慢端点恰恰是低频的"</b>。
+          聚合器对每分钟桶的 <code>p90/p95/p99</code> 有 <b>20 样本下限</b>
+          （<code>MIN_SAMPLES_FOR_TAILS</code>），样本不足置空；本榜在排序前把<b>该列为空的行整行剔除</b>。
+          于是一个睡 8 秒的端点一分钟最多 7 次 → 永远凑不满 20 → <b>越慢越容易被剔除</b>
+          （2026-10-03 实测：整库 30 个端点有「最差 P50」、仅 6 个有「最差 P95」，量级随负载变化）。
+          <br><b>「已删除 N 行」只统计 <code>/inner/sw/*</code> 自读剔除，不含这些分位缺失的端点</b>——
+          所以那个数字不是"被剔掉的总量"。
+          <br><b>两种看法</b>：① 就在本页把「排序依据」切成<b>「平均耗时降序」</b>（或慢率 / 错误率 / 请求数）——
+          这四个都来自计数、恒有值，于是所有端点都回来了；② 要连分位一起看，去
+          <a href="metrics-troubleshoot.html"><b>指标排障 · 最差分钟</b></a>点「<b>最差 P50</b>」列头排序
+          （<code>p50</code> 是唯一<b>没有样本下限</b>的分位；该页不剔分位缺失的行，只把 <code>null</code> 排到末尾）。
+          两页同源（<code>aggregate=true</code>、共用 <code>range.js</code> 的桶范围），可来回对照。</li>
     </ul>
   </section>
 

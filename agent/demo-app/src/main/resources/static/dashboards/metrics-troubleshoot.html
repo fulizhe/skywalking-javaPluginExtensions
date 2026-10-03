@@ -70,10 +70,23 @@ tbody tr.sel{background:#1d3a5c}
 <div class="wrap">
   <h1>指标排障 · 最差分钟分位 <span class="mut" style="font-size:12px">（③ 口径，独立于 metrics.html）</span></h1>
   <p class="sub">回答"这个范围内最坏的那一分钟有多坏、哪个端点最坏"。分位=范围内各桶分位的最大值（最差），而非加权平均。</p>
+  <p class="links" style="margin:6px 0 0">
+    <a href="metrics.html">← 指标大屏（加权平均口径）</a>
+    <a href="slow-topn.html">慢调用 TopN 榜 ↗</a>
+  </p>
 
   <details class="why">
     <summary>本页存在的意义（为什么需要"最差分钟"口径）</summary>
     <div class="why-body">
+      <p><b>看慢端点请优先用本页的「最差 P50」列</b>（<span class="mono">p50</span> 是唯一没有样本下限的分位）：
+        低频慢端点每分钟样本天然凑不满 20，<span class="mono">p90/p95/p99</span> 会被置空；
+        <a href="slow-topn.html">TopN 榜</a>在按 P95 / 最差 P95 / P99 排序前会把<b>该列为空的行整行剔掉</b>，
+        于是"越慢越容易被剔除"。本页<b>不剔</b>——只把全局 <span class="mono">*</span> 行排除，
+        <span class="mono">null</span> 只排到末尾，所以慢端点一定在表里。
+        用法：<b>点「最差 P50」列头排序</b>（默认是「按最差 P99 降序」，那一列对慢端点是空的）。
+        也可以留在 <a href="slow-topn.html">TopN 榜</a>把排序依据切成「平均耗时降序」——
+        那个依据来自计数、恒有值，所有端点都会出现。两页同源，都是
+        <span class="mono">/inner/sw/metrics/query?aggregate=true</span>。</p>
       <p><b>先给结论：</b>单分钟的 p50/p99 并不"失真"，只是"抽样近似"——而且样本几乎代表了全部请求；真正会引入系统性偏差的是"跨桶合并 / rollup"那条路，不是 5000 这个采样上限本身。</p>
       <p><b>为什么单分钟分位基本可信：</b></p>
       <ul>
@@ -109,6 +122,8 @@ tbody tr.sel{background:#1d3a5c}
   </p>
 
   <h2 id="tableTitle">端点 · 按最差 P99 降序</h2>
+  <p class="note">分位列显示 <b>–</b> = 该桶样本不足 20、算不出 p90/p95/p99，<b>不代表这个端点健康</b>；
+    低频端点请看<b>「最差 P50」</b>（无样本下限）。<b>点列头可换排序</b>，慢端点建议点「最差 P50」。</p>
   <div class="card" style="padding:4px 8px">
     <table id="epTable">
       <thead><tr>
