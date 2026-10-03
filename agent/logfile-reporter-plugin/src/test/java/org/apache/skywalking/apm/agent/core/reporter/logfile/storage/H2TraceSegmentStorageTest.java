@@ -228,6 +228,139 @@ public class H2TraceSegmentStorageTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_timeRangeTracksOldestAndNewestSegment() {
+        storage.storeLog(createLog("t1", "s1", 1000L, false));
+        // 插到 1024 行触发一次水位刷新后，最老行才是被 seek 确认过的那行
+        for (int i = 2; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        // start_time 递增：最老存活行是第 1 段(1000)、最新是第 1024 段(1024000)
+        Assert.assertEquals(Long.valueOf(1000L), h2.get("oldestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(1000L * 1024L), h2.get("newestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(1000L * 1024L - 1000L), h2.get("coveredSpanMs"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_oldestLiveRowRefreshesAgainOnSecondRowCap() {
+        // 必须写**两轮** 1024 行：水位刷新每 1024 行一次，而"合并旧值"那类错误只在
+        // 第二次刷新才显形 —— 第一次刷新时旧值还是 MAX_VALUE，取 min 与正确做法同结果。
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 3, true, new File(cappedDir, "payload5.capped.db"), 1024L * 1024L);
+        storage.clear();
+        for (int i = 1; i <= 2048; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        Assert.assertEquals("存活 3 段", Long.valueOf(3L), h2.get("rows"));
+        Assert.assertEquals("第二次刷新后最老存活段应是第 2046 段（第一轮最老的第 1022 段早已被清掉）",
+                Long.valueOf(1000L * 2046L), h2.get("oldestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(1000L * 2048L), h2.get("newestStartTimeMs"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_noPayloadStorage_reportsOldestPayloadIdAsMinusOneNotZero() {
+        // capped 关闭 → writePayload 返回 -1 → payload_id 落库为 NULL。
+        // 这正是 wasNull() 的用武之地：getLong() 会把 NULL 读成 0，而 0 是合法的首个
+        // 逻辑偏移，不判 wasNull 就会把"没有载荷"误报成"指向环里最老的那块"。
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 2000, false, null, 0L);
+        storage.clear();
+        for (int i = 1; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> capped = (Map<String, Object>) storage.selfStatSnapshot().get("capped");
+        Assert.assertEquals("无载荷时必须是 -1，不能是 0", Long.valueOf(-1L), capped.get("oldestPayloadId"));
+        Assert.assertEquals("没有载荷可比，不该报过期", Boolean.TRUE, capped.get("oldestPayloadReadable"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_timeRangeIsMinusOneWhenNoRows() {
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        Assert.assertEquals("无行时三端都应是 -1，不能是 MAX_VALUE（那个值会被前端当时间戳渲染）",
+                Long.valueOf(-1L), h2.get("oldestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(-1L), h2.get("newestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(-1L), h2.get("coveredSpanMs"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_oldestLiveRowRefreshesAfterRowCapEvictsIt() {
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 3, true, new File(cappedDir, "payload4.capped.db"), 1024L * 1024L);
+        storage.clear();
+        // 起始时间递增写：最老那条（start_time=1000）必被 1024 行后的水位清理掉
+        for (int i = 1; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        Assert.assertEquals("存活 3 段", Long.valueOf(3L), h2.get("rows"));
+        Assert.assertEquals("最老存活段是第 1022 段（1000×1022），不是被清掉的第 1 段",
+                Long.valueOf(1000L * 1022L), h2.get("oldestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(1000L * 1024L), h2.get("newestStartTimeMs"));
+        Assert.assertEquals(Long.valueOf(1000L * 1024L - 1000L * 1022L), h2.get("coveredSpanMs"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_oldestPayloadIdTracksRingPointerAndStaysReadable() {
+        for (int i = 1; i <= 3; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+        for (int i = 4; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> snapshot = storage.selfStatSnapshot();
+        final Map<String, Object> capped = (Map<String, Object>) snapshot.get("capped");
+        final long oldestPayloadId = ((Long) capped.get("oldestPayloadId")).longValue();
+        Assert.assertTrue("最早的载荷指针应指向真实块（非 -1）", oldestPayloadId >= 0L);
+        Assert.assertEquals("刚写完、环还没绕圈 → 最早指针必在可读窗口内",
+                Boolean.TRUE, capped.get("oldestPayloadReadable"));
+        Assert.assertEquals(Boolean.TRUE, ((Map<String, Object>) capped.get("stats")).get("ioErrorCount")
+                .equals(Long.valueOf(0L)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void selfStatSnapshot_payloadExpiredAfterRingWrapsPastOldestPointer() {
+        // 4096B 的环：1024 段 × 约 100B gzip ≈ 100KB，必然绕圈 20 圈以上，把最早的载荷覆盖掉。
+        // 必须写满 1024 行才触发一次水位刷新（每 1024 行一次），否则 oldestLivePayloadId 还是初始值。
+        storage.close();
+        storage = new H2TraceSegmentStorage(true, 2000, true, new File(cappedDir, "tiny.capped.db"), 4096L);
+        storage.clear();
+        for (int i = 1; i <= 1024; i++) {
+            storage.storeLog(createLog("t" + i, "s" + i, 1000L * i, false));
+        }
+
+        final Map<String, Object> capped = (Map<String, Object>) storage.selfStatSnapshot().get("capped");
+        Assert.assertEquals("1024 段必然把 4096B 的环绕过多圈", Boolean.TRUE,
+                Boolean.valueOf(((Long) capped.get("wrapCount")).longValue() >= 1L));
+        Assert.assertTrue("最早的载荷指针应是真实偏移", ((Long) capped.get("oldestPayloadId")).longValue() >= 0L);
+        Assert.assertEquals("绕圈后最早指针落在可读窗口左侧 → 报过期（预期结果，不是故障）",
+                Boolean.FALSE, capped.get("oldestPayloadReadable"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void clear_resetsTimeRangeWatermarks() {
+        storage.storeLog(createLog("t1", "s1", 1000L, false));
+        storage.clear();
+
+        final Map<String, Object> h2 = (Map<String, Object>) storage.selfStatSnapshot().get("h2");
+        Assert.assertEquals("clear 后最老段时间必须回到 -1", Long.valueOf(-1L), h2.get("oldestStartTimeMs"));
+        Assert.assertEquals("clear 后最新段时间必须回到 -1", Long.valueOf(-1L), h2.get("newestStartTimeMs"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     public void selfStatSnapshot_disabledStorage_reportsDisabledShapes() {
         storage.close();
         storage = new H2TraceSegmentStorage(false, 2000, false, null, 0L);

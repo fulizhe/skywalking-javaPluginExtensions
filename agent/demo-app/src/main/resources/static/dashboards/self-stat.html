@@ -180,11 +180,16 @@
     while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
     return (i === 0 ? x : f(x, 2)) + " " + u[i];
   }
+  /** 时长的人读格式。分档到分钟/小时——「持久层覆盖跨度」常是几十分钟，
+      只到秒会渲染成 "2880.00 s" 这种没人愿意读的数字。
+      低于 1ms 单列一档：环形文件单次写耗时就在 0.002ms 量级，四舍五入成 "0.0 ms" 等于没显示。 */
   function dur(ms) {
-    if (ms === null || ms === undefined || isNaN(ms)) return "—";
+    if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return "—";
     if (ms < 1) return f(ms, 3) + " ms";
     if (ms < 1000) return f(ms, 1) + " ms";
-    return f(ms / 1000, 2) + " s";
+    if (ms < 60000) return f(ms / 1000, 2) + " s";
+    if (ms < 3600000) return f(ms / 60000, 1) + " 分钟";
+    return f(ms / 3600000, 1) + " 小时";
   }
   /**
    * 「距今多久」的人读格式。
@@ -199,6 +204,16 @@
     if (s < 3600) return Math.floor(s / 60) + " 分";
     if (s < 86400) return f(s / 3600, 1) + " 小时";
     return f(s / 86400, 1) + " 天";
+  }
+
+  /** 绝对时间戳 → 人类可读（精确到秒）；缺失（-1 / null / 0）返回 "—"。 */
+  function fmtTime(ms) {
+    if (ms === null || ms === undefined || ms <= 0) return "—";
+    var d = new Date(Number(ms));
+    if (isNaN(d.getTime())) return "—";
+    function p(x) { return x < 10 ? "0" + x : String(x); }
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " "
+      + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
   }
   function badge(cls, text) { return '<span class="badge ' + cls + '">' + esc(text) + "</span>"; }
 
@@ -309,16 +324,25 @@
     }
     var ratio = h.rowUsageRatio || 0;
     document.getElementById("h2").innerHTML = bar(ratio, ratio > 0.8, false) + table([
-      row("存活行数", n(h.rows)),
-      row("行数水位上限", n(h.maxRows) + "（占用 " + pct(ratio) + "）"),
+      row("存活段数（H2 一行 = 一个 segment）", n(h.rows)),
+      row("段数水位上限", n(h.maxRows) + "（占用 " + pct(ratio) + "）"),
       row("累计插入 / 被水位清理", n(h.insertedRows) + " / " + n(h.evictedRows)),
-      row("约占用（估算）", bytes(h.estimatedBytes) + " × " + n(h.bytesPerRowEstimate) + " B/行", "warn"),
+      row("约占用（估算）", bytes(h.estimatedBytes) + " × " + n(h.bytesPerRowEstimate) + " B/段",
+        "warn"),
+      row("最老段的时间", fmtTime(h.oldestStartTimeMs)),
+      row("最新段的时间", fmtTime(h.newestStartTimeMs)),
+      row("持久层覆盖跨度", dur(h.coveredSpanMs)),
       row("存储侧错误", n(h.errorCount), (h.errorCount || 0) > 0 ? "err" : ""),
       row("审计表水位", n(h.auditWaterLevel))
     ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
-      + "行数是<b>增量口径</b>（插入数 − 被清理数），O(1) 不扫表；H2 无内存读口，"
+      + "<b>段数 ≠ 链路数</b>：一条链路（trace）含 1~3 个 segment。对账页那个「H2 trace 数」数的是 "
+      + "<code>distinct traceId</code>（<code>/inner/sw/trace-parity</code> 的 <code>h2Size</code>），"
+      + "和这里的段数不是一个口径，别相加。"
+      + "<br>行数是<b>增量口径</b>（插入数 − 被清理数），O(1) 不扫表；H2 无内存读口，"
       + "所以字节数只能按实测单行成本折算（见下方口径说明）。"
-      + "payload 不在这里 —— 它在环形文件里，堆外。</div>";
+      + "<br><b>最老段时间为什么写「约」</b>：行数水位按 <code>id</code> 删，而 <code>start_time</code> "
+      + "与 <code>id</code> 的序并不严格一致（异步段、时钟回拨会让后写入的行带更早的时间），"
+      + "所以它是「最老存活行的时间」而非严格 MIN。payload 不在这里 —— 它在环形文件里，堆外。</div>";
   }
 
   function renderBacklog(s) {
@@ -335,6 +359,36 @@
     ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
       + "这一格是「存储侧还能不能跟上采集」的<b>先行指标</b>：它在丢段发生<b>之前</b>就会涨。"
       + "持续上涨 → 顶到容量 → 出现丢弃。</div>";
+  }
+
+  /**
+   * 交叉验证结论：H2 侧最早的载荷指针 vs 环形文件可读窗口左端。
+   *
+   * <p>三种可能分开：<b>没采到</b>（produced 不涨）/ <b>被行数水位清了</b>（h2 存活段数在涨但
+   * 最老段时间随进程推进）/ <b>载荷过期</b>（本行报"过期"）。第三种是环写满的<b>预期结果</b>，
+   * 前两种才需要查。</p>
+   */
+  function renderCrossCheck(s) {
+    var c = s.capped || {}, h = s.h2 || {};
+    var pid = c.oldestPayloadId;
+    var win = c.oldestLiveIndex;
+    if (!c.enabled || pid === undefined || pid === null || pid < 0
+        || win === undefined || win === null) {
+      return '<div class="off">交叉验证不可用（无存活行，或存活行都没有载荷）</div>';
+    }
+    var expired = c.oldestPayloadReadable === false;
+    return '<div style="font-size:12px;line-height:1.8;margin-top:10px;padding-top:8px;'
+      + 'border-top:1px solid #f1f3f5">'
+      + "<b>丢了还是过期了</b>：H2 最早的载荷指针 <code>" + n(pid) + "</code> vs 环可读窗口左端 <code>"
+      + n(win) + "</code> → "
+      + (expired
+        ? badge("warn", "过期") + " 有行指向已被环覆盖的载荷，<b>这是环写满的预期结果，不是故障</b>；"
+          + "载荷过期时链路查询会标 <code>payloadExpired</code> 而不是脏读。"
+        : badge("ok", "可读") + " 存活段指向的载荷都还在环的可读窗口内。")
+      + "<br><span style=\"color:var(--muted)\">"
+      + "若怀疑<b>丢失</b>，看上面两处：H2 的「最老段时间」是否随进程推进（= 行数水位在吃老数据），"
+      + "以及「累计插入」是否在涨（= 采到的确实进来了，只是被清掉了）。"
+      + "</span></div>";
   }
 
   function renderCapped(s) {
@@ -363,7 +417,8 @@
     ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
       + "这块是 <b>堆外</b>的：文件定长、写满覆盖最旧块，所以磁盘占用有<b>硬上限</b>（默认 128 MB），"
       + "不随流量增长。H2 行数被清理后，载荷还可能多活一会儿（覆盖按空间走，不按时间）；"
-      + "反之载荷先被覆盖时，读口会标 <code>payloadExpired</code> 而不是脏读。</div>";
+      + "反之载荷先被覆盖时，读口会标 <code>payloadExpired</code> 而不是脏读。</div>"
+      + renderCrossCheck(s);
   }
 
   function renderHeap(s) {

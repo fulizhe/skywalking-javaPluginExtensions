@@ -93,6 +93,31 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     private volatile long insertCount;
     /** 被行数水位清理掉的累计行数（与 {@link #insertCount} 相减即当前存活行数，避免读口做全表 COUNT）。 */
     private volatile long deletedByRowCap;
+
+    // ==================== 交叉验证用的增量水位（供 /inner/sw/self-stat）====================
+    // 目的：回答"持久层最老的一条是什么时候"以及"是丢了还是过期了"。
+    // 这两件事都**不能**用 MIN(start_time) 直接问 —— start_time 无索引，那是全表扫
+    // （10 万行实测中位 23 ms、p90 44 ms），而本类所有读写都在 synchronized(this) 里，
+    // 一次这样的查询会把写线程按停几十毫秒。改为"主键 seek，每 1024 行刷新一次"。
+    /**
+     * 最老存活行（按 {@code id} 升序）的 {@code start_time}（毫秒）；MAX_VALUE = 持久层尚无行。
+     *
+     * <p><b>口径：按插入序最老的那行，不是严格 MIN(start_time)</b>。两者在乱序时会不同
+     * （异步段、时钟回拨能让后写入的行带更早的 {@code start_time}），此时本值会略新。
+     * 这是刻意的取舍：想拿严格 MIN 就得扫表（23 ms/次），而读口每 5s 轮询一次。
+     * 曾经试过让"插入时增量 min"与 seek 结果取 min 来兼顾，<b>那样是错的</b>——
+     * 增量 min 会被行数水位清掉而残留（它不带删除补偿），取 min 反而永远选那个已删值。
+     * </p>
+     */
+    private volatile long oldestLiveStartTime = Long.MAX_VALUE;
+    /** 最老存活行的 {@code payload_id}（环上的逻辑偏移）；MAX_VALUE = 尚无行，-1 = 该行没有载荷。 */
+    private volatile long oldestLivePayloadId = Long.MAX_VALUE;
+    /**
+     * 全部插入过的行的 {@code start_time} 最大值；0 = 尚无行。
+     * <p>删除只删最老行，所以最新行永远不会被删 —— 这个值<b>永不失效、无需刷新</b>，
+     * 纯 insert 时取 max 即可。</p>
+     */
+    private volatile long newestStartTime;
     private final AtomicLong writeQueueDropped = new AtomicLong(0);
     private final AtomicInteger inFlight = new AtomicInteger(0);
     private static final int WRITE_QUEUE_CAPACITY = 4096;
@@ -376,7 +401,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
      * </p>
      */
     public Map<String, Object> selfStatSnapshot() {
-        final Map<String, Object> h2 = new LinkedHashMap<String, Object>(12);
+        final Map<String, Object> h2 = new LinkedHashMap<String, Object>(16);
         final long rows = getLiveRowCount();
         h2.put("enabled", Boolean.valueOf(enabled && connection != null));
         h2.put("rows", Long.valueOf(rows));
@@ -387,6 +412,9 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         h2.put("estimatedBytes", Long.valueOf(rows * H2_BYTES_PER_ROW_ESTIMATE));
         h2.put("insertedRows", Long.valueOf(insertCount));
         h2.put("evictedRows", Long.valueOf(deletedByRowCap));
+        h2.put("oldestStartTimeMs", Long.valueOf(orMinusOne(oldestLiveStartTime)));
+        h2.put("newestStartTimeMs", Long.valueOf(newestStartTime <= 0L ? -1L : newestStartTime));
+        h2.put("coveredSpanMs", Long.valueOf(coveredSpanMs()));
         h2.put("errorCount", Long.valueOf(errorCount.get()));
         h2.put("auditWaterLevel", Integer.valueOf(AUDIT_WATER_LEVEL));
 
@@ -403,12 +431,32 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
     }
 
     /**
+     * 持久层实际覆盖的时间跨度（最新段 − 最老段，毫秒）；任一端缺失返回 {@code -1}。
+     * <p>
+     * 配 {@code maxRows} 与到达速率可判断"行数水位清理跟不跟得上"：跨度远小于
+     * "进程运行时长 × 速率"能装下的量，说明老段正在被水位清掉。
+     * </p>
+     */
+    private long coveredSpanMs() {
+        if (oldestLiveStartTime == Long.MAX_VALUE || newestStartTime <= 0L) {
+            return -1L;
+        }        final long span = newestStartTime - oldestLiveStartTime;
+        return span < 0L ? -1L : span;
+    }
+
+    private static long orMinusOne(final long value) {
+        return value == Long.MAX_VALUE ? -1L : value;
+    }
+
+    /**
      * 环形载荷文件段快照：写指针位置、物理占用、覆盖轮次 + {@link CappedFileStorageStats} 全部计数。
      * <p>未启用或初始化失败时给 {@code enabled=false} 的空壳，读口据此显示"未启用"而非报错。</p>
      */
     private Map<String, Object> cappedSnapshot() {
         final Map<String, Object> m = new LinkedHashMap<String, Object>(24);
         m.put("enabled", Boolean.valueOf(cappedStorage != null));
+        m.put("oldestPayloadId", Long.valueOf(oldestLivePayloadId == Long.MAX_VALUE ? -1L
+                : oldestLivePayloadId));
         if (cappedStorage == null) {
             m.put("file", "");
             m.put("currIndex", Long.valueOf(0L));
@@ -417,6 +465,7 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             m.put("usedRatio", Double.valueOf(0d));
             m.put("wrapCount", Long.valueOf(0L));
             m.put("oldestLiveIndex", Long.valueOf(0L));
+            m.put("oldestPayloadReadable", Boolean.TRUE);
             m.put("stats", new LinkedHashMap<String, Object>());
             return m;
         }
@@ -431,6 +480,12 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
                 : Math.min(1d, currIndex / (double) dataLen)));
         m.put("wrapCount", Long.valueOf(cappedStorage.getWrapCount()));
         m.put("oldestLiveIndex", Long.valueOf(cappedStorage.getOldestLiveIndex()));
+        // 交叉验证的核心一行：H2 里最早的载荷指针落在环的可读窗口左侧，就说明有行指向
+        // 已被覆盖的载荷 —— 那是"过期"（环写满的预期结果），不是"丢失"。
+        // 有了它，"是没采到 / 被水位清了 / 只是载荷过期"三种可能就能分开。
+        m.put("oldestPayloadReadable", Boolean.valueOf(
+                oldestLivePayloadId == Long.MAX_VALUE || oldestLivePayloadId == -1L
+                        || oldestLivePayloadId >= cappedStorage.getOldestLiveIndex()));
         m.put("stats", cappedStorage.stats().snapshot());
         return m;
     }
@@ -448,11 +503,24 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         synchronized (this) {
             try {
                 final SegmentMetrics metrics = computeSegmentMetrics(log);
-                insertSegmentRow(log, metrics, writePayload(log));
+                final long payloadId = writePayload(log);
+                insertSegmentRow(log, metrics, payloadId);
+                trackInsertedRow(metrics.startTime, payloadId);
                 enforceRowCap();
             } catch (Exception e) {
                 recordError("storeLog", e);
             }
+        }
+    }
+
+    /**
+     * 记一行插入对增量水位的影响（一次比较，纯 CPU、不加锁、不分配）。
+     * <p>只更新"最新段时间"—— 它永不变为无效（删除只删最老行）。"最老行"的水位不在这里算，
+     * 见 {@link #refreshOldestLiveRow()}。</p>
+     */
+    private void trackInsertedRow(final long startTime, final long payloadId) {
+        if (startTime > newestStartTime) {
+            newestStartTime = startTime;
         }
     }
 
@@ -769,6 +837,46 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
         if (deleted > 0) {
             deletedByRowCap += deleted;
         }
+        refreshOldestLiveRow();
+    }
+
+    /**
+     * 刷新"最老存活行"水位：一次主键 seek（{@code ORDER BY id ASC LIMIT 1}）读一行，落地其
+     * {@code start_time} 与 {@code payload_id}。
+     *
+     * <p>
+     * <b>为什么是 seek 而不是 {@code MIN(start_time)}</b>：{@code start_time} 上没有索引，
+     * {@code MIN()} 是全表扫（10 万行实测中位 23 ms、p90 44 ms），而本方法在
+     * {@code synchronized(this)} 内、被写线程独占 —— 每 1024 行卡写线程几十毫秒不可接受。
+     * seek 走主键、只读一行，实测 0.28 ms，摊到每段 0.0003 ms，与既有的 {@code MAX(id)}
+     * 同一量级。
+     * </p>
+     *
+     * <p>
+     * <b>口径提示</b>：返回的是<b>按插入序最老</b>的那行，不是严格 {@code MIN(start_time)}。
+     * 两者在乱序（异步段 / 时钟回拨）时会不同。刻意不合并"插入时增量 min"来补这一点 ——
+     * 增量值不带删除补偿，会被行数水位清掉的行残留下来，取 min 反而永远选那个已删值。
+     * </p>
+     *
+     * <p>出错时<b>保持旧值不动</b>：宁可让读口暂时显示旧水位，也不要写半截值或抛给写线程。</p>
+     */
+    private void refreshOldestLiveRow() {
+        try (PreparedStatement ps = connection.prepareStatement(H2SqlStatements.SELECT_OLDEST_LIVE_SQL);
+                ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                oldestLiveStartTime = rs.getLong(1);
+                final long payloadId = rs.getLong(2);
+                // payload_id 可能是 NULL（载荷写失败）：getLong 会把它读成 0，
+                // 而 0 恰好是合法的首个逻辑偏移，必须靠 wasNull 区分。
+                oldestLivePayloadId = rs.wasNull() ? -1L : payloadId;
+            } else {
+                // 表空了（clear 或水位清到 0）：回到"尚无行"
+                oldestLiveStartTime = Long.MAX_VALUE;
+                oldestLivePayloadId = -1L;
+            }
+        } catch (SQLException e) {
+            recordError("refreshOldestLiveRow", e);
+        }
     }
 
     /**
@@ -1056,6 +1164,9 @@ public class H2TraceSegmentStorage implements TraceSegmentStorage {
             }
             insertCount = 0L;
             deletedByRowCap = 0L;
+            oldestLiveStartTime = Long.MAX_VALUE;
+            oldestLivePayloadId = Long.MAX_VALUE;
+            newestStartTime = 0L;
         }
     }
 

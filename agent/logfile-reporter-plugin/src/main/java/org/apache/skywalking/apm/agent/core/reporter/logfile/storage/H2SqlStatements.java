@@ -66,6 +66,23 @@ final class H2SqlStatements {
 
     static final String MAX_ID_SQL = "SELECT MAX(id) FROM trace_segment";
 
+    /**
+     * 最老存活行（按 {@code id} 升序第一条）的 {@code start_time} 与 {@code payload_id}。
+     * <p>
+     * <b>刻意不带 {@code WHERE}，也不写 {@code MIN(start_time)}</b>：{@code id} 是主键，
+     * {@code ORDER BY id ASC LIMIT 1} 由主键定位、直接读一行，实测 0.28 ms；
+     * 而 {@code start_time} 上没有索引，{@code MIN(start_time)} 是全表扫
+     * （实测 10 万行中位 23 ms、p90 44 ms）。两者差 30 倍以上，而本查询每 1024 行才跑一次，
+     * 仍不该把写线程按在地上。
+     * </p>
+     * <p>
+     * {@code payload_id} 可为 NULL（载荷写失败），读侧必须用 {@code wasNull()} 判断，
+     * 不能直接 {@code getLong()}（那会把 NULL 读成 0，而 0 恰好是首个合法偏移）。
+     * </p>
+     */
+    static final String SELECT_OLDEST_LIVE_SQL =
+            "SELECT start_time, payload_id FROM trace_segment ORDER BY id ASC LIMIT 1";
+
     static final String DELETE_CAP_SQL = "DELETE FROM trace_segment WHERE id <= ?";
 
     static final String DELETE_ALL_SEGMENTS_SQL = "DELETE FROM trace_segment";

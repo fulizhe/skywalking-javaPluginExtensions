@@ -83,11 +83,12 @@ const body = slice(src, 'function esc(s) {', 'var pollTimer = null;');
 const tmp = path.join(require('os').tmpdir(), 'self-stat-under-test-' + process.pid + '.js');
 fs.writeFileSync(tmp, body + `
 module.exports = {
-  esc: esc, n: n, f: f, pct: pct, bytes: bytes, dur: dur, since: since,
+  esc: esc, n: n, f: f, pct: pct, bytes: bytes, dur: dur, since: since, fmtTime: fmtTime,
   row: row, table: table, kvRow: kvRow, bar: bar, badge: badge,
   renderVerdict: renderVerdict, renderChips: renderChips, renderCarrier: renderCarrier,
   renderPipeline: renderPipeline, renderH2: renderH2, renderBacklog: renderBacklog,
-  renderCapped: renderCapped, renderHeap: renderHeap, load: load
+  renderCapped: renderCapped, renderHeap: renderHeap, renderCrossCheck: renderCrossCheck,
+  load: load
 };
 `, 'utf8');
 const M = require(tmp);
@@ -109,11 +110,16 @@ const LIVE = {
   dataLoss: { carrierDropped: 0, storageDropped: 0, total: 0 },
   h2: { enabled: true, rows: 87461, maxRows: 100000, rowUsageRatio: 0.87461,
         bytesPerRowEstimate: 800, estimatedBytes: 87461 * 800,
-        insertedRows: 87461, evictedRows: 0, errorCount: 0, auditWaterLevel: 1000 },
+        insertedRows: 87461, evictedRows: 0, errorCount: 0, auditWaterLevel: 1000,
+        // 最老存活段（按插入序）= NOW-50min、最新 = NOW-2min → 跨度 48 min
+        oldestStartTimeMs: NOW - 50 * 60000, newestStartTimeMs: NOW - 2 * 60000,
+        coveredSpanMs: 48 * 60000 },
   backlog: { enabled: true, depth: 3, capacity: 4096, dropped: 0 },
   capped: { enabled: true, file: 'D:\\apps\\trace-payload.capped.db',
             currIndex: 26680489111, sizeBytes: 134217728, dataLenBytes: 134217712,
             usedRatio: 1, wrapCount: 198, oldestLiveIndex: 26546271399,
+            oldestPayloadId: 26546300000,   // < oldestLiveIndex → 已过期
+            oldestPayloadReadable: false,
             stats: { writeCount: 26680489, readCount: 512, missReadCount: 4096,
                      expiredReadCount: 4096, oversizedRejectedCount: 0, fsyncCount: 266804,
                      ioErrorCount: 0, compressionRatio: 0.85,
@@ -121,6 +127,19 @@ const LIVE = {
                      avgMillisPerWrite: 0.0015, avgMillisPerRead: 1.7, totalWriteMillis: 41000 } },
   jvmHeap: { usedBytes: 353374208, committedBytes: 996432232, maxBytes: 7570000000, usedRatio: 0.0467 },
 };
+
+/** 载荷全部可读（刚写完、环没绕圈）时，交叉验证必须给"可读"而不是"过期"。 */
+const NOT_EXPIRED = JSON.parse(JSON.stringify(LIVE));
+NOT_EXPIRED.capped.oldestPayloadId = 26680000000;   // > oldestLiveIndex
+NOT_EXPIRED.capped.oldestPayloadReadable = true;
+
+/** 持久层尚无行：时间三端都是 -1，交叉验证不可用。 */
+const NO_ROWS = JSON.parse(JSON.stringify(LIVE));
+NO_ROWS.h2.rows = 0;
+NO_ROWS.h2.oldestStartTimeMs = -1;
+NO_ROWS.h2.newestStartTimeMs = -1;
+NO_ROWS.h2.coveredSpanMs = -1;
+NO_ROWS.capped.oldestPayloadId = -1;
 
 /** 存储未启用（h2.enabled=false）：页面必须显示"未启用"，且**不得**报"有损耗"。 */
 const DISABLED = Object.assign({}, LIVE, {
@@ -151,6 +170,11 @@ ok('页面不得把时长当时间戳喂 since（uptimeMs 只能进 duration 类
    !/since\(\s*s\.uptimeMs/.test(src));
 ok('since(undefined) = —（未挂载插件时不编数字）', M.since(undefined) === '—', M.since(undefined));
 ok('dur 是时长口径：37.4 → "37.4 ms"', M.dur(37.4) === '37.4 ms', M.dur(37.4));
+// 环形文件单次写耗时在 0.002ms 量级：四舍五入成 "0.0 ms" 等于没显示，故低于 1ms 单列一档
+ok('dur 保留亚毫秒精度：0.0015 → "0.002 ms"', M.dur(0.0015) === '0.002 ms', M.dur(0.0015));
+ok('dur 分档到分钟：2880000 → "48.0 分钟"', M.dur(2880000) === '48.0 分钟', M.dur(2880000));
+ok('dur 分档到秒：2880 → "2.88 s"', M.dur(2880) === '2.88 s', M.dur(2880));
+ok('dur 对负值（无行时的 -1）返回 —', M.dur(-1) === '—', M.dur(-1));
 ok('bytes 二进制换算：134217728 → "128.00 MB"', M.bytes(134217728) === '128.00 MB', M.bytes(134217728));
 
 console.log('\n== 结论卡：结构与内容（bug ②）==');
@@ -187,6 +211,44 @@ ok('堆面板显示 3.0 小时（修复前是 20721.9 天）',
    // 用裸 indexOf('天') 会误判。
    && !/[\d.]+ 天/.test(textOf(n.heap.innerHTML)),
    textOf(n.heap.innerHTML));
+
+console.log('\n== H2 时间区间与"丢了 vs 过期"交叉验证 ==');
+// 最老/最新段时间：能格式化成可读时刻，且口径写明是"段"不是"链路"
+const h2text = textOf(n.h2.innerHTML);
+ok('H2 面板显示「存活段数」而不是「存活行数」', h2text.indexOf('存活段数') >= 0, h2text);
+ok('H2 面板点明一行 = 一个 segment', h2text.indexOf('H2 一行 = 一个 segment') >= 0);
+ok('H2 面板提醒段数 ≠ 链路数（别与 h2Size 相加）',
+   h2text.indexOf('distinct traceId') >= 0 && h2text.indexOf('不是一个口径') >= 0);
+ok('最老段时间渲染成可读时刻', /最老段的时间\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(h2text), h2text);
+ok('最新段时间渲染成可读时刻', /最新段的时间\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(h2text));
+ok('覆盖跨度渲染成 48.0 分钟', h2text.indexOf('48.0 分钟') >= 0, h2text);
+ok('口径注明按插入序而非严格 MIN', h2text.indexOf('而非严格 MIN') >= 0, h2text);
+
+// 交叉验证：LIVE 里 oldestPayloadId < oldestLiveIndex → 必须是"过期"且说明是预期结果
+ok('交叉验证：指针落在窗口左侧 → 判为「过期」', textOf(n.capped.innerHTML).indexOf('过期') >= 0,
+   textOf(n.capped.innerHTML));
+ok('交叉验证：明说过期是环写满的预期结果、不是故障',
+   textOf(n.capped.innerHTML).indexOf('预期结果，不是故障') >= 0);
+ok('交叉验证：给出"怀疑丢失该看哪两处"', textOf(n.capped.innerHTML).indexOf('若怀疑') >= 0);
+
+// 反向：指针在窗口内 → 判为「可读」。判据必须打**结论句**而不是"过期"二字：
+// 区块标题「丢了还是过期了」本身就含"过期"，用 indexOf('过期') < 0 判必然误报。
+n = renderAll(NOT_EXPIRED);
+const readableText = textOf(n.capped.innerHTML);
+ok('交叉验证：指针在窗口内 → 判为「可读」',
+   readableText.indexOf('存活段指向的载荷都还在环的可读窗口内') >= 0
+   && readableText.indexOf('有行指向已被环覆盖的载荷') < 0, readableText);
+
+// 无行时：时间三端是 -1，页面必须显示 "—" 而不是 1970/负数
+n = renderAll(NO_ROWS);
+ok('无行时最老/最新段时间显示 "—"（不是 -1 也不是 1970）',
+   textOf(n.h2.innerHTML).indexOf('最老段的时间 —') >= 0
+   && textOf(n.h2.innerHTML).indexOf('最新段的时间 —') >= 0, textOf(n.h2.innerHTML));
+ok('无行时交叉验证报「不可用」而不是误判', textOf(n.capped.innerHTML).indexOf('不可用') >= 0,
+   textOf(n.capped.innerHTML));
+ok('fmtTime 对 -1 / 0 / null 一律返回 —',
+   M.fmtTime(-1) === '—' && M.fmtTime(0) === '—' && M.fmtTime(null) === '—');
+ok('fmtTime 对合法时间戳给出可读时刻', /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(M.fmtTime(NOW)), M.fmtTime(NOW));
 
 console.log('\n== 存储未启用：不得被误判成"有损耗" ==');
 n = renderAll(DISABLED);
