@@ -10,9 +10,12 @@
     .verdict { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
     .verdict-text { font-size: 15px; font-weight: 700; }
     .verdict-why { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.7; }
-    .kv { display: grid; grid-template-columns: auto auto; gap: 3px 14px; font-size: 13px; }
-    .kv dt { color: var(--muted); }
-    .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
+    /* 结论卡右侧数字。用 div 行而不是 <dl>/<table>：这个块不在 table 上下文里，
+       <tr> 会被 HTML 解析器当无效标签丢弃（数字就整块不显示）。 */
+    .kv { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+    .kv-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+    .kv-row .k { color: var(--muted); white-space: nowrap; }
+    .kv-row .v { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
     /* 环形占用条：环写满即覆盖最旧块，所以封顶 100% */
     .bar { height: 10px; background: #eef1f4; border-radius: 5px; overflow: hidden; margin: 6px 0 2px; }
     .bar > i { display: block; height: 100%; background: var(--accent); }
@@ -26,7 +29,15 @@
     details.caveats th { background: #f6f8fa; color: var(--muted); font-weight: 600; }
     .est { color: var(--warn); }
     .off { color: var(--muted); font-style: italic; }
-    td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    /* 面板里的两列：标签给最小宽度，免得「写指针 currIndex（逻辑字节）」折成三行 */
+    table.kvtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.kvtable td { padding: 3px 0; border-bottom: 1px solid #f1f3f5; vertical-align: top; }
+    table.kvtable td.lbl { min-width: 42%; padding-right: 12px; }
+    table.kvtable td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    /* 标红 / 标黄：dashboard.css 里只有 .badge.err 与 .tl-bar.error，**没有裸 .err**，
+       而本页就是用 class="num err" 直接给数字上色的 —— 不在这里定义就等于没标。 */
+    table.kvtable td.num.err, .kv-row .v.err { color: var(--err); font-weight: 700; }
+    table.kvtable td.num.warn, .kv-row .v.warn { color: var(--warn); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -59,7 +70,7 @@
                 <div class="verdict-text" id="verdictText">读取中…</div>
                 <div class="verdict-why" id="verdictWhy"></div>
             </div>
-            <dl class="kv" id="verdictKv"></dl>
+            <div class="kv" id="verdictKv"></div>
         </div>
     </section>
 
@@ -175,7 +186,13 @@
     if (ms < 1000) return f(ms, 1) + " ms";
     return f(ms / 1000, 2) + " s";
   }
-  function ago(ms) {
+  /**
+   * 「距今多久」的人读格式。
+   * 入参必须是**绝对时间戳**（epoch ms，如插件的 startedAtMs），
+   * **不是时长** —— 传时长会算出 "距 1970 年起过了 20721 天" 这种废数。
+   * 要显示"已运行多久"就传 startedAtMs；要显示时长本身自己除，不要进这里。
+   */
+  function since(ms) {
     if (!ms) return "—";
     var s = Math.floor((Date.now() - ms) / 1000);
     if (s < 60) return s + " 秒";
@@ -185,11 +202,15 @@
   }
   function badge(cls, text) { return '<span class="badge ' + cls + '">' + esc(text) + "</span>"; }
 
-  /** 一行「标签 …… 值」；值缺失时给一个灰字说明，绝不留空让人误读成 0。 */
+  /** 面板里的一行「标签 …… 值」；值缺失时给一个灰字说明，绝不留空让人误读成 0。 */
   function row(label, value, cls) {
-    return "<tr><td>" + esc(label) + '</td><td class="num ' + (cls || "") + '">' + value + "</td></tr>";
+    return "<tr><td class='lbl'>" + esc(label) + "</td><td class='num " + (cls || "") + "'>" + value + "</td></tr>";
   }
-  function table(rows) { return '<table style="width:100%;border-collapse:collapse;font-size:13px">' + rows.join("") + "</table>"; }
+  function table(rows) { return '<table class="kvtable">' + rows.join("") + "</table>"; }
+  /** 结论卡的一行：这里不在 table 上下文内，用 div 而不是 <tr>（<tr> 会被解析器丢弃）。 */
+  function kvRow(label, value, cls) {
+    return '<div class="kv-row"><span class="k">' + esc(label) + '</span><span class="v ' + (cls || "") + '">' + value + "</span></div>";
+  }
   function bar(ratio, warn, err) {
     var p = Math.max(0, Math.min(1, ratio || 0));
     var cls = err ? " is-err" : (warn ? " is-warn" : "");
@@ -222,12 +243,12 @@
       + "所有落盘、压缩、聚合都在插件自己的线程上跑完。";
 
     document.getElementById("verdictKv").innerHTML =
-      row("丢段总数", '<b>' + n(total) + "</b>", total > 0 ? "err" : "")
-      + row("采集入口丢", n(loss.carrierDropped))
-      + row("存储队列丢", n(loss.storageDropped))
-      + row("单批消费峰值", dur(maxMs))
-      + row("H2 行数 / 水位", n(h2.rows) + " / " + n(h2.maxRows))
-      + row("环形文件占用", pct(capped.usedRatio));
+      kvRow("丢段总数", '<b>' + n(total) + "</b>", total > 0 ? "err" : "")
+      + kvRow("采集入口丢", n(loss.carrierDropped))
+      + kvRow("存储队列丢", n(loss.storageDropped))
+      + kvRow("单批消费峰值", dur(maxMs))
+      + kvRow("H2 行数 / 水位", n(h2.rows) + " / " + n(h2.maxRows))
+      + kvRow("环形文件占用", pct(capped.usedRatio));
   }
 
   function renderChips(s) {
@@ -291,7 +312,7 @@
       row("存活行数", n(h.rows)),
       row("行数水位上限", n(h.maxRows) + "（占用 " + pct(ratio) + "）"),
       row("累计插入 / 被水位清理", n(h.insertedRows) + " / " + n(h.evictedRows)),
-      row("约占用 <span class='est'>估算</span>", bytes(h.estimatedBytes) + " × " + n(h.bytesPerRowEstimate) + " B/行"),
+      row("约占用（估算）", bytes(h.estimatedBytes) + " × " + n(h.bytesPerRowEstimate) + " B/行", "warn"),
       row("存储侧错误", n(h.errorCount), (h.errorCount || 0) > 0 ? "err" : ""),
       row("审计表水位", n(h.auditWaterLevel))
     ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
@@ -352,7 +373,7 @@
       row("已用", bytes(h.usedBytes) + "（" + pct(ratio) + "）"),
       row("已提交", bytes(h.committedBytes)),
       row("上限 -Xmx", bytes(h.maxBytes)),
-      row("进程已运行", ago(s.uptimeMs))
+      row("进程已运行", since(s.startedAtMs))
     ]) + '<div style="color:var(--muted);font-size:12px;margin-top:8px;line-height:1.7">'
       + "H2 内存库跑在<b>被监控应用的同一个堆</b>里，所以这一栏是它的天花板。"
       + "这就是为什么 payload 要挪到堆外环形文件、指标要做保留期清理："
