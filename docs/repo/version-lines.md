@@ -22,8 +22,19 @@
   2.0.0 是之后主要维护的版本；1.0.0 线只接下面「改动范围」与「例外」允许的东西。
 - **一轮维护的形状：先提交，后打 tag。** tag 是「这次发布哪个提交」的唯一声明，且**永不移动** ——
   所以它必须打在分支 tip 上（落在本轮最后一个 commit 上）；tag 之后分支可以继续往前，tag 不动。
-  一轮 = 若干 commit → 在 tip 上打 `1.0.0-maintN` → push tag → Actions 出 run → Release 自动建
-  （构建的是那些 commit 的代码，不是 master 的）。
+
+  ```text
+  release/1.0.0 分支                    tag / Release
+      ├─ commit A  可观测性读口
+      ├─ commit B  修 bug
+      └─ commit C  文档
+             │
+             └─ tag 1.0.0-maint3   ← 必须落在 C 上（分支 tip）
+                    │
+                    └─ push tag → Actions 出 run → Release 自动建（构建 C 的代码）
+  ```
+
+  这一轮结束。分支继续往前；下一轮 commit D 之后打 `1.0.0-maint4`。
 - **「最新」有两个含义，别混**：**用户装哪个**看最新的 `1.0.0-maintN` tag / Release；
   **`release/1.0.0` 分支 tip 是最新的代码**，可能已经领先最后一个 Release（下一轮还没打 tag 的活）。
   分支领先最后一个 tag 是正常的，不是漏发。
