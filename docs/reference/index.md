@@ -11,6 +11,8 @@
   （基准：`456b191`；已核实：采集阈值、写入路径与背压、H2 + `CappedDatabase` 存储模型、读取路径、partial trace；未核实：默认 Reaper 过期时长 / capped 默认大小等，见 §7）
 - **Glowroot CappedDatabase：H2 行 + 封顶文件存 payload** —— 何时读：评估"H2 只存索引/header、大 payload 走环形封顶文件"或磁盘硬上限方案时。→ `glowroot-capped-database.md`
   （基准：`456b191`；已核实：文件格式、块读写、覆盖判定、压缩/fsync/resize/统计、`TraceDao` 指针语义、**一 JVM 多实例（1 trace + N rollup）**、`Existence` 三态；未核实：resize 触发入口，见 §6）
+- **Glowroot Profiler：profile 采集与呈现实现速览** —— 何时读：评估"引入 Glowroot 的 profile / 火焰图思路"、或要搞清 Glowroot 的 profile 到底是"连续采样"还是"跟着慢 trace 走"时。→ `glowroot-profiling.md`
+  （基准：`a48cd05c`（main，2026-10-04）；**已核实**：阈值门控 + 无采样百分比 + 间隔可配 + profile 挂单条 trace、线程 CPU/blocked/allocated 走 `ThreadMXBean` 差值、**发行包无 async-profiler**、火焰图用 d3-flame-graph、虚拟线程丢 profile 的复现参数；**未核实**：真正采样类/包、profile 存储 schema、"continuous profiling" 落点，见 §6。姊妹篇 `glowroot-trace-storage.md` / `glowroot-capped-database.md` 基准为 `456b191`，与本文不同）
 - **SkyWalking 组件（品牌）图标在哪 / 能不能抄** —— 何时读：想把依赖拓扑页的组件图标换成官方那套 docker/go/postgres/nginx 品牌图标时。→ `skywalking-component-icons.md`
   （核实：本机 `sw-ui`（9.4.0）jar 内**零组件 svg**；`skywalking-booster-ui` 的 `src/assets/icons/` 是 96 个 Material 单色图标；`component-libraries.yml` 无 `icon` 字段。**结论：9.4.0 拿不到品牌图标**，见 §2）
 
