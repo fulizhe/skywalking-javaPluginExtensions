@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — 抛砖用的、一次性代码，不属于生产。评审完删除，答案沉淀进实现 issue。
+  设计问题：「依赖拓扑图该长什么样？参考主流 APM（SkyWalking / Jaeger / Grafana Node Graph /
+  Kiali / Datadog Service Map），哪个形态最适合『单体 self → 外部依赖』的汇报与自诊？」
+  四个结构不同的方案，`?variant=A|B|C|D` 切换，底部浮动开关或 ← → 键翻页。
+  数据全部为页面内模拟（契约对齐 topology.html 读口 /inner/sw/topology），仅用于效果评审。
+  参考做法与外壳：同目录 metrics-prototype.html。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依赖拓扑图原型 · 视觉方案</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:#0b0f17;color:#e6edf3;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+:root{--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+a{color:inherit}
+
+/* ================= 原型外壳（不参与评比） ================= */
+.proto-bar{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;gap:14px;
+  padding:9px 18px;background:#141821;border-bottom:1px solid #2a3142;color:#c7d0e0;font-size:12.5px}
+.proto-tag{background:#f43f5e;color:#fff;font-weight:800;letter-spacing:.14em;font-size:11px;padding:3px 9px;border-radius:5px}
+.proto-title{font-weight:700;color:#fff;white-space:nowrap}
+.proto-q{color:#8b96ad;margin-left:auto;max-width:64%;text-align:right;line-height:1.5}
+.proto-q b{color:#7cc4ff}
+.pv{padding:58px 0 96px;min-height:100vh}
+.switcher{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;
+  display:flex;align-items:center;gap:14px;background:rgba(15,18,26,.94);border:1px solid #39415a;
+  border-radius:999px;padding:7px 10px;box-shadow:0 10px 34px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.switcher button{width:32px;height:32px;border-radius:999px;border:1px solid #454f6b;background:#1d2230;color:#e8edf7;
+  cursor:pointer;font-size:14px;line-height:1;display:grid;place-items:center}
+.switcher button:hover{background:#2a3145;border-color:#5f6b8f}
+.sw-label{display:flex;flex-direction:column;align-items:center;min-width:210px}
+.sw-label .k{font-family:var(--mono);font-weight:800;font-size:13px;color:#7cc4ff;letter-spacing:.1em}
+.sw-label .n{font-size:12.5px;color:#cfd7e6}
+.sw-hint{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);z-index:70;color:#5f6980;font-size:11px}
+
+/* ================= A：星云力导（SkyWalking / Kiali 风） ================= */
+.vA{--panel:#0e1626;--bd:#1d2a44;--tx:#dbe6f7;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185;
+  background:radial-gradient(1200px 700px at 32% 30%,#0f1c34 0%,#0a1120 55%,#070c16 100%);color:var(--tx);min-height:100vh}
+.vA .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vA .head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.vA .head h2{margin:0;font-size:19px;letter-spacing:.01em}
+.vA .head .sub{color:var(--mut);font-size:12.5px}
+.vA .seg{display:flex;margin-left:auto;border:1px solid var(--bd);border-radius:9px;overflow:hidden}
+.vA .seg span{padding:5px 12px;font-size:12px;color:var(--mut);cursor:default}
+.vA .seg span.on{background:#16233d;color:#cfe6ff;font-weight:700}
+.vA .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.vA .kpi{flex:1 1 150px;background:linear-gradient(180deg,#101a30,#0d1526);border:1px solid var(--bd);border-radius:12px;padding:11px 14px}
+.vA .kpi .k{font-size:11.5px;color:var(--mut)}
+.vA .kpi .v{font-family:var(--mono);font-weight:800;font-size:23px;margin:4px 0 2px;letter-spacing:-.02em}
+.vA .kpi .s{font-size:11px;color:var(--mut)}
+.vA .stage{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:stretch}
+@media(max-width:1080px){.vA .stage{grid-template-columns:1fr}}
+.vA .canvas{position:relative;background:linear-gradient(180deg,#0b1425,#0a1120);border:1px solid var(--bd);border-radius:14px;
+  overflow:hidden;min-height:660px;box-shadow:inset 0 0 120px rgba(56,189,248,.05)}
+.vA .canvas::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(125,145,220,.16) 1px,transparent 1px);
+  background-size:26px 26px;mask-image:radial-gradient(circle at 34% 50%,#000 20%,transparent 78%)}
+.vA .topo{position:relative;width:100%;height:660px;display:block}
+.vA .topo text{font-family:"Microsoft YaHei",sans-serif}
+.vA .edge-base{fill:none;stroke-linecap:round;transition:opacity .2s}
+.vA .edge-dash{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-dasharray:1.5 13;animation:flowdash 2.4s linear infinite}
+@keyframes flowdash{to{stroke-dashoffset:-29}}
+.vA .node{cursor:pointer;transition:opacity .2s}
+.vA .node .disc{transition:transform .2s;transform-box:fill-box;transform-origin:center}
+.vA .node:hover .disc{transform:scale(1.08)}
+.vA .node text{fill:#e6eefb;font-size:12px;font-weight:600}
+.vA .node .sub{fill:#8ea3c7;font-size:10.5px;font-weight:400}
+.vA .topo.dimming .node:not(.hot){opacity:.2}
+.vA .topo.dimming .edge-base:not(.hot),.vA .topo.dimming .edge-dash:not(.hot),.vA .topo.dimming .flow:not(.hot){opacity:.06}
+.vA .topo.dimming .node.hot text{fill:#fff}
+.vA .legend{position:absolute;left:16px;bottom:14px;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--mut);z-index:2}
+.vA .legend .li{display:inline-flex;align-items:center;gap:6px}
+.vA .legend .sw{width:9px;height:9px;border-radius:3px}
+.vA .inspector{background:linear-gradient(180deg,#101a30,#0c1424);border:1px solid var(--bd);border-radius:14px;padding:16px;min-width:0}
+.vA .inspector h3{margin:0 0 3px;font-size:15px}
+.vA .inspector .lay{font-size:11.5px;color:var(--mut);margin-bottom:14px}
+.vA .inspector .grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.vA .inspector .cell{background:#0b1425;border:1px solid var(--bd);border-radius:9px;padding:9px 10px}
+.vA .inspector .cell .k{font-size:11px;color:var(--mut)}
+.vA .inspector .cell .v{font-family:var(--mono);font-weight:700;font-size:16px;margin-top:2px}
+.vA .inspector .ops{font-family:var(--mono);font-size:11px;color:#a9bede;line-height:1.9;word-break:break-all}
+.vA .inspector .ops b{color:#7cc4ff;font-weight:600}
+.vA .inspector .muted{color:var(--mut);font-size:12px;line-height:1.9}
+.vA .badge{display:inline-block;min-width:18px;text-align:center;background:#451a24;color:#ffb4c0;border:1px solid #7c2b3c;
+  border-radius:999px;font-size:10px;font-weight:700;padding:1px 5px;font-family:var(--mono)}
+
+/* ================= B：分层控制台（Grafana Node Graph 风） ================= */
+.vB{--panel:#111827;--bd:#26313f;--tx:#e6edf3;--mut:#8b98ab;--ac:#22d3ee;--ok:#34d399;--warn:#fbbf24;--err:#f87171;
+  background:#0d1320;color:var(--tx);min-height:100vh}
+.vB .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vB .head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.vB .head h2{margin:0;font-size:18px}
+.vB .chips{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.vB .chip{border:1px solid var(--bd);background:#141c2b;border-radius:8px;padding:5px 11px;font-size:12px;color:var(--mut)}
+.vB .chip.on{background:#0f2a33;border-color:#1d5a66;color:#9deffb}
+.vB .board{position:relative;background:#0b111c;border:1px solid var(--bd);border-radius:12px;overflow:auto;
+  background-image:radial-gradient(rgba(120,145,190,.14) 1px,transparent 1px);background-size:22px 22px}
+.vB .inner{position:relative;width:1220px;height:720px}
+.vB .edges{position:absolute;inset:0;width:1220px;height:720px}
+.vB .edge{fill:none;stroke-linecap:round}
+.vB .edge.flow{stroke-dasharray:2 10;animation:bfdash 1.6s linear infinite}
+@keyframes bfdash{to{stroke-dashoffset:-24}}
+.vB .board.dim .bcard:not(.hot){opacity:.3}
+.vB .board.dim .edge:not(.hot){opacity:.08}
+.vB .selfcard,.vB .bcard{position:absolute;background:linear-gradient(180deg,#141d2d,#101826);border:1px solid var(--bd);
+  border-radius:11px;padding:12px 13px;cursor:default;transition:opacity .18s,border-color .18s}
+.vB .selfcard{border-color:#1d5a66;box-shadow:0 0 0 1px rgba(34,211,238,.12),0 14px 40px rgba(0,0,0,.35)}
+.vB .selfcard .t{font-size:12px;color:var(--mut)}
+.vB .selfcard .big{font-family:var(--mono);font-weight:800;font-size:30px;letter-spacing:-.02em;margin:6px 0}
+.vB .selfcard .row{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:5px}
+.vB .selfcard .row b{color:#dbe6f7;font-family:var(--mono)}
+.vB .spark{display:flex;align-items:flex-end;gap:2px;height:26px;margin-top:10px}
+.vB .spark i{flex:1;background:linear-gradient(180deg,#22d3ee,#164e63);border-radius:1px;opacity:.75}
+.vB .bcard{padding:10px 12px}
+.vB .bcard .top{display:flex;align-items:center;gap:9px}
+.vB .bcard img{width:24px;height:24px}
+.vB .bcard .nm{font-family:var(--mono);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vB .bcard .ly{font-size:10px;letter-spacing:.04em;margin-top:2px}
+.vB .bcard .st{margin-left:auto;text-align:right}
+.vB .bcard .st .n{font-family:var(--mono);font-weight:700;font-size:14px}
+.vB .bcard .st .e{font-family:var(--mono);font-size:11px}
+.vB .bcard .bar{height:4px;background:#0a0f18;border-radius:3px;margin-top:8px;overflow:hidden}
+.vB .bcard .bar i{display:block;height:100%;border-radius:3px}
+.vB .epill rect{fill:#0b1622;stroke:#2b3a4d}
+.vB .epill text{fill:#c4d3e6;font-size:10.5px;font-family:var(--mono)}
+.vB .lane{position:absolute;border-radius:10px;background:rgba(255,255,255,.02);border:1px solid #1e2836;border-left-width:3px}
+.vB .lane .lt{position:absolute;top:10px;left:12px;font-size:12px;font-weight:700}
+.vB .lane .lc{position:absolute;top:31px;left:12px;font-size:11px;color:var(--mut);line-height:1.6}
+
+/* ================= C：流量带（Sankey / 汇报图，浅色） ================= */
+.vC{--panel:#ffffff;--bd:#e3e8f0;--tx:#16213a;--mut:#68758c;--ac:#2563eb;--ok:#12b981;--warn:#f59e0b;--err:#ef4444;
+  background:#eef2f8;color:var(--tx);min-height:100vh}
+.vC .wrap{max-width:1240px;margin:0 auto;padding:20px 22px}
+.vC .head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.vC .head h2{margin:0;font-size:20px}
+.vC .head .sub{color:var(--mut);font-size:12.5px}
+.vC .stamp{margin-left:auto;font-size:12px;color:var(--mut);font-family:var(--mono)}
+.vC .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:960px){.vC .kpis{grid-template-columns:repeat(2,1fr)}}
+.vC .kpi{background:var(--panel);border:1px solid var(--bd);border-radius:14px;padding:14px 16px;box-shadow:0 6px 18px rgba(22,33,58,.05)}
+.vC .kpi .k{font-size:12px;color:var(--mut)}
+.vC .kpi .v{font-family:var(--mono);font-weight:800;font-size:26px;margin:6px 0 2px;letter-spacing:-.02em}
+.vC .kpi .s{font-size:11.5px;color:var(--mut)}
+.vC .cols{display:grid;grid-template-columns:1.65fr 1fr;gap:16px;align-items:start}
+@media(max-width:1080px){.vC .cols{grid-template-columns:1fr}}
+.vC .card{background:var(--panel);border:1px solid var(--bd);border-radius:16px;padding:18px 18px;box-shadow:0 8px 24px rgba(22,33,58,.05)}
+.vC .card h3{margin:0 0 4px;font-size:15px}
+.vC .card .cap{color:var(--mut);font-size:12px;margin-bottom:12px}
+.vC .ribbon{transition:opacity .15s}
+.vC .ribbon:hover{opacity:1}
+.vC .flow-item{cursor:default}
+.vC .flow-item.dim{opacity:.22}
+.vC .rlabel{font-family:"Microsoft YaHei",sans-serif;font-size:12px;fill:#16213a}
+.vC .rsub{font-size:10.5px;fill:#68758c;font-family:"Cascadia Code",Consolas,monospace}
+.vC table{width:100%;border-collapse:collapse;font-size:12.5px}
+.vC th{text-align:left;color:var(--mut);font-weight:700;font-size:11px;padding:6px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.vC td{padding:8px;border-bottom:1px solid var(--bd)}
+.vC tr:last-child td{border-bottom:0}
+.vC .num{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.vC .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+
+/* ================= D：追猎者（Jaeger 风：链路 + 依赖图） ================= */
+.vD{--panel:#1a1a1e;--bd:#2c2c33;--tx:#e8e8ea;--mut:#8a8a94;--ac:#67c3f3;--ok:#5fca7a;--warn:#e0a33e;--err:#e05656;
+  background:#111114;color:var(--tx);min-height:100vh;font-family:"Helvetica Neue",Arial,"Microsoft YaHei",sans-serif}
+.vD .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 20px;background:#1a1a1e;border-bottom:1px solid var(--bd)}
+.vD .top .logo{font-weight:800;color:#67c3f3;font-size:15px;letter-spacing:.02em;margin-right:6px}
+.vD .sel{background:#25252b;border:1px solid #38383f;color:#d7d7db;border-radius:4px;padding:5px 10px;font-size:12.5px}
+.vD .sel b{color:#fff}
+.vD .top .sp{margin-left:auto;display:flex;align-items:center;gap:8px}
+.vD .btn{background:#25252b;border:1px solid #38383f;color:#c9c9cf;border-radius:4px;padding:5px 12px;font-size:12.5px}
+.vD .wrap{padding:16px 20px}
+.vD .grid{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+@media(max-width:1080px){.vD .grid{grid-template-columns:1fr}}
+.vD .card{background:#1a1a1e;border:1px solid var(--bd);border-radius:6px;overflow:hidden}
+.vD .card>.hd{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--bd);font-size:13px;font-weight:700}
+.vD .card>.hd .m{margin-left:auto;color:var(--mut);font-weight:400;font-size:12px;font-family:var(--mono)}
+.vD .wf{padding:6px 0 10px}
+.vD .wfrow{display:grid;grid-template-columns:250px 1fr 66px;align-items:center;gap:10px;padding:4px 14px;cursor:pointer;border-left:3px solid transparent}
+.vD .wfrow:hover{background:#22222a}
+.vD .wfrow.hot{background:#232c38;border-left-color:#67c3f3}
+.vD .wfrow .op{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:14px}
+.vD .wfrow .op .svc{color:var(--mut);font-size:11px}
+.vD .wfrow.err .op{color:#f0a0a0}
+.vD .track{position:relative;height:16px;border-radius:3px;background:#202027;overflow:hidden}
+.vD .track i{position:absolute;top:0;bottom:0;border-radius:3px;min-width:2px}
+.vD .track i.err{background:#e05656}
+.vD .dur{font-family:"Cascadia Code",Consolas,monospace;font-size:11.5px;color:#b9b9c0;text-align:right}
+.vD .detail{padding:12px 14px;font-size:12px;font-family:"Cascadia Code",Consolas,monospace;color:#c9c9cf}
+.vD .detail .kv{display:flex;gap:10px;padding:3px 0;border-bottom:1px dashed #26262d}
+.vD .detail .kv .k{color:var(--mut);width:120px;flex:none}
+.vD .dep svg{display:block;width:100%;height:auto}
+.vD .dep .dn{font-size:11px;fill:#d7d7db}
+.vD .dep .dns{font-size:9.5px;fill:#8a8a94;font-family:"Cascadia Code",Consolas,monospace}
+.vD .dep .de{stroke:#4a4a52;stroke-width:1.2;fill:none}
+.vD .dep .node{cursor:pointer}
+.vD .dep .node.dim{opacity:.28}
+.vD .dep .self-lab{fill:#67c3f3;font-size:12px;font-weight:700}
+
+/* ================= 图例（B/C 共用） ================= */
+.health-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:#8b98ab;margin-top:10px}
+.health-legend .li{display:inline-flex;align-items:center;gap:6px}
+.health-legend .sw{width:9px;height:9px;border-radius:3px}
+</style>
+</head>
+<body>
+
+<header class="proto-bar">
+  <span class="proto-tag">PROTOTYPE</span>
+  <span class="proto-title">依赖拓扑图 · 视觉方案</span>
+  <span class="proto-q" id="proto-q"></span>
+</header>
+
+<main id="app"></main>
+
+<div class="switcher">
+  <button id="sw-prev" title="上一个方案（←）">◀</button>
+  <div class="sw-label"><span class="k" id="sw-k">A</span><span class="n" id="sw-n"></span></div>
+  <button id="sw-next" title="下一个方案（→）">▶</button>
+</div>
+<div class="sw-hint">← → 切换方案 · ?variant=A|B|C|D · 数据为模拟，仅用于效果评审</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   0) 模拟数据（契约对齐 topology.html 读口 /inner/sw/topology）
+   ============================================================ */
+var DEPS=[
+  {id:"h2",        name:"h2-jdbc-driver", short:"H2",      layer:"Database",     icon:"icons/H2.png",         calls:12480, errs:0,   p95:3,    max:22,   ops:["JDBC/PreparedStatement/executeQuery","JDBC/PreparedStatement/execute"]},
+  {id:"mysql",     name:"Mysql",           short:"MySQL",   layer:"Database",     icon:"icons/MYSQL.png",      calls:3120,  errs:0,   p95:94,   max:312,  ops:["Mysql/JDBI/PreparedStatement/execute"]},
+  {id:"redis",     name:"Jedis",           short:"Redis",   layer:"Cache",        icon:"icons/REDIS.png",      calls:8640,  errs:12,  p95:6,    max:1040, ops:["Jedis/set","Jedis/get","Jedis/del"]},
+  {id:"kafka",     name:"kafka-producer",  short:"Kafka",   layer:"MQ",           icon:"icons/KAFKA.png",      calls:2410,  errs:0,   p95:3002, max:3010, ops:["Kafka/sw-demo/Producer"]},
+  {id:"http",      name:"Http(#128)",      short:"Http",    layer:"Http",         icon:"icons/HTTPCLIENT.png", calls:1980,  errs:154, p95:120,  max:3001, ops:["Http/GET","Http/POST"]},
+  {id:"httpclient",name:"HttpClient",      short:"HttpClient",layer:"Http",       icon:"icons/HTTPCLIENT.png", calls:520,   errs:520, p95:2100, max:5000, ops:["/api/trace-alert-demo/ok"]},
+  {id:"grpc",      name:"GRPC",            short:"gRPC",    layer:"RPCFramework", icon:"icons/GRPC.png",       calls:640,   errs:0,   p95:18,   max:60,   ops:["Grpc/demo.Greeter/SayHello"]}
+];
+var LAYER_ORDER=["Database","Cache","MQ","Http","RPCFramework"];
+var LAYER_COLOR={Database:"#38bdf8",Cache:"#f59e0b",MQ:"#a78bfa",Http:"#34d399",RPCFramework:"#f472b6"};
+var ENDPOINTS=[
+  {name:"/api/deps-demo/redis", calls:4200, errs:12},
+  {name:"/api/deps-demo/mysql", calls:1800, errs:0},
+  {name:"/api/deps-demo/kafka", calls:2410, errs:0},
+  {name:"/api/deps-demo/http",  calls:1980, errs:154},
+  {name:"/api/deps-demo/all",   calls:900,  errs:160},
+  {name:"/fullSample",          calls:640,  errs:0},
+  {name:"/queryDbByMybatis",    calls:3200, errs:0},
+  {name:"/queryDbByJdbc",       calls:2800, errs:0},
+  {name:"/api/hutool-demo/post-json", calls:420, errs:0},
+  {name:"/api/trace-alert-demo/ok",   calls:380, errs:0}
+];
+
+/* ============================================================
+   1) 纯函数：格式化 / 健康分档（与生产页同一口径）
+   ============================================================ */
+function fmtInt(n){return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g,",");}
+function fmtK(n){if(n>=1000)return (n/1000).toFixed(n>=10000?0:1)+"k";return String(n);}
+function fmtMs(v){if(v==null||v<0)return "-";return v>=1000?(v/1000).toFixed(2)+"s":Math.round(v)+"ms";}
+function fmtPct(r){var p=r*100;return (p>=10?p.toFixed(0):p.toFixed(1))+"%";}
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function depRate(d){return d.calls>0?(d.errs/d.calls):0;}
+function health(r){
+  if(r<=0) return {c:"#34d399",l:"无错误"};
+  if(r<0.01) return {c:"#fbbf24",l:"< 1%"};
+  if(r<0.05) return {c:"#fb923c",l:"< 5%"};
+  return {c:"#f43f5e",l:"≥ 5%"};
+}
+var BANDS=[{c:"#34d399",l:"无错误"},{c:"#fbbf24",l:"< 1%"},{c:"#fb923c",l:"< 5%"},{c:"#f43f5e",l:"≥ 5%"}];
+function healthLegend(){return '<div class="health-legend"><b style="color:#9aa4b2">节点/边颜色 = 边级错误率</b>'
+  +BANDS.map(function(b){return '<span class="li"><span class="sw" style="background:'+b.c+'"></span>'+b.l+'</span>';}).join("")
+  +'<span class="li" style="color:#68758c">（阈值硬编码，非 OAP 的 100/99.9/99/95）</span></div>';}
+var TOTALS=(function(){var c=0,e=0;DEPS.forEach(function(d){c+=d.calls;e+=d.errs;});
+  return {calls:c,errs:e,rate:c?e/c:0,endpoints:ENDPOINTS.length,deps:DEPS.length,
+    slowest:DEPS.slice().sort(function(a,b){return b.p95-a.p95;})[0]};})();
+function depsByLayer(){var m={};DEPS.forEach(function(d){(m[d.layer]=m[d.layer]||[]).push(d);});return m;}
+function orderByLayer(){var out=[],m=depsByLayer();LAYER_ORDER.forEach(function(l){(m[l]||[]).forEach(function(d){out.push(d);});});return out;}
+
+/* ============================================================
+   A) 星云力导 —— SkyWalking / Kiali 风
+   ============================================================ */
+function edgePath(sx,sy,nx,ny,bow){
+  var mx=(sx+nx)/2,my=(sy+ny)/2,dx=nx-sx,dy=ny-sy;
+  var cx=mx-dy*bow, cy=my+dx*bow;
+  return "M "+sx+" "+sy+" Q "+cx+" "+cy+" "+nx+" "+ny;
+}
+function renderA(){
+  var cx=380, cy=336, rx=262, ry=222;
+  var list=orderByLayer();
+  var maxCalls=Math.max.apply(null,DEPS.map(function(d){return d.calls;}));
+  var pos={};
+  list.forEach(function(d,i){
+    var a=-Math.PI/2 + i*2*Math.PI/list.length;
+    pos[d.id]={x:cx+Math.cos(a)*rx, y:cy+Math.sin(a)*ry, a:a};
+  });
+  var edges="",flow="",nodes="";
+  /* 先建带 id 的路径，再让 flow 的 mpath 指过去（mpath 需要真实 id） */
+  list.forEach(function(d,i){
+    var p=pos[d.id], h=health(depRate(d));
+    var w=(1.6 + Math.log(d.calls)/Math.log(maxCalls)*5.4);
+    var pth=edgePath(cx,cy,p.x,p.y,0.14), pid="ap-"+d.id;
+    edges+='<path class="edge-base" data-id="'+d.id+'" d="'+pth+'" stroke="'+h.c+'" stroke-opacity="0.30" stroke-width="'+w.toFixed(2)+'"/>'
+      +'<path id="'+pid+'" class="edge-dash" data-id="'+d.id+'" d="'+pth+'" stroke="'+h.c+'" stroke-opacity="0.75" style="animation-duration:'+(2.9-Math.min(1.6,d.calls/maxCalls*1.6)).toFixed(2)+'s"/>';
+    flow+='<circle class="flow" data-id="'+d.id+'" r="2.7" fill="'+h.c+'">'
+      +'<animateMotion dur="'+(2.2+(i%4)*0.35).toFixed(2)+'s" begin="'+(i*0.27).toFixed(2)+'s" repeatCount="indefinite">'
+      +'<mpath href="#'+pid+'"/></animateMotion></circle>';
+  });
+  list.forEach(function(d){
+    var p=pos[d.id], h=health(depRate(d));
+    var ux=Math.cos(p.a), uy=Math.sin(p.a);
+    var lx=p.x+ux*40, ly=p.y+uy*40+(uy>0.4?6:uy<-0.4?-10:0);
+    var anchor=ux>0.35?"start":(ux<-0.35?"end":"middle");
+    var err=d.errs>0?'<circle cx="'+(p.x+19)+'" cy="'+(p.y-19)+'" r="4.5" fill="#fb7185"><animate attributeName="r" values="4.5;6.5;4.5" dur="1.6s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;.5;1" dur="1.6s" repeatCount="indefinite"/></circle>':'';
+    nodes+='<g class="node" data-id="'+d.id+'" tabindex="0">'
+      +'<title>'+esc(d.name)+' · 调用 '+fmtInt(d.calls)+' · 错误率 '+fmtPct(depRate(d))+'</title>'
+      +'<circle class="halo" cx="'+p.x+'" cy="'+p.y+'" r="34" fill="'+h.c+'" opacity="0.10"/>'
+      +'<circle class="disc" cx="'+p.x+'" cy="'+p.y+'" r="27" fill="#0b1425" stroke="'+h.c+'" stroke-width="3"/>'
+      +'<image href="'+d.icon+'" x="'+(p.x-16)+'" y="'+(p.y-16)+'" width="32" height="32"/>'
+      +err
+      +'<text x="'+lx+'" y="'+ly+'" text-anchor="'+anchor+'">'+esc(d.name)+'</text>'
+      +'<text class="sub" x="'+lx+'" y="'+(ly+15)+'" text-anchor="'+anchor+'">'+fmtK(d.calls)+' · '+fmtPct(depRate(d))+' · p95 '+fmtMs(d.p95)+'</text>'
+      +'</g>';
+  });
+  var selfMarkup='<g class="node" data-id="__self">'
+    +'<circle r="52" fill="#38bdf8" opacity="0.08"><animate attributeName="r" values="44;60;44" dur="3.4s" repeatCount="indefinite"/></circle>'
+    +'<circle r="38" fill="#0b1425" stroke="#67c3f3" stroke-width="2.5"/>'
+    +'<circle r="46" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.4" stroke-dasharray="3 7"/>'
+    +'<path d="M0,-16 L14,-8 L14,8 L0,16 L-14,8 L-14,-8 Z" fill="#0e1c30" stroke="#7cc4ff" stroke-width="1.6"/>'
+    +'<circle r="4.2" fill="#7cc4ff"/>'
+    +'<text y="68" text-anchor="middle" style="font-size:13px;fill:#cfe6ff;font-weight:700">本服务</text>'
+    +'<text class="sub" y="85" text-anchor="middle" style="font-size:10.5px;fill:#8ea3c7">调用 '+fmtK(TOTALS.calls)+' · 错误 '+fmtPct(TOTALS.rate)+' · 端点 '+TOTALS.endpoints+'</text>'
+    +'</g>';
+  return '<div class="vA pv"><div class="wrap">'
+    +'<div class="head"><h2>依赖拓扑 · 星云力导</h2>'
+    +'<span class="sub">self 居中 + 依赖环绕 · 边宽=调用量 · 边色=错误率 · 光点流动=实时调用</span>'
+    +'<span class="seg"><span class="on">近 5 分钟</span><span>近 1 小时</span><span>自启动以来</span></span></div>'
+    +'<div class="kpis">'
+    +kpiA("外部依赖",TOTALS.deps+" 类","跨 Cache / DB / MQ / HTTP 四层")
+    +kpiA("窗口调用",fmtK(TOTALS.calls),"出口 span 段内配对")
+    +kpiA("错误率",fmtPct(TOTALS.rate),fmtInt(TOTALS.errs)+" 次错误",TOTALS.rate>0?"#fb7185":"#34d399")
+    +kpiA("最慢依赖",fmtMs(TOTALS.slowest.p95),TOTALS.slowest.name,"#fbbf24")
+    +kpiA("覆盖端点",String(TOTALS.endpoints),"入口端点聚合")
+    +'</div>'
+    +'<div class="stage">'
+    +'<div class="canvas"><svg class="topo" viewBox="0 0 760 672" preserveAspectRatio="xMidYMid meet">'
+    +'<g class="edges">'+edges+'</g><g class="flows">'+flow+'</g>'
+    +'<g transform="translate('+cx+','+cy+')">'+selfMarkup+'</g>'+nodes
+    +'</svg>'
+    +'<div class="legend">'
+    +LAYER_ORDER.map(function(l){return '<span class="li"><span class="sw" style="background:'+LAYER_COLOR[l]+'"></span>'+l+'</span>';}).join("")
+    +'<span class="li" style="color:#f43f5e">● 红点 = 最近有失败调用</span>'
+    +'</div></div>'
+    +'<div class="inspector" id="a-insp">'+renderAInspector(null)+'</div>'
+    +'</div></div></div>';
+}
+function kpiA(k,v,s,color){
+  return '<div class="kpi"><div class="k">'+k+'</div><div class="v" style="color:'+(color||"#e6eefb")+'">'+v+'</div><div class="s">'+s+'</div></div>';
+}
+function renderAInspector(id){
+  var d=DEPS.filter(function(x){return x.id===id;})[0];
+  if(!d){
+    return '<h3>依赖详情</h3><div class="lay">点左侧任一依赖节点</div>'
+      +'<div class="muted">这张图讲的是<b style="color:#cfe6ff">「我伸出去几只手、每只手什么健康度」</b>：'
+      +'节点位置按依赖层排布，边的粗细是调用量，颜色是边级错误率。<br><br>'
+      +'光点流动方向 = self → 外部依赖；错误率 ≥ 5% 的边会显示红色。'
+      +'<br><br>口径：只统计<b>同一链路段内</b>的 Entry × Exit 配对；异步出口与「连接都没建起来」的依赖不出现在图上。</div>';
+  }
+  var h=health(depRate(d));
+  return '<h3>'+esc(d.name)+'</h3><div class="lay" style="color:'+LAYER_COLOR[d.layer]+'">'+d.layer+' · 组件 #'+d.id.toUpperCase()+'</div>'
+    +'<div class="grid">'
+    +cellA("调用",fmtInt(d.calls))
+    +cellA("错误",fmtInt(d.errs)+(d.errs>0?' <span class="badge">'+fmtPct(depRate(d))+'</span>':""))
+    +cellA("p95",fmtMs(d.p95))
+    +cellA("最大",fmtMs(d.max))
+    +'</div>'
+    +'<div style="font-size:11.5px;color:#7d8db3;margin-bottom:6px">出口操作名</div>'
+    +'<div class="ops">'+d.ops.map(function(o){return "· "+esc(o);}).join("<br>")+'</div>';
+}
+function cellA(k,v){return '<div class="cell"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';}
+function initA(){
+  var svg=document.querySelector(".vA .topo"); if(!svg) return;
+  function clear(){svg.classList.remove("dimming");
+    Array.prototype.forEach.call(svg.querySelectorAll(".hot"),function(x){x.classList.remove("hot");});}
+  svg.addEventListener("mouseover",function(e){
+    var g=e.target.closest && e.target.closest(".node"); if(!g) return;
+    var id=g.getAttribute("data-id"); if(id==="__self") return;
+    svg.classList.add("dimming"); g.classList.add("hot");
+    Array.prototype.forEach.call(svg.querySelectorAll('[data-id="'+id+'"]'),function(x){x.classList.add("hot");});
+  });
+  svg.addEventListener("mouseleave",clear);
+  svg.addEventListener("click",function(e){
+    var g=e.target.closest && e.target.closest(".node"); if(!g) return;
+    var id=g.getAttribute("data-id"); if(id==="__self") return;
+    document.getElementById("a-insp").innerHTML=renderAInspector(id);
+  });
+}
+
+/* ============================================================
+   B) 分层控制台 —— Grafana Node Graph / Datadog Service Map 风
+   ============================================================ */
+var B_SELF={x:34,y:250,w:252,h:196};
+var B_CARD_X=590, B_CARD_W=372, B_CARD_H=74, B_GAP=14, B_TOP=32;
+var B_LANE_X=1000, B_LANE_W=196, B_W=1220, B_H=720;
+function renderB(){
+  var list=orderByLayer();
+  var maxCalls=Math.max.apply(null,DEPS.map(function(d){return d.calls;}));
+  var totalCalls=TOTALS.calls;
+  var cards=[],edges="",pills="";
+  var selfCy=B_SELF.y+B_SELF.h/2;
+  list.forEach(function(d,i){
+    var y=B_TOP+i*(B_CARD_H+B_GAP), cy=y+B_CARD_H/2;
+    var h=health(depRate(d)), share=d.calls/totalCalls;
+    var strokeW=(2.2 + Math.log(d.calls)/Math.log(maxCalls)*7.4);
+    var pth="M "+(B_SELF.x+B_SELF.w)+" "+selfCy+" C 470 "+selfCy+", 500 "+cy+", "+B_CARD_X+" "+cy;
+    edges+='<path class="edge'+(d.errs>0?" flow":"")+'" data-id="'+d.id+'" d="'+pth+'" stroke="'+h.c+'" stroke-opacity="'+(d.errs>0?0.95:0.6)+'" stroke-width="'+strokeW.toFixed(2)+'"/>';
+    var txt=fmtK(d.calls)+" · "+fmtPct(depRate(d))+" · p95 "+fmtMs(d.p95);
+    var pw=txt.length*6.4+18, px=500-pw/2, py=(selfCy+cy)/2-11;
+    pills+='<g class="epill" data-id="'+d.id+'"><rect x="'+px+'" y="'+py+'" width="'+pw.toFixed(0)+'" height="22" rx="11"/>'
+      +'<text x="'+(px+pw/2).toFixed(0)+'" y="'+(py+15)+'" text-anchor="middle">'+txt+'</text></g>';
+  });
+  /* 右列卡片 */
+  list.forEach(function(d,i){
+    var y=B_TOP+i*(B_CARD_H+B_GAP);
+    var h=health(depRate(d)), col=LAYER_COLOR[d.layer], share=d.calls/totalCalls;
+    cards+='<div class="bcard" data-id="'+d.id+'" style="left:'+B_CARD_X+'px;top:'+y+'px;width:'+B_CARD_W+'px;height:'+B_CARD_H+'px;border-left:3px solid '+col+'">'
+      +'<div class="top"><img src="'+d.icon+'" alt="">'
+      +'<div style="min-width:0"><div class="nm">'+esc(d.name)+'</div>'
+      +'<div class="ly" style="color:'+col+'">'+d.layer+' · '+d.ops.length+' 个出口操作</div></div>'
+      +'<div class="st"><div class="n">'+fmtK(d.calls)+'</div>'
+      +'<div class="e" style="color:'+h.c+'">'+fmtPct(depRate(d))+' · '+fmtMs(d.p95)+'</div></div></div>'
+      +'<div class="bar"><i style="width:'+Math.max(3,share*100).toFixed(1)+'%;background:'+col+'"></i></div>'
+      +'</div>';
+  });
+  /* 泳道 */
+  var lanes="",m=depsByLayer();
+  LAYER_ORDER.forEach(function(l){
+    var ds=m[l]; if(!ds) return;
+    var idxs=[]; list.forEach(function(d,i){if(d.layer===l)idxs.push(i);});
+    var top=B_TOP+idxs[0]*(B_CARD_H+B_GAP)-8;
+    var bottom=B_TOP+idxs[idxs.length-1]*(B_CARD_H+B_GAP)+B_CARD_H+8;
+    var calls=ds.reduce(function(s,d){return s+d.calls;},0);
+    lanes+='<div class="lane" style="left:'+B_LANE_X+'px;top:'+top+'px;width:'+B_LANE_W+'px;height:'+(bottom-top)+'px;border-left-color:'+LAYER_COLOR[l]+'">'
+      +'<div class="lt" style="color:'+LAYER_COLOR[l]+'">'+l+'</div>'
+      +'<div class="lc">'+ds.length+' 个组件<br>调用 '+fmtK(calls)+'</div></div>';
+  });
+  var spark=ENDPOINTS.map(function(e,i){return '<i style="height:'+(30+((i*37+e.calls)%70))+'%"></i>';}).join("");
+  return '<div class="vB pv"><div class="wrap">'
+    +'<div class="head"><h2>依赖拓扑 · 分层控制台</h2>'
+    +'<span style="color:#8b98ab;font-size:12.5px">左进右出 · 依赖按层分泳道 · 边标 = 调用 / 错误率 / p95</span>'
+    +'<span class="chips"><span class="chip on">近 5 分钟</span><span class="chip">近 1 小时</span><span class="chip">自启动以来</span>'
+    +'<span class="chip">固定布局</span></span></div>'
+    +'<div class="board"><div class="inner">'
+    +'<svg class="edges" viewBox="0 0 '+B_W+' '+B_H+'">'+edges+pills+'</svg>'
+    +'<div class="selfcard" style="left:'+B_SELF.x+'px;top:'+B_SELF.y+'px;width:'+B_SELF.w+'px;height:'+B_SELF.h+'px">'
+      +'<div class="t">本服务 aggregate</div>'
+      +'<div class="big">'+fmtK(TOTALS.calls)+'</div>'
+      +'<div class="row"><span>错误率</span><b style="color:'+(TOTALS.rate>0?"#f87171":"#34d399")+'">'+fmtPct(TOTALS.rate)+'</b></div>'
+      +'<div class="row"><span>依赖 / 端点</span><b>'+TOTALS.deps+' / '+TOTALS.endpoints+'</b></div>'
+      +'<div class="spark">'+spark+'</div>'
+    +'</div>'
+    +cards+lanes
+    +'</div></div>'
+    +healthLegend()
+    +'</div></div>';
+}
+function initB(){
+  var board=document.querySelector(".vB .board"); if(!board) return;
+  function clear(){
+    board.classList.remove("dim");
+    Array.prototype.forEach.call(board.querySelectorAll(".hot"),function(x){x.classList.remove("hot");});
+  }
+  Array.prototype.forEach.call(board.querySelectorAll(".bcard"),function(card){
+    var id=card.getAttribute("data-id");
+    card.addEventListener("mouseenter",function(){
+      board.classList.add("dim"); card.classList.add("hot");
+      Array.prototype.forEach.call(board.querySelectorAll('[data-id="'+id+'"]'),function(x){x.classList.add("hot");});
+    });
+    card.addEventListener("mouseleave",clear);
+  });
+}
+
+/* ============================================================
+   C) 流量带 —— Sankey / 汇报图（浅色）
+   ============================================================ */
+function renderC(){
+  var list=orderByLayer();
+  var total=TOTALS.calls;
+  var W=980,H=520,selfX=46,selfW=30,padY=34,rightX=690,rightW=30;
+  var usable=H-padY*2-(list.length-1)*8;
+  var sumShare=0;
+  var selfSeg=[],rightSeg=[];
+  var ySelf=padY, yRight=padY;
+  list.forEach(function(d){
+    var hgt=d.calls/total*usable;
+    selfSeg.push({y0:ySelf,y1:ySelf+hgt});
+    rightSeg.push({y0:yRight,y1:yRight+hgt});
+    ySelf+=hgt; yRight+=hgt+8;
+  });
+  var ribbons="",rightBars="",labels="";
+  list.forEach(function(d,i){
+    var h=health(depRate(d)), col=h.c;
+    var s=selfSeg[i], r=rightSeg[i];
+    var mid=(selfX+selfW+rightX)/2;
+    var dd="M "+(selfX+selfW)+" "+s.y0+" C "+mid+" "+s.y0+", "+mid+" "+r.y0+", "+rightX+" "+r.y0+" L "+rightX+" "+r.y1
+      +" C "+mid+" "+r.y1+", "+mid+" "+s.y1+", "+(selfX+selfW)+" "+s.y1+" Z";
+    ribbons+='<g class="flow-item" data-id="'+d.id+'"><path class="ribbon" data-id="'+d.id+'" d="'+dd+'" fill="'+col+'" fill-opacity="0.42" stroke="'+col+'" stroke-opacity="0.25"/></g>';
+    rightBars+='<rect x="'+rightX+'" y="'+r.y0+'" width="'+rightW+'" height="'+Math.max(1,r.y1-r.y0)+'" rx="3" fill="'+col+'"/>';
+    labels+='<text class="rlabel" x="'+(rightX+rightW+12)+'" y="'+(r.y0+(r.y1-r.y0)/2-1)+'">'+esc(d.name)+'</text>'
+      +'<text class="rsub" x="'+(rightX+rightW+12)+'" y="'+(r.y0+(r.y1-r.y0)/2+13)+'">'+fmtK(d.calls)+' · '+fmtPct(depRate(d))+' · p95 '+fmtMs(d.p95)+'</text>';
+  });
+  var slow=DEPS.slice().sort(function(a,b){return b.p95-a.p95;}).slice(0,5);
+  var buggy=DEPS.slice().sort(function(a,b){return b.errs-a.errs;}).slice(0,5);
+  return '<div class="vC pv"><div class="wrap">'
+    +'<div class="head"><h2>依赖拓扑 · 流量带</h2>'
+    +'<span class="sub">带宽 = 调用量 · 颜色 = 错误率 · 一眼看清「流量都花在哪儿」</span>'
+    +'<span class="stamp">近 5 分钟 · 模拟数据</span></div>'
+    +'<div class="kpis">'
+    +kpiC("外部依赖",TOTALS.deps+" 类","Cache / DB / MQ / HTTP")
+    +kpiC("窗口调用",fmtK(TOTALS.calls),"段内 Entry × Exit 配对")
+    +kpiC("错误率",fmtPct(TOTALS.rate),fmtInt(TOTALS.errs)+" 次",TOTALS.rate>0?"#ef4444":"#12b981")
+    +kpiC("最慢依赖",fmtMs(TOTALS.slowest.p95),TOTALS.slowest.name,"#f59e0b")
+    +kpiC("覆盖端点",String(TOTALS.endpoints),"入口端点聚合")
+    +'</div>'
+    +'<div class="cols">'
+    +'<div class="card"><h3>流量分布</h3><div class="cap">self 向左展开为每个外部依赖的调用带宽</div>'
+      +'<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;overflow:visible">'
+      +ribbons
+      +'<rect x="'+selfX+'" y="'+padY+'" width="'+selfW+'" height="'+(H-padY*2)+'" rx="5" fill="#2563eb"/>'
+      +'<text class="rlabel" x="'+selfX+'" y="'+(padY-12)+'" style="font-weight:700">本服务</text>'
+      +'<text class="rsub" x="'+selfX+'" y="'+(padY+H-2*padY+2)+'">'+fmtK(total)+' 次 · '+fmtPct(TOTALS.rate)+'</text>'
+      +rightBars+labels
+      +'</svg>'+healthLegend()+'</div>'
+    +'<div style="display:flex;flex-direction:column;gap:16px">'
+      +listCard("最慢的依赖（p95）",slow,"p95")
+      +listCard("错误最多的依赖",buggy,"errs")
+    +'</div>'
+    +'</div></div></div>';
+}
+function kpiC(k,v,s,color){return '<div class="kpi"><div class="k">'+k+'</div><div class="v" style="color:'+(color||"#16213a")+'">'+v+'</div><div class="s">'+s+'</div></div>';}
+function listCard(title,rows,key){
+  return '<div class="card"><h3>'+title+'</h3><div class="cap">点击行可定位到该依赖</div><table><tbody>'
+    +rows.map(function(d){
+      var h=health(depRate(d));
+      var val=key==="p95"?fmtMs(d.p95):fmtInt(d.errs)+" 次";
+      return '<tr><td><span class="dot" style="background:'+h.c+'"></span>'+esc(d.name)+'</td>'
+        +'<td class="num">'+val+'</td></tr>';
+    }).join("")
+    +'</tbody></table></div>';
+}
+function initC(){
+  var svg=document.querySelector(".vC svg"); if(!svg) return;
+  Array.prototype.forEach.call(svg.querySelectorAll(".flow-item"),function(g){
+    var id=g.getAttribute("data-id");
+    g.addEventListener("mouseenter",function(){
+      Array.prototype.forEach.call(svg.querySelectorAll(".flow-item"),function(x){x.classList.toggle("dim",x!==g);});
+      Array.prototype.forEach.call(svg.querySelectorAll(".ribbon"),function(p){
+        p.style.fillOpacity = p.getAttribute("data-id")===id?0.85:0.12;
+      });
+    });
+    g.addEventListener("mouseleave",function(){
+      Array.prototype.forEach.call(svg.querySelectorAll(".flow-item"),function(x){x.classList.remove("dim");});
+      Array.prototype.forEach.call(svg.querySelectorAll(".ribbon"),function(p){p.style.fillOpacity=0.42;});
+    });
+  });
+}
+
+/* ============================================================
+   D) 追猎者 —— Jaeger 风：链路瀑布 + 依赖图
+   ============================================================ */
+var SPANS=[
+  {id:"s0",op:"GET /api/deps-demo/all",svc:"demo-app",start:0,dur:5200,depth:0,kind:"entry"},
+  {id:"s1",op:"H2/JDBC/PreparedStatement/executeQuery",svc:"h2-jdbc-driver",start:30,dur:6,depth:1,dep:"h2"},
+  {id:"s2",op:"Jedis/set",svc:"Jedis",start:60,dur:1040,depth:1,dep:"redis",error:"JedisConnectionException"},
+  {id:"s3",op:"Mysql/JDBI/PreparedStatement/execute",svc:"Mysql",start:1150,dur:94,depth:1,dep:"mysql"},
+  {id:"s4",op:"Kafka/sw-demo/Producer",svc:"kafka-producer",start:1300,dur:3002,depth:1,dep:"kafka"},
+  {id:"s5",op:"Http/GET httpbin.org",svc:"Http(#128)",start:4400,dur:120,depth:1,dep:"http"},
+  {id:"s6",op:"/api/trace-alert-demo/ok",svc:"HttpClient",start:4560,dur:300,depth:1,dep:"httpclient",error:"ConnectException"},
+  {id:"s7",op:"Grpc/demo.Greeter/SayHello",svc:"GRPC",start:4950,dur:18,depth:1,dep:"grpc"}
+];
+function renderD(){
+  var total=SPANS[0].dur;
+  var wf=SPANS.map(function(s){
+    var left=(s.start/total*100), width=Math.max(0.4,s.dur/total*100);
+    var entry=s.depth===0;
+    return '<div class="wfrow'+(s.error?" err":"")+'" data-span="'+s.id+'" data-dep="'+(s.dep||"")+'">'
+      +'<div class="op" style="padding-left:'+(14+s.depth*16)+'px">'+esc(s.op)+(entry?"":' <span class="svc">'+esc(s.svc)+'</span>')+'</div>'
+      +'<div class="track"><i class="'+(s.error?"err":(entry?"":"exit"))+'" style="left:'+left.toFixed(2)+'%;width:'+width.toFixed(2)+'%;background:'+(s.error?"#e05656":(entry?"#67c3f3":"#4f9d8b"))+'"></i></div>'
+      +'<div class="dur">'+fmtMs(s.dur)+'</div></div>';
+  }).join("");
+  var depGraph=renderDBody();
+  return '<div class="vD pv">'
+    +'<div class="top"><span class="logo">jaeger</span>'
+    +'<span class="sel">Service: <b>demo-app</b></span>'
+    +'<span class="sel">Operation: <b>all</b></span>'
+    +'<span class="sel">Lookback: <b>1h</b></span>'
+    +'<span class="sel">'+"1 trace"+'</span>'
+    +'<span class="sp"><span class="sel">依赖拓扑</span><button class="btn">Compare</button><button class="btn">JSON</button></span></div>'
+    +'<div class="wrap"><div class="grid">'
+    +'<div class="card"><div class="hd">Trace 时间线 · GET /api/deps-demo/all <span class="m">'+SPANS.length+' spans · '+total+'ms</span></div>'
+      +'<div class="wf">'+wf+'</div>'
+      +'<div class="hd" style="border-top:1px solid #2c2c33;border-bottom:0">Span 详情</div>'
+      +'<div class="detail" id="d-detail">'+spanDetail("s0")+'</div></div>'
+    +'<div class="dep card"><div class="hd">服务依赖 <span class="m">'+DEPS.length+' 类 · '+'点节点筛选左侧</span></div>'
+      +'<div style="padding:8px">'+depGraph+'</div>'
+      +'<div class="detail" style="border-top:1px solid #2c2c33">'+healthLegend()+'</div></div>'
+    +'</div></div></div>';
+}
+function spanDetail(id){
+  var s=SPANS.filter(function(x){return x.id===id;})[0]; if(!s) return "";
+  var d=s.dep?DEPS.filter(function(x){return x.id===s.dep;})[0]:null;
+  function kv(k,v){return '<div class="kv"><span class="k">'+k+'</span><span>'+esc(v)+'</span></div>';}
+  return kv("span.kind",s.depth===0?"server (Entry)":"client (Exit)")
+    +kv("operationName",s.op)
+    +kv("service",s.depth===0?"demo-app":s.svc)
+    +kv("component",d?d.name:"-")
+    +kv("spanLayer",d?d.layer:"-")
+    +kv("duration",fmtMs(s.dur)+" ("+s.dur+"ms)")
+    +kv("start",s.start+"ms")
+    +(s.error?kv("error",s.error):"")
+    +(d?kv("peer / ops",d.ops.join(", ")):"");
+}
+function renderDBody(){
+  var W=420,H=400,cx=210,cy=200,rx=150,ry=138;
+  var list=orderByLayer(), maxCalls=Math.max.apply(null,DEPS.map(function(d){return d.calls;}));
+  var edges="",nodes="";
+  list.forEach(function(d,i){
+    var a=-Math.PI/2+i*2*Math.PI/list.length;
+    var x=cx+Math.cos(a)*rx,y=cy+Math.sin(a)*ry;
+    var r=18+Math.sqrt(d.calls/maxCalls)*14, h=health(depRate(d));
+    edges+='<path class="de" data-id="'+d.id+'" d="M '+cx+' '+cy+' L '+x+' '+y+'" marker-end="url(#arw)" '+(d.errs>0?'stroke="#a24a4a" opacity="0.85"':'')+'/>';
+    var ux=Math.cos(a),uy=Math.sin(a), anchor=ux>0.3?"start":(ux<-0.3?"end":"middle");
+    var tx=x+ux*(r+6),ty=y+uy*(r+6)+(uy>0.4?11:uy<-0.4?-4:4);
+    nodes+='<g class="node" data-id="'+d.id+'">'
+      +'<circle cx="'+x+'" cy="'+y+'" r="'+r.toFixed(1)+'" fill="#20262e" stroke="'+h.c+'" stroke-width="2"/>'
+      +'<text class="dn" x="'+tx+'" y="'+ty+'" text-anchor="'+anchor+'">'+esc(d.name)+'</text>'
+      +'<text class="dns" x="'+tx+'" y="'+(ty+11)+'" text-anchor="'+anchor+'">'+fmtK(d.calls)+' · '+fmtPct(depRate(d))+'</text>'
+      +'</g>';
+  });
+  return '<svg viewBox="0 0 '+W+' '+H+'">'
+    +'<defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">'
+    +'<path d="M0,0 L10,5 L0,10 z" fill="#5a5a63"/></marker></defs>'
+    +edges
+    +'<circle cx="'+cx+'" cy="'+cy+'" r="30" fill="#14202b" stroke="#67c3f3" stroke-width="2.4"/>'
+    +'<text class="self-lab" x="'+cx+'" y="'+(cy+46)+'" text-anchor="middle">demo-app</text>'
+    +nodes+'</svg>';
+}
+function initD(){
+  var card=document.querySelector(".vD .dep"); if(!card) return;
+  var rows=document.querySelectorAll(".vD .wfrow");
+  function select(id){
+    Array.prototype.forEach.call(rows,function(r){r.classList.toggle("hot",r.getAttribute("data-span")===id);});
+    var d=document.getElementById("d-detail"); if(d) d.innerHTML=spanDetail(id);
+  }
+  Array.prototype.forEach.call(rows,function(r){
+    r.addEventListener("click",function(){select(r.getAttribute("data-span"));});
+  });
+  Array.prototype.forEach.call(card.querySelectorAll(".node"),function(n){
+    n.addEventListener("mouseenter",function(){
+      var id=n.getAttribute("data-id");
+      Array.prototype.forEach.call(card.querySelectorAll(".node"),function(x){x.classList.toggle("dim",x!==n);});
+      Array.prototype.forEach.call(rows,function(r){r.classList.toggle("hot",r.getAttribute("data-dep")===id);});
+    });
+    n.addEventListener("mouseleave",function(){
+      Array.prototype.forEach.call(card.querySelectorAll(".node"),function(x){x.classList.remove("dim");});
+      Array.prototype.forEach.call(rows,function(r){r.classList.remove("hot");});
+    });
+    n.addEventListener("click",function(){
+      var id=n.getAttribute("data-id");
+      var hit=SPANS.filter(function(s){return s.dep===id;})[0];
+      if(hit) select(hit.id);
+    });
+  });
+  select("s0");
+}
+
+/* ============================================================
+   6) 切换器（?variant= + ← →）
+   ============================================================ */
+var VARIANTS=[
+  {key:"A",name:"星云力导（SkyWalking）",render:renderA,init:initA,
+    q:"<b>A · 门面方案</b>｜self 居中 + 依赖环绕，边宽=调用量、边色=错误率，光点沿边流动。参考 SkyWalking / Kiali 拓扑图，最「酷」、最适合大屏。"},
+  {key:"B",name:"分层控制台（Grafana）",render:renderB,init:initB,
+    q:"<b>B · 工程方案</b>｜左 self、中边、右按层分泳道的节点卡（卡上带调用/错误/p95），边中标统计 pill。参考 Grafana Node Graph / Datadog Service Map，信息密度最高。"},
+  {key:"C",name:"流量带（Sankey）",render:renderC,init:initC,
+    q:"<b>C · 汇报方案</b>｜浅色扁平，带宽 ∝ 调用量，颜色=错误率，右侧列最慢/最错依赖。参考 Sankey，投影与打印最清晰。"},
+  {key:"D",name:"追猎者（Jaeger）",render:renderD,init:initD,
+    q:"<b>D · 自诊方案</b>｜左为单条 trace 的 span 瀑布、右为依赖图，互相联动。参考 Jaeger，从「哪条依赖红」直通「那次调用的现场」。"}
+];
+function currentKey(){
+  var k=(new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
+  return VARIANTS.some(function(v){return v.key===k;})?k:"A";
+}
+function idxOf(k){for(var i=0;i<VARIANTS.length;i++) if(VARIANTS[i].key===k) return i; return 0;}
+function render(){
+  var k=currentKey(),v=VARIANTS[idxOf(k)];
+  document.getElementById("app").innerHTML=v.render();
+  document.getElementById("proto-q").innerHTML=v.q;
+  document.getElementById("sw-k").textContent=v.key;
+  document.getElementById("sw-n").textContent=v.name;
+  document.title="依赖拓扑图原型 · "+v.name;
+  if(v.init){try{v.init();}catch(e){console.warn("init "+v.key+" failed",e);}}
+}
+function go(delta){
+  var i=(idxOf(currentKey())+delta+VARIANTS.length)%VARIANTS.length;
+  history.replaceState(null,"","?variant="+VARIANTS[i].key);
+  render();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+document.getElementById("sw-prev").addEventListener("click",function(){go(-1);});
+document.getElementById("sw-next").addEventListener("click",function(){go(1);});
+document.addEventListener("keydown",function(e){
+  var t=e.target,tag=(t&&t.tagName)||"";
+  if(tag==="INPUT"||tag==="TEXTAREA"||(t&&t.isContentEditable)) return;
+  if(e.key==="ArrowLeft"){go(-1);} else if(e.key==="ArrowRight"){go(1);}
+});
+window.addEventListener("popstate",render);
+render();
+</script>
+</body>
+</html>
