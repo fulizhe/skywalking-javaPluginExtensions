@@ -154,10 +154,10 @@ body.presenter-on .presenter-collapse > h2::after {
 body.presenter-on .presenter-collapse:hover > h2::after { content: "（鼠标移开即收起）"; }
 
 /* 字号放大一档：投影/投屏时数字要能在后排看清。
-   **刻意不动 `#chart` 的高度** —— 拓扑图的节点坐标是按 560px 画布设计的固定跨度
-   （yAt: y = 60 + i*420/(n-1)，layout:none 不自动重排）。把画布改矮会让节点挤到底边、
-   改高则 canvas 与容器不同步，两者都会让图溢出到图例上。要"图更大"应改 yAt 的跨度，
-   而不是只改 CSS 高度。 */
+   **刻意不动 `#chart` 的高度** —— 依赖拓扑的节点坐标是按画布高度设计的固定跨度（ECharts layout:none，
+   yAt: y = 60 + i*420/(n-1)，不自动重排；v2 的星图按 svg viewBox 缩放，明细档同样吃 `#chart` 的高度）。
+   在演示态只改 CSS 高度会让 canvas 与容器不同步、图溢出到图例上。要"图更大"应去页面里调
+   `#chart` 的高度（组件会跟着自适应），而不是在演示态只改 CSS。 */
 body.presenter-on .legend { font-size: 13px; line-height: 2.1; }
 body.presenter-on .kpi-row .k-val { font-size: 30px; }
 body.presenter-on .kpi-row { gap: 10px; }

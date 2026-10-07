@@ -1,0 +1,1489 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依赖拓扑 v2 · 星云（候选）</title>
+<script src="../lib/echarts.min.js"></script>
+<script src="presenter.js"></script>
+<script src="poll.js"></script>
+<link rel="stylesheet" href="presenter.css">
+<style>
+  /* 配色：整页统一成「星云」主题（原深灰已弃用）。
+     与拓扑原型 A 方案一致 —— 深蓝底 + 层色 + SLA 四档。 */
+  :root {
+    --bg: #070c16;
+    --bg-2: #0a1120;
+    --surface: #0e1626;
+    --surface-raised: #101a30;
+    --input: #1d2230;
+    --border: #1d2a44;
+    --border-strong: #2a3a58;
+    --text: #dbe6f7;
+    --muted: #7d8db3;
+    --ac: #38bdf8;
+    --ac-soft: #7cc4ff;
+    --blue: #3b82f6;
+    --ok: #34d399;
+    --yellow: #fbbf24;
+    --orange: #fb923c;
+    --red: #f43f5e;
+    --red-soft: #fb7185;
+    --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+    /* 层色：与图例、节点光晕同源 */
+    --database: #38bdf8;
+    --cache: #f59e0b;
+    --mq: #a78bfa;
+    --http: #34d399;
+    --rpc: #f472b6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; min-width: 320px; color: var(--text);
+               background: radial-gradient(1200px 700px at 32% 18%, #0f1c34 0%, #0a1120 55%, var(--bg) 100%) fixed;
+               font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", "PingFang SC", sans-serif; }
+  button, input { font: inherit; }
+  .bar { padding: 10px 16px; background: rgba(14, 22, 38, 0.92); border-bottom: 1px solid var(--border);
+         display: flex; flex-wrap: wrap; gap: 8px; align-items: center; position: sticky; top: 0; z-index: 10;
+         backdrop-filter: blur(8px); }
+  .bar h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; color: var(--ac-soft); }
+  /* 版本标记：这页是「星云 v2」候选，原版仍保留在 topology.html，方便并排对比后再定去留。 */
+  .bar .vtag { font-size: 11px; font-weight: 600; color: #06263a; background: var(--ac);
+               border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+  .bar .home { color: var(--muted); text-decoration: none; font-size: 12px; }
+  .bar .home:hover { color: var(--ac-soft); }
+  /* 「自启动以来」只有一种画法(组件级星图),视图切换在该档无意义 —— 置灰而不是留着误导 */
+  button[disabled] { opacity: 0.4; cursor: not-allowed; filter: none; }
+  .field { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  button { padding: 5px 12px; cursor: pointer; background: var(--blue); color: #fff; border: 0;
+           border-radius: 6px; }
+  button.sec { background: var(--input); border: 1px solid var(--border-strong); color: #cfd7e6; }
+  button.on { background: var(--ac); color: #06263a; font-weight: 700; border-color: transparent; }
+  button:hover { filter: brightness(1.12); }
+  button:focus-visible { outline: 2px solid var(--ac-soft); outline-offset: 2px; }
+  .summary { flex: 1 1 320px; min-width: 0; margin-left: auto; color: var(--muted); font-size: 12px;
+             font-family: var(--mono); text-align: right; overflow-wrap: anywhere; }
+  .page { padding: 12px 16px 24px; max-width: 1360px; margin: 0 auto; }
+  /* 口径说明:硬要求,不可隐藏 */
+  .caveats { margin-bottom: 12px; padding: 10px 12px; background: var(--surface);
+             border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: 8px; }
+  .caveats h2 { margin: 0 0 6px; font-size: 13px; color: var(--yellow); }
+  .caveats ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .caveats code { color: var(--ac-soft); }
+  .caveats b { color: #c7d6ee; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 12px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  /* 「清单」档：关系图收起、表格占满宽度。清单是**汇报视角**（"我伸出去过哪些手"），
+     不是第三种画法 —— 留着半屏图只会让人把累计表的数字和窗口边的图并排读，那正是要避免的混读。 */
+  body.view-list .grid { grid-template-columns: minmax(0, 1fr); }
+  body.view-list #chart-panel { display: none; }
+  body.view-list .table-wrap { max-height: 720px; }
+  .panel { min-width: 0; overflow: hidden; background: linear-gradient(180deg, var(--surface-raised), #0d1526);
+           border: 1px solid var(--border); border-radius: 14px; }
+  .panel h2 { margin: 0; padding: 9px 12px; font-size: 13px; color: var(--ac-soft);
+              border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+  .panel h2 .hint { color: var(--muted); font-weight: 400; font-size: 11px; }
+
+  /* ---------------------------------------------------------- KPI 行（A 方案） */
+  .kpi-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .kpi { flex: 1 1 150px; background: linear-gradient(180deg, var(--surface-raised), #0d1526);
+         border: 1px solid var(--border); border-radius: 12px; padding: 11px 14px; min-width: 0; }
+  .kpi .k-label { font-size: 11.5px; color: var(--muted); }
+  .kpi .k-val { font-family: var(--mono); font-weight: 800; font-size: 23px; margin: 5px 0 2px;
+                letter-spacing: -0.02em; color: var(--text); }
+  .kpi .k-sub { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+
+  /* ---------------------------------------------------------- 星云图（A 方案） */
+  #chart-panel { position: relative; }
+  /* #chart 必须有实体高度：明细档的 ECharts 画布按容器高度布局；星图则让 svg 撑满同一高度 */
+  #chart { position: relative; height: 660px; }
+  #chart .topo { display: block; width: 100%; height: 100%; }
+  #chart .topo text { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; fill: #e6eefb;
+                      font-size: 12px; font-weight: 600; }
+  #chart .topo text.sub { fill: #8ea3c7; font-size: 10.5px; font-weight: 400; }
+  #chart .topo text.self-t { font-size: 13px; fill: #cfe6ff; font-weight: 700; }
+  #chart .topo text.self-sub { font-size: 10.5px; fill: #8ea3c7; font-weight: 400; }
+  #chart .topo text.empty-t { fill: #7d8db3; font-size: 13px; font-weight: 400; }
+  #chart .edge-base { fill: none; stroke-linecap: round; transition: opacity 0.2s; }
+  #chart .edge-dash { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 1.5 13;
+                      animation: flowdash 2.4s linear infinite; }
+  @keyframes flowdash { to { stroke-dashoffset: -29; } }
+  #chart .node { cursor: pointer; transition: opacity 0.2s; }
+  #chart .node .disc { transition: transform 0.2s; transform-box: fill-box; transform-origin: center; }
+  #chart .node:hover .disc { transform: scale(1.08); }
+  #chart .topo.dimming .node:not(.hot) { opacity: 0.18; }
+  #chart .topo.dimming .edge-base:not(.hot), #chart .topo.dimming .edge-dash:not(.hot),
+  #chart .topo.dimming .flow:not(.hot) { opacity: 0.05; }
+  #chart .topo.dimming .node.hot text { fill: #fff; }
+
+  /* 依赖详情浮层：点节点弹出，不占右侧表格的位置 */
+  .insp-float { position: absolute; top: 12px; right: 12px; width: 264px; z-index: 5;
+                background: rgba(16, 26, 48, 0.96); border: 1px solid var(--border-strong);
+                border-radius: 12px; padding: 14px 15px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.6); }
+  .insp-float[hidden] { display: none; }
+  .insp-float h3 { margin: 0 0 2px; font-size: 14px; color: #eaf2ff; padding-right: 20px; }
+  .insp-float .lay { font-size: 11.5px; color: var(--muted); margin-bottom: 12px; }
+  .insp-float .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .insp-float .cell { background: #0b1425; border: 1px solid var(--border); border-radius: 8px; padding: 8px 9px; }
+  .insp-float .cell .k { font-size: 10.5px; color: var(--muted); }
+  .insp-float .cell .v { font-family: var(--mono); font-weight: 700; font-size: 15px; margin-top: 2px; }
+  .insp-float .ops { font-family: var(--mono); font-size: 10.5px; color: #a9bede; line-height: 1.8; word-break: break-all; }
+  .insp-float .insp-x { position: absolute; top: 8px; right: 10px; background: transparent; border: 0;
+                        color: var(--muted); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+  .insp-float .insp-x:hover { color: #fff; }
+  .insp-float .insp-go { margin-top: 10px; width: 100%; background: var(--input); border: 1px solid var(--border-strong);
+                         color: var(--ac-soft); border-radius: 6px; padding: 5px 10px; font-size: 12px; }
+  .insp-float .insp-go:hover { filter: brightness(1.15); }
+  .insp-float .muted { color: var(--muted); font-size: 12px; line-height: 1.9; }
+  .insp-float .badge { display: inline-block; min-width: 18px; text-align: center; background: #451a24; color: #ffb4c0;
+                       border: 1px solid #7c2b3c; border-radius: 999px; font-size: 10px; font-weight: 700;
+                       padding: 1px 5px; font-family: var(--mono); }
+
+  .legend { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11px;
+            color: var(--muted); line-height: 1.9; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+  .key .ki { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .key .ki img { width: 18px; height: 18px; display: block; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+            margin-right: 5px; vertical-align: middle; }
+  .table-wrap { max-height: 660px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border);
+           white-space: nowrap; }
+  th { position: sticky; top: 0; background: #16233d; color: var(--muted);
+       font-weight: 500; z-index: 1; }
+  td.num { text-align: right; font-family: var(--mono); }
+  tbody tr:hover { background: #16233d; cursor: pointer; }
+  td .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+  /* 清单档的可点列头：排序是这一档唯一的交互，得让它看起来可点 */
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: #fff; }
+  th.sortable.on { color: var(--ac-soft); }
+  th .arrow { font-size: 9px; opacity: .85; }
+  td .sub { color: var(--muted); font-size: 11px; }
+  .empty { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.8; }
+  .empty code { color: var(--ac-soft); }
+  .foot { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.8; }
+  .foot a { color: var(--ac-soft); }
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>依赖拓扑 <span class="vtag">v2 · 星云</span></h1>
+  <a class="home" href="index.html">← 仪表盘</a>
+  <a class="home" href="topology.html" title="切到原始版本做并排对比">对比原版 v1 ›</a>
+  <span class="field presenter-hide">视图
+    <button id="btn-summary" class="sec" type="button">总览</button>
+    <button id="btn-detail" class="sec" type="button">明细</button>
+    <button id="btn-list" class="sec" type="button">清单</button>
+  </span>
+  <span class="field presenter-hide">时间窗
+    <button class="sec win" data-min="5" type="button">近 5 分钟</button>
+    <button class="sec win" data-scope="lifetime" type="button">自启动以来</button>
+  </span>
+  <span class="summary presenter-hide" id="summary">加载中…</span>
+  <span class="presenter-only" id="scope-chip" title="演示模式下控件被收起，这一行告诉你当前看的是哪一档"></span>
+</div>
+
+<div class="page">
+  <div id="presenter-slot"></div>
+  <!-- KPI 行与 A 方案一致；演示模式下收起（顶部的结论卡就是那一档的结论，避免两份数字被并排读） -->
+  <div class="kpi-row presenter-hide" id="kpis"></div>
+
+  <section class="caveats presenter-collapse">
+    <h2>口径说明（读这张图前必读）</h2>
+    <ul>
+      <li><b>总览 / 自启动以来</b>都是 <b>self 居中的星图</b>：<b>边宽 ∝ 调用量</b>、<b>边色 = 边级错误率</b>、
+          <b>光点沿边流动 = 调用方向</b>（self → 依赖）。总览是<b>窗口聚合</b>（self 到每个组件一条边），
+          自启动以来是<b>进程累计</b>（累计表不存耗时样本，故不显示 p95，只给累计最大耗时）。</li>
+      <li>依赖边<b>只统计同一个链路段内</b>的调用（段内 Entry × Exit 配对）。</li>
+      <li><b>异步调用的出口依赖不进图</b>——跨段配对需要父段索引，而父段可能已被淘汰，
+          那会产生无法与「没有这个调用」区分的随机缺边。@Async 出口请到链路可视化页看。</li>
+      <li>依赖节点<b>只到组件类型</b>，<b>不区分具体实例地址</b>（同一组件的多个实例会并成一个节点；
+          同理，访问 3 个不同站点的 HTTP 也<b>只是 1 个 Http 节点</b>，不是 3 个依赖）。</li>
+      <li><b>总览档中心只有一个「本服务」节点</b>，它是窗口内全部入口端点的<b>聚合</b>
+          （合计调用 / 合计错误 / 覆盖端点数），端点维度在<b>明细档</b>与本页<b>边列表</b>里看。</li>
+      <li><b>「清单」档不看时间窗</b>，恒为<b>进程累计</b>（自启动以来，一行一个外部依赖）——
+          它回答的是"<b>这个进程伸出去过哪些手</b>"，用来给资源申请 / 拆单体当论据，与"此刻谁在调谁"是两件事。
+          该档下关系图会收起、表格占满宽度：<b>不并排展示</b>，免得累计表的数字被当成窗口边的图读。
+          点列头可排序，点行回到总览档。</li>
+      <li><b>明细档</b>的依赖节点标签取该边上去重后的<b>出口操作名</b>（每边最多 8 个，超出会截断并标 <code>+N</code>；
+          完整列表看节点 tooltip）。<b>总览档</b>只显示组件类型。</li>
+      <li>节点颜色与标记的判据是<b>边级错误率</b>（取自出口 span 的 <code>isError</code>），
+          <b>不是规则引擎告警</b>；边上的耗时分位是<b>蓄水池抽样</b>得出的，样本少时尾部分位噪声大。
+          <br><b>反过来也不成立</b>：<b>span 判成功 ≠ 调用真的成功</b>。例如 Kafka 在 broker 不可达时
+          <code>send()</code> 会等满 <code>max.block.ms</code> 抛超时，而 agent 的 producer span
+          靠<b>异步 callback</b> 回填错误、同步超时这条路上没有 callback —— 那条边于是
+          <code>errorCount = 0</code>（<b>耗时却会涨到超时上限</b>，那才是线索）。
+          判断"这次调用到底成没成"以端点自己的响应/业务日志为准，别只看颜色。</li>
+      <li><b>连接都没建起来的依赖，不出现在这张图上</b> —— 依赖边建立在「调用已发生」之上，
+          而连接建立本身（connection refused、主机名解析失败）发生在被观测的调用之前，
+          <b>不会产生依赖边</b>。所以某个组件缺席<b>不能</b>读成「没有这个调用」，
+          要确认请到链路视图里看那条请求的失败现场。</li>
+      <li>数据为<b>纯内存</b>、分钟级窗口、<b>重启即失</b>（与 H2 影子层同语义）。<br>
+          本页只有两档：<b>「近 5 分钟」</b>看窗口内的边 —— 插件只保留「当前分钟 + 3 个晚到桶」
+          ≈ <b>4 分钟</b>，再往前的桶已被淘汰，所以这一档拉不出更长历史；
+          <b>「自启动以来」</b>读插件侧的<b>进程累计</b>（不参与淘汰），回答"这个进程伸出去过哪些手"，
+          <b>重启即从零开始</b>。<br>
+          要看<b>小时级 / 天级</b>趋势请看<a href="metrics.html" target="_blank">指标大屏</a>——
+          端点级指标<b>落 H2</b>并做小时 rollup，那一页才有 1h/6h/24h/7d/30d。</li>
+    </ul>
+  </section>
+
+  <div class="grid">
+    <div class="panel" id="chart-panel">
+      <h2><span>调用关系图</span><span class="hint" id="chart-hint"></span></h2>
+      <div id="chart"></div>
+      <div class="legend">
+        <div class="key" id="icon-key"></div>
+        <div><b>节点 / 边颜色 = 边级错误率</b>（SLA 分档；阈值硬编码，非 OAP 的 100/99.9/99/95）
+          <span class="swatch" style="background:#34d399;margin-left:10px"></span>无错误
+          <span class="swatch" style="background:#fbbf24;margin-left:10px"></span>&lt; 1%
+          <span class="swatch" style="background:#fb923c;margin-left:10px"></span>&lt; 5%
+          <span class="swatch" style="background:#f43f5e;margin-left:10px"></span>≥ 5%</div>
+        <div><b>光点</b> = 沿边流动的调用方向（self → 依赖）；节点右上角<b>红点</b> = 该组件最近有失败调用；
+          <b>边宽</b> = 调用量，<b>边标签</b> = 调用量 / 错误率 · p95 耗时</div>
+        <div>点<b>依赖节点</b> → 图右上角弹出该依赖详情（含「慢调用 ›」下钻）。下钻落到 trace-slow（按该端点的慢链路）</div>
+        <div><b>总览档中心是聚合，不可下钻</b>（没有单一端点可传）——端点明细看下方边列表，或切到<b>明细档</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2><span id="table-title">边列表</span><span class="hint" id="table-hint"></span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>入口端点</th><th>依赖</th><th class="num">调用</th><th class="num">错误</th>
+                <th class="num">p95</th><th class="num">最大</th></tr>
+          </thead>
+          <tbody id="edge-rows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty" style="display:none">
+        暂无依赖边。<br>先造点带外部调用的流量,例如：<br>
+        <code>/queryDbByMybatis</code> · <code>/queryDbByJdbc</code> · <code>/api/hutool-demo/post-json</code><br>
+        三层依赖面：<code>/api/deps-demo/redis?op=set</code> ·
+        <code>/api/deps-demo/mysql?sleepMs=300</code> ·
+        <code>/api/deps-demo/kafka?op=produce</code> ·
+        <code>/api/deps-demo/http?site=httpbin</code><br>
+        一次打穿四层：<code>/api/deps-demo/all</code>（依赖面专用，可分别造慢边/失败）；
+        <code>/fullSample</code> 是全貌入口，每种被监控的组件各打一次（<code>?deps=false</code> 关掉三层）
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">
+    <b>明细档</b>左列端点的耗时与分位来自 <a href="metrics.html" target="_blank">Trace 指标页</a>（端点级口径），
+    本页只画依赖关系与边级指标。<b>总览档</b>中心的「本服务」是这些端点的聚合，其数字由本页边集现场汇总。
+    数据源读口：<code>/inner/sw/topology</code>。
+  </p>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var OTHER_EDGE = "(other)";
+  var OTHER_COMPONENT = -1;
+  var SELF_ID = "s:self";
+  // 与插件侧 EdgeMetricsAggregator 的硬编码分档保持一致（非 OAP 的 100/99.9/99/95）。
+  // 色值与页头星云主题同源：无错误 / <1% / <5% / ≥5%。
+  var SLA_BANDS = [
+    { max: 0,     color: "#34d399", label: "无错误" },
+    { max: 0.01,  color: "#fbbf24", label: "< 1%" },
+    { max: 0.05,  color: "#fb923c", label: "< 5%" },
+    { max: 1.01,  color: "#f43f5e", label: ">= 5%" }
+  ];
+  var LAYER_COLOR = {
+    Database: "#38bdf8", Cache: "#f59e0b", MQ: "#a78bfa",
+    Http: "#34d399", RPCFramework: "#f472b6"
+  };
+
+  var state = { view: "summary", minutes: 5, scope: "window", edges: [], dependencies: [],
+    counters: {}, rawEdgeCount: 0, lifetimeSinceMs: 0, enabled: true, truncated: false,
+    // 清单档的排序。默认按累计调用降序 —— 读口本来就这么给，前端只是把它变成可点的。
+    sortKey: "requestCount", sortDir: -1 };
+  var chart = null;          // ECharts 实例（只用于「明细」档的二部图）
+  var currentModel = null;   // 当前星云图的数据模型（点击弹详情要用）
+  var chartHostClickBound = false; // #chart 上的浮层按钮委托是否已绑（跨轮询只绑一次）
+
+  function slaColor(rate) {
+    for (var i = 0; i < SLA_BANDS.length; i++) {
+      if (rate < SLA_BANDS[i].max) { return SLA_BANDS[i].color; }
+    }
+    return SLA_BANDS[SLA_BANDS.length - 1].color;
+  }
+
+  function health(rate) {
+    for (var i = 0; i < SLA_BANDS.length; i++) {
+      if (rate < SLA_BANDS[i].max) { return { c: SLA_BANDS[i].color, l: SLA_BANDS[i].label }; }
+    }
+    return { c: SLA_BANDS[SLA_BANDS.length - 1].color, l: SLA_BANDS[SLA_BANDS.length - 1].label };
+  }
+
+  function isRealEdge(e) {
+    return e.endpoint !== OTHER_EDGE && Number(e.componentId) !== OTHER_COMPONENT;
+  }
+
+  function fmtMs(v) {
+    if (v === null || v === undefined || v < 0) { return "-"; }
+    return v >= 1000 ? (v / 1000).toFixed(2) + "s" : Math.round(v) + "ms";
+  }
+
+  function fmtPct(v) {
+    if (!isFinite(v)) { return "-"; }
+    return (v * 100).toFixed(1) + "%";
+  }
+
+  function fmtK(n) {
+    n = Number(n) || 0;
+    if (n >= 1000) { return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k"; }
+    return String(n);
+  }
+
+  function componentLabel(e) {
+    return e.componentName || ("component-" + e.componentId);
+  }
+
+  /**
+   * 组件图标：**SkyWalking 官方的品牌图标**（与官方拓扑图同一套读法），取自
+   * `skywalking-booster-ui` 的 `src/assets/img/technologies/`（Apache-2.0，见同目录 NOTICE）。
+   * 官方图标集里没有"本服务"和"其它"，这两个仍用内联 SVG。
+   * 换图标只改这张表 —— 页面其余逻辑不认识图标名。
+   */
+  var ICON_FILES = {
+    database: "H2.png",      // 进程内 H2(实测组件名 h2-jdbc-driver)
+    mysql: "MYSQL.png",      // 真 MySQL(实测组件名 mysql-connector-java)
+    cache: "REDIS.png",      // Jedis(实测组件名 Jedis)
+    mq: "KAFKA.png",         // 实测组件名 kafka-producer
+    http: "HTTPCLIENT.png",  // HttpClient 与 Hutool(#128)共用
+    rpc: "GRPC.png"          // 实测组件名大写 GRPC、层 RPCFramework
+  };
+
+  var ICON_SVG = {
+    generic: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<circle cx="20" cy="20" r="12" fill="none" stroke="#9aa4b2" stroke-width="2.4"/>'
+      + '</svg>',
+    self: '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">'
+      + '<circle cx="20" cy="20" r="7" fill="#7fd1ff"/><circle cx="20" cy="20" r="12.5" fill="none"'
+      + ' stroke="#7fd1ff" stroke-width="2.2"/>'
+      + '</svg>'
+  };
+
+  /** 官方 png 图标（相对页面 URL）。 */
+  function iconFile(name) { return "icons/" + ICON_FILES[name]; }
+  /** 给 ECharts 用（image:// + 相对路径）。 */
+  function fileSymbol(name) { return "image://" + iconFile(name); }
+  /** 内联 SVG 给 ECharts 用。 */
+  function svgSymbol(svg) { return "image://" + dataUri(svg); }
+  /** 纯 data URI：既能喂 ECharts 的 symbol，也能塞进&lt;img src>。 */
+  function dataUri(svg) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); }
+  /** 图例/图标行用的一项：png 走相对路径，SVG 走 data URI。 */
+  function iconSrc(name) { return ICON_FILES[name] ? iconFile(name) : dataUri(ICON_SVG[name]); }
+
+  // 组件名 → 图标 key。按**实测组件名**匹配，层分类兜底(组件名会随组件库措辞变，层稳定)。
+  function iconKey(componentName, spanLayer) {
+    var n = String(componentName || "").toLowerCase();
+    if (n.indexOf("grpc") >= 0 || spanLayer === "gRPC" || spanLayer === "RPCFramework") { return "rpc"; }
+    if (n.indexOf("jedis") >= 0 || n.indexOf("redis") >= 0 || n === "cache" || spanLayer === "Cache") { return "cache"; }
+    if (n.indexOf("kafka") >= 0 || n.indexOf("mq") >= 0 || spanLayer === "MQ") { return "mq"; }
+    if (spanLayer === "Http" || n.indexOf("http") >= 0 || n.indexOf("hutool") >= 0) { return "http"; }
+    if (n.indexOf("mysql") >= 0 || n === "mariadb") { return "mysql"; }
+    if (spanLayer === "Database" || n.indexOf("jdbc") >= 0 || n.indexOf("h2") >= 0
+        || n.indexOf("postgres") >= 0) { return "database"; }
+    return "generic";
+  }
+  /** 给 ECharts 的 symbol。 */
+  function iconFor(componentName, spanLayer) {
+    var k = iconKey(componentName, spanLayer);
+    return ICON_FILES[k] ? fileSymbol(k) : svgSymbol(ICON_SVG[k]);
+  }
+  /** 给内联 SVG &lt;image href> 的 URL。 */
+  function iconUrlFor(componentName, spanLayer) {
+    var k = iconKey(componentName, spanLayer);
+    return ICON_FILES[k] ? iconFile(k) : dataUri(ICON_SVG[k]);
+  }
+
+  /**
+   * 图下方那行「图标 = 组件类型」：**画真图标**，与图上完全一致。
+   * （之前是文字描述"圆柱/堆叠盘"，读者得靠想象把文字对图形。）
+   */
+  function renderIconKey() {
+    var el = document.getElementById("icon-key");
+    if (!el) { return; }
+    var items = [["数据库 H2", "database"], ["MySQL", "mysql"], ["缓存 Redis", "cache"],
+                 ["消息队列 Kafka", "mq"], ["HTTP 出网", "http"], ["gRPC", "rpc"],
+                 ["其它", "generic"], ["本服务", "self"]];
+    el.innerHTML = "<b>节点图标 = 组件类型</b>（官方品牌图标，同 SkyWalking 拓扑图）："
+      + items.map(function (it) {
+          return '<span class="ki"><img src="' + iconSrc(it[1]) + '" alt="">' + it[0] + "</span>";
+        }).join("");
+  }
+
+  // 依赖节点身份:总览档=组件类型;明细档=组件类型 + 出口操作名
+  // 注意:操作名是"边上聚合出去重的集合"(插件侧封顶 8 个),不是一个值——
+  // 同一端点调同一组件可能走多个操作名,故用第一个当标签、全部进 tooltip。
+  function depOps(e) {
+    return Array.isArray(e.operations) ? e.operations : [];
+  }
+
+  function depKey(e) {
+    if (state.view === "summary") { return "c:" + e.componentId; }
+    var ops = depOps(e);
+    return "c:" + e.componentId + "|" + (ops.length ? ops[0] : "");
+  }
+
+  function depLabel(e) {
+    if (state.view === "summary") { return componentLabel(e); }
+    var ops = depOps(e);
+    var base = ops.length ? ops[0] : componentLabel(e);
+    if (e.operationsTruncated && ops.length) { return base + " +" + (ops.length - 1); }
+    return base;
+  }
+
+  /**
+   * 星云图的统一取键：**不读 state.view**。
+   * <p>byComponent=true → 组件级一条边（总览）；false → 组件 + 出口操作名（明细）。</p>
+   * <p>刻意与 depKey 分开：总览档固定组件级，不受 state.view 影响（明细档才按操作名拆）。</p>
+   */
+  function graphKey(e, byComponent) {
+    if (byComponent) { return "c:" + e.componentId; }
+    var ops = depOps(e);
+    return "c:" + e.componentId + "|" + (ops.length ? ops[0] : "");
+  }
+  function graphName(e, byComponent) {
+    if (byComponent) { return componentLabel(e); }
+    var ops = depOps(e);
+    var base = ops.length ? ops[0] : componentLabel(e);
+    if (e.operationsTruncated && ops.length) { return base + " +" + (ops.length - 1); }
+    return base;
+  }
+
+  /**
+   * 千分位整数。结论卡与摘要共用。
+   * <p>
+   * 刻意自己写而**不引入别页的 fmtInt** —— 那种跨页复制粘贴的隐式依赖一旦对不上就是
+   * `ReferenceError`，且它发生在渲染链路上，会把整张图一起带空（页内已有教训）。
+   * </p>
+   */
+  function fmtCount(v) {
+    return String(Number(v) || 0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  /**
+   * 结论卡：给汇报用的一行结论，数字**全部由 `/inner/sw/topology` 的读口算出**，不手写。
+   * <p>
+   * 刻意用 <b>进程累计</b>口径（{@code dependencies}）而不是窗口内的边：累计量不随时间窗跳变，
+   * 翻页/切档时数字稳定，适合放进汇报材料；窗口边的绝对值会随压测停否忽大忽小。
+   * </p>
+   */
+  function presenterConclusion(data) {
+    if (!window.SWPresenter) { return; }
+    try {
+      var deps = (data && data.dependencies) ? data.dependencies : [];
+      var calls = 0, errs = 0, slowest = null;
+      deps.forEach(function (d) {
+        calls += Number(d.requestCount) || 0;
+        errs += Number(d.errorCount) || 0;
+        var ms = Number(d.maxLatency);
+        if (ms > 0 && (slowest === null || ms > slowest.ms)) {
+          slowest = { name: d.componentName || ("component:" + d.componentId), ms: ms };
+        }
+      });
+      var rate = calls ? (errs * 100 / calls) : 0;
+      window.SWPresenter.conclusion([
+        { label: "外部依赖类型", value: String(deps.length), sub: data && data.enabled ? "自启动以来" : "采集未启用" },
+        { label: "累计调用", value: fmtCount(calls) + " 次", sub: "出口 span 段内配对" },
+        { label: "累计错误率", value: rate.toFixed(2) + "%", sub: fmtCount(errs) + " 次错误", tone: rate > 0 ? "err" : "ok" },
+        { label: "最慢依赖", value: slowest ? slowest.ms + " ms" : "-", sub: slowest ? slowest.name : "无数据" }
+      ]);
+    } catch (e) {
+      // 结论卡是锦上添花，绝不能因为它算错就把主图带空 —— 吞掉并留下痕迹
+      if (window.console && console.warn) { console.warn("[topology] 结论卡计算失败", e); }
+    }
+  }
+
+  /**
+   * 把跨分钟桶的同一逻辑边合成一条。
+   * <p>
+   * 插件侧边是<b>按分钟桶</b>存的（与 Trace 指标同构），所以同一窗口内
+   * 「端点 → 组件」会出现多行。直接铺到图上会看到重复节点与重复边。
+   * </p>
+   * <p>
+   * 合并口径：计数<b>求和</b>；分位与最大耗时<b>取最大值</b>——与本仓「最差分钟分位」
+   * 同一取向（不掩盖尖峰），且不做加权平均那种会把尖峰抹平的近似。
+   * </p>
+   */
+  function aggregateEdges(raw) {
+    var byKey = {};
+    var order = [];
+    raw.forEach(function (e) {
+      var k = e.endpoint + "" + depKey(e);
+      var cur = byKey[k];
+      if (!cur) {
+        cur = {
+          endpoint: e.endpoint,
+          componentId: e.componentId,
+          componentName: e.componentName,
+          spanLayer: e.spanLayer,
+          operations: depOps(e),
+          operationsTruncated: !!e.operationsTruncated,
+          requestCount: 0,
+          errorCount: 0,
+          sampleCount: 0,
+          p50: -1, p90: -1, p95: -1, p99: -1,
+          maxLatency: 0,
+          buckets: 0
+        };
+        byKey[k] = cur;
+        order.push(k);
+      }
+      cur.requestCount += Number(e.requestCount) || 0;
+      cur.errorCount += Number(e.errorCount) || 0;
+      cur.sampleCount += Number(e.sampleCount) || 0;
+      cur.buckets += 1;
+      if (Number(e.maxLatency) > cur.maxLatency) { cur.maxLatency = Number(e.maxLatency) || 0; }
+      // 分位取窗口内最差的一个桶；-1(样本不足)不参与竞争
+      ["p50", "p90", "p95", "p99"].forEach(function (q) {
+        var v = Number(e[q]);
+        if (v >= 0 && v > cur[q]) { cur[q] = v; }
+      });
+      if (e.operationsTruncated) { cur.operationsTruncated = true; }
+    });
+    return order.map(function (k) { return byKey[k]; });
+  }
+
+  function fetchJson(path) {
+    return fetch(path).then(function (r) { return r.json(); });
+  }
+
+  /** 顶栏摘要：清单档与「自启动以来」档讲的同一件事（依赖清单），故共用一份措辞。 */
+  function depSummaryText() {
+    var list = state.dependencies || [];
+    var total = list.reduce(function (s, d) { return s + (Number(d.requestCount) || 0); }, 0);
+    var since = state.lifetimeSinceMs ? fmtClock(state.lifetimeSinceMs) : "?";
+    return (state.enabled ? "" : "[聚合未启用] ")
+      + "自启动以来 " + list.length + " 个依赖 · 累计 " + total + " 次调用 · 起点 " + since;
+  }
+
+  function load() {
+    var summary = document.getElementById("summary");
+    summary.textContent = "加载中…";
+    // 时间窗只影响"哪些分钟桶算数";边只存内存窗口,故用桶范围做客户端过滤
+    var nowBucket = Math.floor(Date.now() / 60000);
+    var fromBucket = nowBucket - state.minutes;
+    var url = "/inner/sw/topology?view=" + encodeURIComponent(state.view) + "&limit=2000";
+    return fetchJson(url).then(function (data) {
+      state.counters = (data && data.counters) ? data.counters : {};
+      state.truncated = !!(data && data.truncated);
+      state.enabled = !!(data && data.enabled);
+      // 「自启动以来」这一档读的是插件侧的**生命周期累计**,不是窗口内的边:
+      // 窗口桶约 4 分钟就被淘汰,只有累计表记得"这个进程伸出去过哪些手"。
+      state.dependencies = (data && data.dependencies) ? data.dependencies : [];
+      state.lifetimeSinceMs = (data && data.lifetimeSinceMs) ? Number(data.lifetimeSinceMs) : 0;
+      // 结论卡放在主渲染**之前**算（两档都要用），但它内部自带 try/catch：
+      // 锦上添花的东西坏了也不该把主图带空。
+      presenterConclusion(data);
+      if (state.scope === "lifetime") {
+        state.edges = [];
+        state.rawEdgeCount = 0;
+        render();
+        summary.textContent = depSummaryText();
+        return;
+      }
+      var edges = (data && data.edges) ? data.edges : [];
+      var kept = edges.filter(function (e) {
+        return Number(e.timeBucket) >= fromBucket;
+      });
+      // 插件侧按分钟桶存边,同一逻辑边会跨桶重复 —— 合并后再上视图/上表
+      state.edges = aggregateEdges(kept);
+      state.rawEdgeCount = kept.length;
+      render();
+      var range = fmtClock(fromBucket * 60000) + " – " + fmtClock((nowBucket + 1) * 60000);
+      // 清单档下顶栏也讲依赖清单：这一档的表是累计口径，若顶栏还报"窗口边 N 条"，
+      // 观众会把两个口径的数字并排读 —— 那正是页内 caveats 反复劝阻的混读。
+      summary.textContent = state.view === "list" ? depSummaryText()
+        : (state.enabled ? "" : "[聚合未启用] ")
+          + "边 " + state.edges.length + "（分钟桶 " + (state.rawEdgeCount || 0) + "）"
+          + " · 窗口 " + range
+          + (state.truncated ? " · [已截断]" : "");
+      presenterConclusion(data);
+    }).catch(function (e) {
+      summary.textContent = "加载失败: " + e;
+      render();
+    });
+  }
+
+  function fmtClock(ms) {
+    var d = new Date(ms);
+    function p(n) { return (n < 10 ? "0" : "") + n; }
+    return p(d.getHours()) + ":" + p(d.getMinutes());
+  }
+
+  // ============================================================ 数据模型
+
+  /** 把窗口内已合并的边集收成「端点 + 组件 + self 聚合」三张表。byComponent 决定依赖怎么分行。 */
+  function collectWindowGraph(byComponent) {
+    var endpoints = {}, deps = {}, order = [], depOrder = [];
+    var self = { n: 0, err: 0, slowest: "", max: 0 };
+    state.edges.forEach(function (e) {
+      var epId = "e:" + e.endpoint;
+      if (!endpoints[epId]) { endpoints[epId] = { id: epId, name: e.endpoint, n: 0, err: 0 }; order.push(epId); }
+      var ep = endpoints[epId];
+      var n = Number(e.requestCount) || 0;
+      ep.n += n; ep.err += Number(e.errorCount) || 0;
+      self.n += n; self.err += Number(e.errorCount) || 0;
+      if ((Number(e.maxLatency) || 0) > self.max) {
+        self.max = Number(e.maxLatency) || 0;
+        self.slowest = graphName(e, byComponent);
+      }
+      var dk = graphKey(e, byComponent);
+      if (!deps[dk]) {
+        deps[dk] = {
+          id: "d:" + dk, key: dk,
+          comp: componentLabel(e), spanLayer: e.spanLayer, ops: depOps(e),
+          name: graphName(e, byComponent),
+          n: 0, err: 0, p95: 0, max: 0, topEndpoint: "", topN: 0
+        };
+        depOrder.push(dk);
+      }
+      var d = deps[dk];
+      d.n += n; d.err += Number(e.errorCount) || 0;
+      d.max = Math.max(d.max, Number(e.maxLatency) || 0);
+      d.p95 = Math.max(d.p95, Number(e.p95) < 0 ? 0 : Number(e.p95));
+      // 记下该依赖调用量最大的端点：下钻只能落到它
+      if (!d.topEndpoint || n > d.topN) { d.topEndpoint = e.endpoint; d.topN = n; }
+    });
+    return { endpoints: endpoints, deps: deps, order: order, depOrder: depOrder, self: self };
+  }
+
+  function indexById(nodes) {
+    var m = {};
+    nodes.forEach(function (nd) { m[nd.id] = nd; });
+    return m;
+  }
+
+  /** 组件级依赖 → 星云节点（外环节点）。 */
+  function depNode(d) {
+    var rate = d.n > 0 ? d.err / d.n : 0;
+    return {
+      id: d.id, kind: "dep", comp: d.comp, layer: d.spanLayer,
+      icon: iconUrlFor(d.comp, d.spanLayer),
+      name: d.comp, label: d.comp,
+      calls: d.n, errs: d.err, p95: d.p95, max: d.max, ops: d.ops, topEndpoint: d.topEndpoint,
+      sub: fmtK(d.n) + " · " + fmtPct(rate) + (d.p95 >= 0 ? " · p95 " + fmtMs(d.p95) : "")
+    };
+  }
+
+  /** 总览档：self 居中 + 组件环。 */
+  function buildSummaryModel() {
+    var g = collectWindowGraph(true);
+    var deps = g.depOrder.map(function (k) { return depNode(g.deps[k]); });
+    var edges = g.depOrder.map(function (k) {
+      var d = g.deps[k];
+      return { from: "__self", to: d.id, calls: d.n, errs: d.err, p95: d.p95 };
+    });
+    return {
+      center: { title: "本服务", sub: "调用 " + fmtK(g.self.n) + " · 错误 "
+        + fmtPct(g.self.n ? g.self.err / g.self.n : 0) + " · 端点 " + g.order.length },
+      rings: [deps], edges: edges, byId: indexById(deps),
+      kpis: windowKpis(g)
+    };
+  }
+
+  /** 自启动以来档：self 居中 + 组件环，数字取进程累计（无耗时样本，不给 p95）。 */
+  function buildLifetimeModel() {
+    var list = (state.dependencies || []).slice();
+    var total = 0, errs = 0, slowest = null;
+    list.forEach(function (d) {
+      var n = Number(d.requestCount) || 0;
+      total += n; errs += Number(d.errorCount) || 0;
+      var ms = Number(d.maxLatency) || 0;
+      if (ms > (slowest ? slowest.ms : 0)) {
+        slowest = { ms: ms, name: d.componentName || ("component-" + d.componentId) };
+      }
+    });
+    var deps = list.map(function (d) {
+      var n = Number(d.requestCount) || 0, err = Number(d.errorCount) || 0, r = n ? err / n : 0;
+      var name = d.componentName || ("component-" + d.componentId);
+      return {
+        id: "d:c:" + d.componentId + "|" + d.spanLayer, kind: "dep",
+        comp: name, layer: d.spanLayer, icon: iconUrlFor(d.componentName, d.spanLayer),
+        name: name, label: name, calls: n, errs: err, p95: -1, max: Number(d.maxLatency) || 0,
+        ops: d.operations, firstSeenMs: Number(d.firstSeenBucket) * 60000,
+        sub: "累计 " + fmtK(n) + " · 错误 " + fmtPct(r)
+          + (Number(d.maxLatency) > 0 ? " · 最大 " + fmtMs(d.maxLatency) : "")
+      };
+    });
+    var edges = deps.map(function (nd) {
+      return { from: "__self", to: nd.id, calls: nd.calls, errs: nd.errs, p95: -1 };
+    });
+    return {
+      center: { title: "本服务", sub: "依赖 " + deps.length + " 个 · 调用 " + fmtK(total)
+        + " · 错误 " + fmtPct(total ? errs / total : 0) },
+      rings: [deps], edges: edges, byId: indexById(deps), lifetime: true,
+      kpis: lifetimeKpis(list, total, errs, slowest)
+    };
+  }
+
+  // ---------------------------------------------------------------- KPI 行
+
+  function kpiCard(label, val, sub, tone) {
+    return '<div class="kpi"><div class="k-label">' + esc(label) + "</div>"
+      + '<div class="k-val"' + (tone ? ' style="color:' + tone + '"' : "") + ">" + val + "</div>"
+      + '<div class="k-sub">' + esc(sub) + "</div></div>";
+  }
+
+  function windowKpis(g) {
+    var calls = g.self.n, errs = g.self.err, rate = calls ? errs / calls : 0;
+    var slow = null;
+    g.depOrder.forEach(function (k) {
+      var d = g.deps[k];
+      var q = d.p95 >= 0 ? d.p95 : d.max;
+      if (q > (slow ? slow.q : 0)) { slow = { q: q, name: d.comp }; }
+    });
+    var comps = {};
+    g.depOrder.forEach(function (k) { comps[g.deps[k].comp] = 1; });
+    return [
+      kpiCard("外部依赖", Object.keys(comps).length + " 类", "组件级 · 不含端点"),
+      kpiCard("窗口调用", fmtK(calls), "出口 span 段内配对"),
+      kpiCard("错误率", fmtPct(rate), fmtCount(errs) + " 次错误", rate > 0 ? "#fb7185" : "#34d399"),
+      kpiCard("最慢依赖", slow ? fmtMs(slow.q) : "-", slow ? slow.name : "无数据", "#fbbf24"),
+      kpiCard("覆盖端点", g.order.length + " 个", "窗口内入口端点")
+    ];
+  }
+
+  function lifetimeKpis(list, total, errs, slowest) {
+    return [
+      kpiCard("外部依赖", list.length + " 类", "自启动以来"),
+      kpiCard("累计调用", fmtK(total), "出口 span 段内配对"),
+      kpiCard("累计错误率", fmtPct(total ? errs / total : 0), fmtCount(errs) + " 次错误",
+        errs > 0 ? "#fb7185" : "#34d399"),
+      kpiCard("最慢依赖", slowest ? fmtMs(slowest.ms) : "-", slowest ? slowest.name : "无数据", "#fbbf24"),
+      kpiCard("起点", state.lifetimeSinceMs ? fmtClock(state.lifetimeSinceMs) : "?", "重启即重置")
+    ];
+  }
+
+  function renderKpis() {
+    var host = document.getElementById("kpis");
+    if (!host) { return; }
+    var model;
+    if (state.view === "list" || state.scope === "lifetime") { model = buildLifetimeModel(); }
+    else { model = buildSummaryModel(); }
+    host.innerHTML = model.kpis.join("");
+  }
+
+  // ============================================================ 星云图渲染
+
+  function edgePath(sx, sy, nx, ny, bow) {
+    var mx = (sx + nx) / 2, my = (sy + ny) / 2, dx = nx - sx, dy = ny - sy;
+    var cx = mx - dy * bow, cy = my + dx * bow;
+    return "M " + sx.toFixed(1) + " " + sy.toFixed(1) + " Q " + cx.toFixed(1) + " " + cy.toFixed(1)
+      + " " + nx.toFixed(1) + " " + ny.toFixed(1);
+  }
+
+  function safeLog(x) { return Math.log(Math.max(2, x)); }
+
+  function edgeRate(e) { return e.calls > 0 ? e.errs / e.calls : 0; }
+  function nodeRate(nd) { return nd.calls > 0 ? nd.errs / nd.calls : 0; }
+
+  function centerMarkup(c, cx, cy) {
+    return '<g class="node self" data-id="__self" transform="translate(' + cx + "," + cy + ')">'
+      + '<circle r="52" fill="#38bdf8" opacity="0.08">'
+      + '<animate attributeName="r" values="44;60;44" dur="3.4s" repeatCount="indefinite"/></circle>'
+      + '<circle r="38" fill="#0b1425" stroke="#67c3f3" stroke-width="2.5"/>'
+      + '<circle r="46" fill="none" stroke="#38bdf8" stroke-width="1" opacity="0.4" stroke-dasharray="3 7"/>'
+      + '<path d="M0,-16 L14,-8 L14,8 L0,16 L-14,8 L-14,-8 Z" fill="#0e1c30" stroke="#7cc4ff" stroke-width="1.6"/>'
+      + '<circle r="4.2" fill="#7cc4ff"/>'
+      + '<text class="self-t" y="70" text-anchor="middle">' + esc(c.title) + "</text>"
+      + '<text class="self-sub" y="87" text-anchor="middle">' + esc(c.sub) + "</text>"
+      + "</g>";
+  }
+
+  function depMarkup(nd, p, h) {
+    var ux = Math.cos(p.a), uy = Math.sin(p.a);
+    var lx = p.x + ux * 40, ly = p.y + uy * 40 + (uy > 0.4 ? 6 : (uy < -0.4 ? -10 : 0));
+    var anchor = ux > 0.35 ? "start" : (ux < -0.35 ? "end" : "middle");
+    var pulse = nd.errs > 0
+      ? '<circle cx="' + (p.x + 19) + '" cy="' + (p.y - 19) + '" r="4.5" fill="#fb7185">'
+        + '<animate attributeName="r" values="4.5;6.5;4.5" dur="1.6s" repeatCount="indefinite"/>'
+        + '<animate attributeName="opacity" values="1;.5;1" dur="1.6s" repeatCount="indefinite"/></circle>'
+      : "";
+    var title = esc(nd.name) + " · 调用 " + fmtCount(nd.calls) + " · 错误率 " + fmtPct(nodeRate(nd))
+      + (nd.p95 >= 0 ? " · p95 " + fmtMs(nd.p95) : "");
+    return '<g class="node dep' + (nd.errs > 0 ? " has-err" : "") + '" data-id="' + nd.id + '" tabindex="0">'
+      + "<title>" + title + "</title>"
+      + '<circle class="halo" cx="' + p.x + '" cy="' + p.y + '" r="34" fill="' + h.c + '" opacity="0.10"/>'
+      + '<circle class="disc" cx="' + p.x + '" cy="' + p.y + '" r="27" fill="#0b1425" stroke="' + h.c + '" stroke-width="3"/>'
+      + '<image href="' + nd.icon + '" x="' + (p.x - 16) + '" y="' + (p.y - 16) + '" width="32" height="32"/>'
+      + pulse
+      + '<text x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '" text-anchor="' + anchor + '">'
+      + esc(nd.label) + "</text>"
+      + '<text class="sub" x="' + lx.toFixed(1) + '" y="' + (ly + 15).toFixed(1) + '" text-anchor="' + anchor + '">'
+      + esc(nd.sub) + "</text>"
+      + "</g>";
+  }
+
+  /**
+   * 星云图：self 居中 + 一圈依赖（星图）。渲染器本身按「多环」写，当前只用 1 环。
+   * <p>环 0 在最内圈、环末在最外圈；中心固定为 self。边按调用量给宽度、按边级错误率给颜色，
+   * 并有沿边流动的光点。位置全部是确定性计算 —— 刷新不跳位，方便截图对比。</p>
+   */
+  function nebulaSVG(model, opts) {
+    opts = opts || {};
+    var W = opts.width || 760, H = opts.height || 672;
+    var cx = W / 2, cy = H / 2;
+    var radii = opts.radii || [{ rx: 262, ry: 222 }];
+    var rings = model.rings || [];
+    var pos = {}, maxCalls = 1;
+    // self 不在环上，但每条边的 from 都指向它 —— 必须塞进 pos，否则边会因找不到端点被整条跳过
+    pos.__self = { x: cx, y: cy, a: 0, ring: -1 };
+    rings.forEach(function (nodes, k) {
+      var rx = radii[k] ? radii[k].rx : 262, ry = radii[k] ? radii[k].ry : 222;
+      var n = nodes.length;
+      nodes.forEach(function (nd, i) {
+        var a = -Math.PI / 2 + (n ? i * 2 * Math.PI / n : 0);
+        pos[nd.id] = { x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry, a: a, ring: k };
+        if (Number(nd.calls) > maxCalls) { maxCalls = Number(nd.calls); }
+      });
+    });
+
+    var edgeBase = "", edgeDash = "", flows = "";
+    (model.edges || []).forEach(function (e, i) {
+      var from = pos[e.from], to = pos[e.to];
+      if (!from || !to) { return; }
+      var h = health(edgeRate(e));
+      var w = 1.4 + safeLog(e.calls) / safeLog(maxCalls) * 5.2;
+      var pth = edgePath(from.x, from.y, to.x, to.y, opts.bow == null ? 0.12 : opts.bow);
+      var pid = "ap-" + (opts.uid || "x") + "-" + i;
+      var a = e.from, b = e.to;
+      edgeBase += '<path class="edge-base" data-a="' + a + '" data-b="' + b + '" d="' + pth
+        + '" stroke="' + h.c + '" stroke-opacity="0.28" stroke-width="' + w.toFixed(2) + '"/>';
+      edgeDash += '<path id="' + pid + '" class="edge-dash" data-a="' + a + '" data-b="' + b + '" d="' + pth
+        + '" stroke="' + h.c + '" stroke-opacity="0.7" style="animation-duration:'
+        + (2.9 - Math.min(1.6, e.calls / maxCalls * 1.6)).toFixed(2) + 's"/>';
+      flows += '<circle class="flow" data-a="' + a + '" data-b="' + b + '" r="2.6" fill="' + h.c + '">'
+        + '<animateMotion dur="' + (2.2 + (i % 4) * 0.35).toFixed(2) + 's" begin="'
+        + (i * 0.22).toFixed(2) + 's" repeatCount="indefinite"><mpath href="#' + pid + '"/></animateMotion></circle>';
+    });
+
+    var nodesHtml = "";
+    rings.forEach(function (nodes) {
+      nodes.forEach(function (nd) {
+        var p = pos[nd.id];
+        if (!p) { return; }
+        nodesHtml += depMarkup(nd, p, health(nodeRate(nd)));
+      });
+    });
+
+    var emptyT = "";
+    var any = rings.some(function (r) { return r.length > 0; });
+    if (!any) {
+      emptyT = '<text class="empty-t" x="' + cx + '" y="' + (cy + 130) + '" text-anchor="middle">'
+        + "暂无依赖边（依赖边只在进程内存里，重启即清零；先造点流量）</text>";
+    }
+
+    return '<svg class="topo" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet">'
+      + '<g class="edges">' + edgeBase + "</g>"
+      + '<g class="flows">' + flows + "</g>"
+      + '<g class="edge-dashes">' + edgeDash + "</g>"
+      + centerMarkup(model.center, cx, cy)
+      + nodesHtml + emptyT
+      + "</svg>";
+  }
+
+  function resetChartHost() {
+    if (chart) { chart.dispose(); chart = null; }
+    var h = document.getElementById("chart");
+    if (h) { h.innerHTML = ""; }
+  }
+
+  function renderNebula(model, opts) {
+    resetChartHost();
+    var host = document.getElementById("chart");
+    host.innerHTML = nebulaSVG(model, opts)
+      + '<div class="insp-float" id="insp-float" hidden></div>';
+    currentModel = model;
+    initNebula();
+  }
+
+  // ---------------------------------------------------------------- 详情浮层
+
+  function inspectorForDep(nd) {
+    var rate = nodeRate(nd);
+    var h = health(rate);
+    return "<h3>" + esc(nd.name) + "</h3>"
+      + '<div class="lay" style="color:' + (LAYER_COLOR[nd.layer] || "#7d8db3") + '">'
+      + esc(nd.layer || "-") + " · 组件</div>"
+      + '<div class="grid2">'
+      + cell("调用", fmtCount(nd.calls))
+      + cell("错误", fmtCount(nd.errs) + (nd.errs > 0 ? ' <span class="badge">' + fmtPct(rate) + "</span>" : ""))
+      + cell("p95", nd.p95 >= 0 ? fmtMs(nd.p95) : "-")
+      + cell("最大", fmtMs(nd.max))
+      + "</div>"
+      + '<div style="font-size:11px;color:#7d8db3;margin-bottom:5px">出口操作名</div>'
+      + '<div class="ops">' + (nd.ops && nd.ops.length
+        ? nd.ops.map(function (o) { return "· " + esc(o); }).join("<br>") : "（无记录）") + "</div>"
+      + (nd.topEndpoint
+        ? '<button class="insp-go" data-ep="' + escapeAttr(nd.topEndpoint) + '">慢调用 ›</button>' : "");
+  }
+  function cell(k, v) {
+    return '<div class="cell"><div class="k">' + esc(k) + '</div><div class="v">' + v + "</div></div>";
+  }
+
+  function showInspector(html) {
+    var f = document.getElementById("insp-float");
+    if (!f) { return; }
+    f.innerHTML = '<button class="insp-x" type="button" title="关闭">×</button>' + html;
+    f.hidden = false;
+  }
+  function hideInspector() {
+    var f = document.getElementById("insp-float");
+    if (f) { f.hidden = true; }
+  }
+
+  function initNebula() {
+    var svg = document.querySelector("#chart svg.topo");
+    if (!svg) { return; }
+    function clear() {
+      svg.classList.remove("dimming");
+      Array.prototype.forEach.call(svg.querySelectorAll(".hot"), function (x) { x.classList.remove("hot"); });
+    }
+    svg.addEventListener("mouseover", function (ev) {
+      var g = ev.target.closest && ev.target.closest(".node");
+      if (!g) { return; }
+      var id = g.getAttribute("data-id");
+      if (id === "__self") { return; }
+      svg.classList.add("dimming");
+      Array.prototype.forEach.call(svg.querySelectorAll("[data-id],[data-a],[data-b]"), function (x) {
+        var hit = x.getAttribute("data-id") === id || x.getAttribute("data-a") === id || x.getAttribute("data-b") === id;
+        x.classList.toggle("hot", hit);
+      });
+    });
+    svg.addEventListener("mouseleave", clear);
+    svg.addEventListener("click", function (ev) {
+      var g = ev.target.closest && ev.target.closest(".node");
+      if (!g || !currentModel) { return; }
+      var id = g.getAttribute("data-id");
+      if (id === "__self") { return; }
+      var nd = currentModel.byId[id];
+      if (!nd) { return; }
+      showInspector(inspectorForDep(nd));
+    });
+    // 浮层按钮的委托只绑一次：`#chart` 这个宿主元素跨轮询是复用的（每次只换 innerHTML），
+    // 若放在这里每轮都 addEventListener，几轮之后一次点击会同时触发多个 window.open。
+    if (!chartHostClickBound) {
+      chartHostClickBound = true;
+      document.getElementById("chart").addEventListener("click", function (ev) {
+        if (ev.target.closest && ev.target.closest(".insp-x")) { hideInspector(); return; }
+        var go = ev.target.closest && ev.target.closest(".insp-go");
+        if (go) {
+          window.open("trace-slow.html?endpoint=" + encodeURIComponent(go.getAttribute("data-ep")), "_blank");
+        }
+      });
+    }
+  }
+
+  // ============================================================ 明细档（ECharts 二部图）
+
+  function renderDetailChart() {
+    var g = collectWindowGraph(false);
+    var rows = Math.max(g.order.length, g.depOrder.length, 1);
+    function yAt(i, n) { return n <= 1 ? 60 : 60 + (i * 420) / (n - 1); }
+
+    var nodes = [];
+    g.order.forEach(function (id, i) {
+      var ep = g.endpoints[id];
+      nodes.push({
+        id: ep.id, name: ep.name, category: 0, symbolSize: 32, symbol: svgSymbol(ICON_SVG.self),
+        x: 90, y: yAt(i, rows),
+        itemStyle: { color: "#0b1425", borderColor: "#7cc4ff", borderWidth: 2 },
+        label: { color: "#dbe6f7", fontSize: 11, position: "left", distance: 6 }
+      });
+    });
+    g.depOrder.forEach(function (dk, i) {
+      var d = g.deps[dk];
+      var rate = d.n > 0 ? d.err / d.n : 0;
+      nodes.push({
+        id: d.id, name: d.name, category: 1, symbolSize: 40, symbol: iconFor(d.comp, d.spanLayer),
+        x: 545, y: yAt(i, rows),
+        itemStyle: { color: "#0b1425", borderColor: slaColor(rate), borderWidth: 3 },
+        label: { color: "#dbe6f7", fontSize: 11, position: "right", distance: 6, width: 120 },
+        mark: d.err > 0, ops: d.ops, comp: d.comp, layerName: d.spanLayer, n: d.n, err: d.err
+      });
+    });
+
+    var links = [];
+    var pairSeq = {};
+    state.edges.forEach(function (e) {
+      var d = g.deps[graphKey(e, false)];
+      if (!d) { return; }
+      var pair = e.endpoint + " -> " + d.key;
+      var idx = pairSeq[pair] === undefined ? 0 : pairSeq[pair];
+      pairSeq[pair] = idx + 1;
+      links.push({
+        source: "e:" + e.endpoint, target: d.id,
+        value: Number(e.requestCount) || 0,
+        rate: Number(e.requestCount) > 0 ? (Number(e.errorCount) || 0) / Number(e.requestCount) : 0,
+        p95: Number(e.p95), endpoint: e.endpoint, depName: d.name,
+        curveness: pairSeq[pair] > 1 ? (idx % 2 === 0 ? 0.18 : -0.18) : 0.06
+      });
+    });
+
+    resetChartHost();
+    if (!chart) { chart = echarts.init(document.getElementById("chart")); }
+    document.getElementById("chart-hint").textContent =
+      "左=入口端点 · 右=外部依赖（点节点可下钻）· 固定布局，刷新位置不变";
+
+    chart.setOption({
+      backgroundColor: "transparent",
+      tooltip: {
+        backgroundColor: "#0e1626", borderColor: "#1d2a44", textStyle: { color: "#dbe6f7" },
+        formatter: function (p) {
+          if (p.dataType === "edge") {
+            return p.data.source.replace(/^e:/, "") + " → " + p.data.depName
+              + "<br>调用 " + p.data.value + " 次"
+              + "<br>错误率 " + fmtPct(p.data.rate)
+              + "<br>p95 " + fmtMs(p.data.p95);
+          }
+          if (p.dataType === "node" && p.data.category === 1) {
+            var d = p.data;
+            var ops = (d.ops && d.ops.length) ? d.ops.join("<br>") : "(无记录)";
+            return "<b>" + escapeHtml(d.name) + "</b><br>组件: " + escapeHtml(d.comp)
+              + "<br>层: " + escapeHtml(d.layerName || "(未知)")
+              + "<br>窗口内调用 " + d.n + " 次 · 错误 " + d.err
+              + (d.mark ? "<br><b>最近有失败调用</b>" : "")
+              + "<br><br>出口操作:<br>" + ops;
+          }
+          return escapeHtml(p.name || "");
+        }
+      },
+      legend: [{
+        data: [
+          { name: "入口端点", icon: svgSymbol(ICON_SVG.self) },
+          { name: "外部依赖", icon: svgSymbol(ICON_SVG.generic) }
+        ],
+        top: 6, itemGap: 18, textStyle: { color: "#9aa4b2" }
+      }],
+      series: [{
+        type: "graph", layout: "none", roam: true, draggable: true,
+        categories: [
+          { name: "入口端点", itemStyle: { color: "#0b1425", borderColor: "#7cc4ff", borderWidth: 2 } },
+          { name: "外部依赖", itemStyle: { color: "#0b1425", borderColor: "#34d399", borderWidth: 3 } }
+        ],
+        label: { show: true, overflow: "break", width: 150 },
+        edgeLabel: {
+          show: true, fontSize: 10, color: "#9aa4b2", rotate: 0, distance: 4,
+          formatter: function (p) {
+            return p.data.value + " · " + fmtPct(p.data.rate) + " · " + fmtMs(p.data.p95);
+          }
+        },
+        edgeSymbol: ["none", "arrow"],
+        edgeSymbolSize: 7,
+        lineStyle: { color: "#3b4b6b", width: 1.5, opacity: 0.75 },
+        data: nodes, links: links
+      }]
+    }, true);
+
+    chart.off("click");
+    chart.on("click", function (p) {
+      if (p.dataType === "edge") {
+        window.open("trace-slow.html?endpoint=" + encodeURIComponent(p.data.endpoint), "_blank");
+        return;
+      }
+      if (p.dataType !== "node") { return; }
+      var id = String(p.data.id || "");
+      if (id.indexOf("d:") === 0) {
+        var key = id.slice(2);
+        var best = null;
+        state.edges.forEach(function (e) {
+          if (graphKey(e, false) !== key) { return; }
+          if (!best || (Number(e.requestCount) || 0) > (Number(best.requestCount) || 0)) { best = e; }
+        });
+        if (best) { window.open("trace-slow.html?endpoint=" + encodeURIComponent(best.endpoint), "_blank"); }
+        return;
+      }
+      if (id.indexOf("e:") === 0) {
+        window.open("trace-slow.html?endpoint=" + encodeURIComponent(id.slice(2)), "_blank");
+      }
+    });
+  }
+
+  // ============================================================ 渲染调度
+
+  function render() {
+    syncListAffordance();
+    renderKpis();
+    if (state.view === "list") {
+      resetChartHost();
+      renderListTable();
+      return;
+    }
+    if (state.scope === "lifetime") {
+      document.getElementById("chart-hint").textContent =
+        "自启动以来累计（本档不看时间窗，重启即重置）· self → 每个依赖 · 点节点看详情";
+      renderNebula(buildLifetimeModel(), { width: 760, height: 672, radii: [{ rx: 262, ry: 222 }], bow: 0.14, uid: "L" });
+      renderLifetimeTable();
+      return;
+    }
+    if (state.view === "detail") {
+      renderDetailChart();
+      renderTable();
+      return;
+    }
+    // summary
+    document.getElementById("chart-hint").textContent =
+      "本服务 → 外部依赖 · 边宽=调用量 · 边色=错误率 · 光点=调用方向 · 点节点看详情";
+    renderNebula(buildSummaryModel(), { width: 760, height: 672, radii: [{ rx: 262, ry: 222 }], bow: 0.14, uid: "S" });
+    renderTable();
+  }
+
+  /**
+   * 清单档的版式开关：收起关系图、表格标题改成"依赖清单"。
+   * 放在 render() 里而不是 setView() 里，是因为每次轮询都会重渲染 —— 口径切换
+   * （时间窗按钮）也要跟着把版式摆对，不能只靠点视图按钮这一条路径。
+   */
+  function syncListAffordance() {
+    var isList = state.view === "list";
+    // 用 classList 而不是改写 className —— presenter.js 也在同一个 body 上切 presenter-on，
+    // 直接重写 className 属于跨模块抢写（今天恰好没事，改一处就可能静默踩掉演示态）。
+    document.body.classList.toggle("view-list", isList);
+    document.getElementById("table-title").textContent = isList ? "依赖清单（谁在调我）" : "边列表";
+  }
+
+  /**
+   * 「清单」档：**组件级的进程累计依赖清单**，一行一个外部依赖。
+   *
+   * <p>为什么单独一档而不是并进「总览 / 明细」：那两档回答的是"此刻谁在调谁"（窗口内的边），
+   * 清单回答的是"<b>这个进程伸出去过哪些手</b>"（自启动以来的累计）。后者是给资源申请 / 拆单体
+   * 决策当论据用的 —— "对外依赖 5 类，其中 Cache/MQ 是新引入的" —— 它不该跟着时间窗跳变。
+   *
+   * <p>口径纪律：清单**恒为进程累计**，不看时间窗。所以档位标签写死"自启动以来"，
+   * 也不会和窗口边的图并排出现（那一档里图是收起的）。
+   *
+   * <p>数据源就是读口无条件附带的 {@code dependencies}（{@code EdgeLifetimeRow}）：组件名 / 层 /
+   * 累计调用 / 累计错误 / 错误率 / 首末见分钟桶 / 去重出口操作名。行数 = 该数组长度，
+   * 不分页、不过滤 —— 这一页要能当"清单"用，缺行比多列严重得多。
+   */
+  var LIST_COLS = [
+    { key: "component", label: "依赖" },
+    { key: "spanLayer", label: "层" },
+    { key: "requestCount", label: "累计调用", num: true },
+    { key: "errorCount", label: "累计错误", num: true },
+    { key: "errorRate", label: "错误率", num: true },
+    { key: "firstSeenBucket", label: "首次出现" },
+    { key: "lastSeenBucket", label: "最近出现" },
+    { key: "opCount", label: "出口操作名" }
+  ];
+
+  function depName(d) {
+    return String(d.componentName || ("component-" + d.componentId));
+  }
+
+  function depRate(d) {
+    var n = Number(d.requestCount) || 0;
+    return n > 0 ? (Number(d.errorCount) || 0) / n : 0;
+  }
+
+  /** 「距进程启动多久」—— 用来区分"一直都有"与"压测才开始碰"（清单的完成判据之一）。 */
+  function sinceStart(bucket) {
+    if (!state.lifetimeSinceMs) { return ""; }
+    var ms = (Number(bucket) || 0) * 60000 - state.lifetimeSinceMs;
+    var m = ms <= 30000 ? 0 : Math.round(ms / 60000);
+    if (m < 1) { return " 起点"; }
+    if (m < 60) { return " +" + m + "m"; }
+    return " +" + Math.floor(m / 60) + "h" + ((m % 60) ? (m % 60) + "m" : "");
+  }
+
+  function cmpStr(a, b) {
+    a = String(a); b = String(b);
+    return a < b ? -1 : (a > b ? 1 : 0);
+  }
+
+  /**
+   * 排序：读口已按累计调用降序返回，这里再加一层点列头 ——
+   * 汇报场景经常要换口径（谁最不稳定 / 谁是新引入的），不该只能看一个固定序。
+   * 数值相等时按组件名兜底，否则每次刷新行序会乱跳（读口序只按调用量给）。
+   */
+  function sortDeps(list) {
+    var key = state.sortKey;
+    var dir = state.sortDir;
+    function val(d) {
+      if (key === "component") { return depName(d); }
+      if (key === "spanLayer") { return String(d.spanLayer || ""); }
+      if (key === "errorRate") { return depRate(d); }
+      if (key === "opCount") { return (d.operations && d.operations.length) || 0; }
+      return Number(d[key]) || 0;
+    }
+    return list.slice().sort(function (a, b) {
+      var va = val(a), vb = val(b);
+      var out = (typeof va === "string") ? cmpStr(va, vb) : (va - vb);
+      if (out !== 0) { return dir * out; }
+      return cmpStr(depName(a), depName(b));
+    });
+  }
+
+  function listHead() {
+    var head = document.getElementById("edge-rows").closest("table").querySelector("thead");
+    head.innerHTML = "<tr>" + LIST_COLS.map(function (c) {
+      var on = state.sortKey === c.key;
+      var arrow = on ? "<span class=\"arrow\">" + (state.sortDir < 0 ? "▼" : "▲") + "</span>" : "";
+      var next = on ? (state.sortDir < 0 ? "升序" : "降序") : (c.num ? "降序" : "升序");
+      return "<th class=\"sortable" + (c.num ? " num" : "") + (on ? " on" : "") + "\" data-k=\"" + c.key + "\""
+        + " title=\"点一下按" + c.label + next + "排\">" + c.label + arrow + "</th>";
+    }).join("") + "</tr>";
+    Array.prototype.forEach.call(head.querySelectorAll("th[data-k]"), function (th) {
+      th.addEventListener("click", function () {
+        var k = th.getAttribute("data-k");
+        if (state.sortKey === k) {
+          state.sortDir = -state.sortDir;          // 同一列：翻方向
+        } else {
+          state.sortKey = k;
+          state.sortDir = LIST_COLS.filter(function (c) { return c.key === k; })[0].num ? -1 : 1;
+        }
+        renderListTable();
+      });
+    });
+  }
+
+  function renderListTable() {
+    var tbody = document.getElementById("edge-rows");
+    var empty = document.getElementById("empty");
+    var list = state.dependencies || [];
+    listHead();
+    tbody.innerHTML = "";
+    if (!list.length) {
+      empty.style.display = "";
+      empty.innerHTML = depEmptyHtml();
+      document.getElementById("table-hint").textContent = "";
+      return;
+    }
+    empty.style.display = "none";
+    var rows = sortDeps(list);
+    tbody.innerHTML = rows.map(function (d) {
+      var n = Number(d.requestCount) || 0;
+      var err = Number(d.errorCount) || 0;
+      var rate = depRate(d);
+      var ops = Array.isArray(d.operations) ? d.operations : [];
+      var shown = shorten(ops.slice(0, 3).join(", ") || "-", 44);
+      var more = ops.length > 3 ? " +" + (ops.length - 3) : "";
+      var trunc = d.operationsTruncated ? "<span class=\"sub\"> 已截断(上限 8)</span>" : "";
+      return "<tr title=\"点这行回到总览档看图\">"
+        + "<td><span class=\"dot\" style=\"background:" + slaColor(rate) + "\"></span>"
+        + escapeHtml(shorten(depName(d), 26)) + "</td>"
+        + "<td>" + escapeHtml(d.spanLayer || "-") + "</td>"
+        + "<td class=\"num\">" + n + "</td><td class=\"num\">" + err + "</td>"
+        + "<td class=\"num\">" + (rate > 0 ? fmtPct(rate) : "-") + "</td>"
+        + "<td>" + fmtClock(Number(d.firstSeenBucket) * 60000)
+        + "<span class=\"sub\">" + escapeHtml(sinceStart(d.firstSeenBucket)) + "</span></td>"
+        + "<td>" + fmtClock((Number(d.lastSeenBucket) + 1) * 60000) + "</td>"
+        + "<td title=\"" + escapeAttr(ops.join(", ")) + "\">" + escapeHtml(shown) + more + trunc + "</td>"
+        + "</tr>";
+    }).join("");
+    Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr) {
+      tr.addEventListener("click", function () { setView("summary"); });
+    });
+    var dropped = Number(state.counters.lifetimeDropped) || 0;
+    document.getElementById("table-hint").textContent =
+      rows.length + " 行（= 读口 dependencies 长度）· 进程累计 · 点列头排序 · 点行回总览"
+      + (dropped > 0 ? " · [超出 512 上限的依赖已丢弃 " + dropped + " 个]" : "");
+  }
+
+  /** 清单与累计档共用同一段空态文案：同一份数据，不该有两种解释。 */
+  function depEmptyHtml() {
+    return "本进程还没有调过任何外部依赖。<br>"
+      + "<b>依赖边只存在进程内存里，重启即清零</b>（指标大屏的数字落 H2 跨重启保留，两页口径不同）。<br>"
+      + "先造点流量，例如 <code>/api/deps-demo/all</code> 或 <code>/fullSample</code>";
+  }
+
+  function renderLifetimeTable() {
+    var tbody = document.getElementById("edge-rows");
+    var empty = document.getElementById("empty");
+    var list = (state.dependencies || []).slice();
+    tbody.innerHTML = "";
+    if (!list.length) {
+      empty.style.display = "";
+      // 说清"为什么空"：依赖边只在进程内存里，**重启即清零**，与落 H2 的指标大屏口径不同。
+      // 不写这句，演示时"拓扑图空 / 指标图有数据"会被当成页面坏了。
+      empty.innerHTML = depEmptyHtml();
+      document.getElementById("table-hint").textContent = "";
+      return;
+    }
+    empty.style.display = "none";
+    var head = document.querySelector("#edge-rows").closest("table").querySelector("thead");
+    head.innerHTML = "<tr><th>依赖</th><th>层</th><th class=\"num\">累计调用</th><th class=\"num\">错误</th>"
+      + "<th>首次出现</th><th>最近</th></tr>";
+    tbody.innerHTML = list.map(function (d) {
+      var n = Number(d.requestCount) || 0;
+      var err = Number(d.errorCount) || 0;
+      return "<tr><td><span class=\"dot\" style=\"background:" + slaColor(n > 0 ? err / n : 0) + "\"></span>"
+        + escapeHtml(shorten(d.componentName || ("component-" + d.componentId), 26)) + "</td>"
+        + "<td>" + escapeHtml(d.spanLayer || "-") + "</td>"
+        + "<td class=\"num\">" + n + "</td><td class=\"num\">" + err + "</td>"
+        + "<td>" + fmtClock(Number(d.firstSeenBucket) * 60000) + "</td>"
+        + "<td>" + fmtClock((Number(d.lastSeenBucket) + 1) * 60000) + "</td></tr>";
+    }).join("");
+    document.getElementById("table-hint").textContent =
+      list.length + " 个依赖 · 自启动以来累计 · 按累计调用降序";
+  }
+
+  function renderTable() {
+    var tbody = document.getElementById("edge-rows");
+    var empty = document.getElementById("empty");
+    tbody.innerHTML = "";
+    if (!state.edges.length) {
+      empty.style.display = "";
+      document.getElementById("table-hint").textContent = "";
+      return;
+    }
+    empty.style.display = "none";
+
+    var rows = state.edges.slice().sort(function (a, b) {
+      return (Number(b.requestCount) || 0) - (Number(a.requestCount) || 0);
+    });
+    var html = rows.map(function (e) {
+      var n = Number(e.requestCount) || 0;
+      var err = Number(e.errorCount) || 0;
+      var rate = n > 0 ? err / n : 0;
+      return "<tr data-ep=\"" + escapeAttr(e.endpoint) + "\">"
+        + "<td>" + escapeHtml(shorten(e.endpoint, 34)) + "</td>"
+        + "<td><span class=\"dot\" style=\"background:" + slaColor(rate) + "\"></span>"
+        + escapeHtml(shorten(depLabel(e), 30))
+        + (e.buckets > 1 ? " <span style=\"color:#9aa4b2\">(" + e.buckets + " 桶)</span>" : "")
+        + "</td>"
+        + "<td class=\"num\">" + n + "</td>"
+        + "<td class=\"num\">" + err + "</td>"
+        + "<td class=\"num\">" + fmtMs(Number(e.p95) < 0 ? null : Number(e.p95)) + "</td>"
+        + "<td class=\"num\">" + fmtMs(Number(e.maxLatency)) + "</td>"
+        + "</tr>";
+    }).join("");
+    tbody.innerHTML = html;
+    document.getElementById("table-hint").textContent =
+      rows.length + " 条 · 按调用量降序" + (state.rawEdgeCount > rows.length ? " · 已跨 " + state.rawEdgeCount + " 条分钟桶边合并" : "");
+
+    Array.prototype.forEach.call(tbody.querySelectorAll("tr"), function (tr) {
+      tr.addEventListener("click", function () {
+        window.open("trace-slow.html?endpoint=" + encodeURIComponent(tr.getAttribute("data-ep")), "_blank");
+      });
+    });
+  }
+
+  function shorten(s, n) {
+    s = String(s === null || s === undefined ? "" : s);
+    return s.length > n ? s.slice(0, n - 1) + "…" : s;
+  }
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, "&quot;");
+  }
+
+  // ---------------------------------------------------------------- 交互
+
+  /**
+   * 「自启动以来」只有一种画法（组件级星图），**没有"明细"这一说**。
+   * 该档下把总览/明细置灰并强制回到总览 —— 留着可点的按钮只会让人以为那几档也是累计口径。
+   * 但**「清单」始终可点**：它本来就是累计口径的表，与时间窗无关，正是那一档该给的视角。
+   */
+  function syncViewAffordance() {
+    var lifetime = state.scope === "lifetime";
+    var btnSummary = document.getElementById("btn-summary");
+    var btnDetail = document.getElementById("btn-detail");
+    btnSummary.disabled = lifetime;
+    btnDetail.disabled = lifetime;
+    if (lifetime && state.view !== "list") {
+      state.view = "summary";
+      btnSummary.className = "on";
+      btnDetail.className = "sec";
+      btnSummary.title = "「自启动以来」是组件级累计，只有一种画法";
+    }
+  }
+
+  /**
+   * 演示模式下的**只读**档位标签：控件被收起后，观众仍需要知道看的是哪一档
+   *（窗口档随压测停否忽大忽小，累计档重启归零 —— 两者不能混读）。
+   */
+  function renderScopeChip() {
+    var chip = document.getElementById("scope-chip");
+    if (!chip) { return; }
+    var view = state.view === "summary" ? "总览" : (state.view === "detail" ? "明细" : "清单");
+    // 清单恒为进程累计口径，不随时间窗变 —— 标签必须写死，否则会被读成"近 5 分钟的清单"
+    var scope = (state.scope === "lifetime" || state.view === "list")
+      ? "自启动以来" : "近 " + state.minutes + " 分钟";
+    chip.textContent = view + " · " + scope;
+  }
+
+  function setView(v) {
+    // 「自启动以来」档下只允许切到清单（累计口径那一档），总览/明细仍按上面的规则挡着
+    if (state.scope === "lifetime" && v !== "list") { return; }
+    state.view = v;
+    document.getElementById("btn-summary").className = v === "summary" ? "on" : "sec";
+    document.getElementById("btn-detail").className = v === "detail" ? "on" : "sec";
+    document.getElementById("btn-list").className = v === "list" ? "on" : "sec";
+    // 档位标签跟着视图一起变：否则"先在普通模式切到明细、再进演示模式"会显示旧档位
+    renderScopeChip();
+    load();
+  }
+
+  document.getElementById("btn-summary").addEventListener("click", function () { setView("summary"); });
+  document.getElementById("btn-detail").addEventListener("click", function () { setView("detail"); });
+  document.getElementById("btn-list").addEventListener("click", function () { setView("list"); });
+  Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (b) {
+    b.addEventListener("click", function () {
+      Array.prototype.forEach.call(document.querySelectorAll("button.win"), function (x) { x.className = "sec win"; });
+      b.className = "on win";
+      if (b.getAttribute("data-scope") === "lifetime") {
+        state.scope = "lifetime";
+        state.minutes = 0;
+      } else {
+        state.scope = "window";
+        state.minutes = Number(b.getAttribute("data-min"));
+      }
+      syncViewAffordance();
+      renderScopeChip();
+      load();
+    });
+  });
+  window.addEventListener("resize", function () { if (chart) { chart.resize(); } });
+
+  // ---------------------------------------------------------------- 轮询开关
+  //
+  // 依赖边是**分钟级窗口**,每5 秒重拉一次主要是为了"看窗口滑动",不是看秒级变化。
+  // 停下来盯着图(比如要照着截图对比)时轮询只会把图刷掉,所以给一个明确的停止开关 ——
+  // 与其他大屏页的"停止轮询"按钮同一约定。
+  var pollTimer = null;
+
+  function startPolling() {
+    if (pollTimer === null) {
+      pollTimer = setInterval(load, SWPoll ? SWPoll.intervalMs("topology-v2", 5000) : 5000);
+    }
+  }
+
+  function stopPolling() {
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  // 原来工具栏里那个「停止刷新」按钮已删：暂停/间隔统一由左下角控件管，两处控制只会互相打架。
+  // 它的能力没丢 —— 该控件里有「立即刷新」（一次）与「暂停刷新」（持续）。
+
+  setView("summary");
+  document.querySelector('button.win[data-min="5"]').className = "on win";
+  renderIconKey();
+  syncViewAffordance();
+  renderScopeChip();
+  window.SWPresenter.mount({ page: "topology", theme: "dark", slot: "#presenter-slot" });
+  if (SWPoll) {
+    SWPoll.attach({
+      key: "topology-v2", defaultMs: 5000, start: startPolling, stop: stopPolling,
+      once: load
+    });
+  } else {
+    startPolling();
+  }
+})();
+</script>
+</body>
+</html>
