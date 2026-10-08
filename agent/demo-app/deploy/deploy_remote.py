@@ -11,17 +11,36 @@ Example:
 
 Env fallbacks: DEPLOY_SSH_HOST, DEPLOY_SSH_USER, DEPLOY_SSH_PASSWORD, DEPLOY_SSH_PORT.
 
-Stress paths: the local compose deliberately压测**只压正常路径**(排除 /error、/http500)，
-因为错误路径会触发同步 webhook 回打自身形成放大环路，污染指标稳定性观测。但远端这台
-压力机要的是"指标+告警"全压，故本脚本默认把 `-Dloadtest.paths` 覆盖成含错误路径的混合
-列表；传 `--stress-paths compose` 可沿用 compose 里的值。
+Profiles (--profile, 可重复; 默认 `stress`):
+  demo-app 不带 profile; `stress` / `stress-slow` / `deps` 各自收在 profile 里。
+  远端按需指定, 如 `--profile stress --profile deps`; `--profile none` 只起 demo-app。
+
+Stress paths / threads (--stress-paths, --stress-threads):
+  `--stress-paths` 默认 `compose` = 沿用 compose 里的值(`stress` 档刻意只压 ms 级 2xx 路径,
+  理由见 compose 注释); 传 `full` 用本文件的全压列表(含 /error、/http500, 会触发同步 webhook
+  自环), 也可直接传逗号分隔的路径列表。**只作用于 `stress` 服务**, `stress-slow` 的慢端点
+  清单是它自己的设计, 不受影响。
+  `--stress-threads` 覆盖 `stress` 档线程数(默认 0 = 沿用 compose 的 32)。线程越多、对
+  demo-app 的内存压力越大 —— 108 上曾因 32 线程把 demo-app 顶到 `mem_limit` 上限触发
+  cgroup OOM 重启, 故该机用 16。
+
+Deps on remote (--deps-ports):
+  远端 deps(redis/mysql/kafka)只给 compose 内部用, 故默认**剥掉宿主端口映射**;
+  加 `--deps-ports` 才对外发布(本机调试用)。
+
+Periodic slow round (--stress-slow-interval):
+  `stress-slow` 是有限请求、打完即退(repo 里那份是给本地手动核对指标准确性用的)。
+  远端传该参数(秒) > 0 时, 把命令包成 `while true; do <原命令>; sleep N; done` 并把
+  `restart` 改成 `unless-stopped`, 让慢档按周期反复跑。
+  注意: 一轮约 3.3min(240 请求 / 4 线程 / 端点均耗时 3.3s), 周期必须大于一轮时长;
+  建议 420(≈7min), 实测约 10min 一轮、每端点 40 个样本(分位可用的下限)。
 
 What it does:
   1. docker save <image> | gzip  -> local temp tar.gz
   2. render an image-only compose (drops the local build context, points the
      settings bind-mount at ./settings.xml)
   3. sftp upload tar.gz + docker-compose.yaml + settings.xml
-  4. ssh: docker load, docker compose up -d, wait healthy, tail stress logs
+  4. ssh: docker load, docker compose --profile <..> up -d, wait healthy, tail logs
 """
 from __future__ import annotations
 
@@ -42,11 +61,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_COMPOSE = os.path.normpath(os.path.join(HERE, "..", "docker-compose.yaml"))
 DEFAULT_SETTINGS = os.path.normpath(os.path.join(HERE, "..", "..", "settings.xml"))
 
-# 远端压力机的默认压测路径：正常 + 错误/告警(全压)。与本地 compose 的"只压正常路径"不同，
-# 见模块 docstring 的取舍说明。
+# 全压列表(含错误/告警路径): 会触发插件**同步 webhook 回打自身**形成放大环路,
+# 且 5xx 响应带 Connection: close 会泄漏 TCP 连接 —— 只适合"要连告警链路一起压"的场合,
+# 不是常规档默认值。常规档默认沿用 compose 的 ms 级 2xx 路径集(见 --stress-paths)。
 STRESS_PATHS_FULL = ("/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,"
                       "/api/trace-alert-demo/error,/api/trace-alert-demo/http500,/longTimeTask")
 LOADTEST_PATHS_PREFIX = "-Dloadtest.paths="
+LOADTEST_THREADS_PREFIX = "-Dloadtest.threads="
+SETTINGS_LOCAL_MOUNT = "../settings.xml"
+SETTINGS_REMOTE_MOUNT = "./settings.xml"
+# 远端 deps(redis/mysql/kafka)只给 compose 内网用, 按 profile 识别后剥掉宿主端口
+DEPS_PROFILE = "deps"
 
 
 def local_image_exists(image: str) -> bool:
@@ -73,38 +98,68 @@ def build_tarball(image: str, out_path: str) -> None:
     print(f"[local] tarball ready: {size_mb:.0f} MB")
 
 
-def set_loadtest_paths(command: list, paths: str) -> bool:
-    """把 command 里的 -Dloadtest.paths 覆盖成 paths；没有就追加。返回是否发生了覆盖。"""
+def set_loadtest_arg(command: list, prefix: str, value: str) -> bool:
+    """把 command 里的 <prefix>... 覆盖成 <prefix><value>；没有就追加。返回是否发生了覆盖。"""
     if not isinstance(command, list):
         return False
     for i, arg in enumerate(command):
-        if isinstance(arg, str) and arg.startswith(LOADTEST_PATHS_PREFIX):
-            command[i] = LOADTEST_PATHS_PREFIX + paths
+        if isinstance(arg, str) and arg.startswith(prefix):
+            command[i] = prefix + value
             return True
-    command.append(LOADTEST_PATHS_PREFIX + paths)
+    command.append(prefix + value)
     return False
 
 
-def render_remote_compose(src: str, dst: str, stress_paths: str | None = None) -> None:
+def wrap_command_loop(command: list, interval_sec: int) -> list:
+    """把命令包成 `while true; do <命令>; sleep N; done`, 供远端慢档周期跑。"""
+    inner = " ".join(shlex.quote(str(a)) for a in command)
+    return ["sh", "-c", f"while true; do {inner}; sleep {interval_sec}; done"]
+
+
+def render_remote_compose(src: str, dst: str, stress_paths: str | None = None,
+                          deps_ports: bool = False, slow_interval_sec: int = 0,
+                          stress_threads: int = 0) -> None:
     with open(src, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
-    doc["services"]["demo-app"].pop("build", None)
-    stress = doc["services"]["stress"]
-    # 本地编排把 stress 收进 `profiles: ["stress"]`(只想浏览效果时不启动压测)。
-    # 但远端部署本身就是压测部署,且远端只用 `docker compose up -d`(不带 --profile),
-    # 若沿用该字段会静默起不到 stress、日志也无从 tail。故在此显式摘掉。
-    stress.pop("profiles", None)
-    stress["volumes"] = [
-        (v.replace("../settings.xml", "./settings.xml") if isinstance(v, str) else v)
-        for v in stress.get("volumes", [])
-    ]
-    if stress_paths:
-        applied = set_loadtest_paths(stress.get("command", []), stress_paths)
+    services = doc["services"]
+    services["demo-app"].pop("build", None)
+    # settings 挂载: 本地是 ../settings.xml(相对 agent/demo-app), 远端只有 ./settings.xml
+    for name, svc in services.items():
+        if not isinstance(svc, dict) or "volumes" not in svc:
+            continue
+        svc["volumes"] = [
+            (v.replace(SETTINGS_LOCAL_MOUNT, SETTINGS_REMOTE_MOUNT) if isinstance(v, str) else v)
+            for v in svc["volumes"]
+        ]
+    # 远端 deps 只在内网用: 默认剥掉宿主端口映射(9600/8092 是 demo-app 的, 不动)
+    if not deps_ports:
+        stripped = [n for n, s in services.items()
+                    if isinstance(s, dict) and DEPS_PROFILE in (s.get("profiles") or []) and "ports" in s]
+        for n in stripped:
+            services[n].pop("ports", None)
+        print(f"[local] deps ports NOT published on host: {', '.join(stripped) or '(none)'}")
+    # 压测路径覆盖(只作用于 stress 服务; stress-slow 的慢端点清单是它自己的设计)
+    if stress_paths and "stress" in services:
+        applied = set_loadtest_arg(services["stress"].get("command", []), LOADTEST_PATHS_PREFIX, stress_paths)
         print(f"[local] stress paths -> {stress_paths}"
               f"{'' if applied else '  (WARN: compose 里没有 -Dloadtest.paths, 已追加)'}")
+    # 线程数覆盖(同上, 只作用于 stress): 线程越多对 demo-app 的内存压力越大
+    if stress_threads > 0 and "stress" in services:
+        applied = set_loadtest_arg(services["stress"].get("command", []), LOADTEST_THREADS_PREFIX,
+                                   str(stress_threads))
+        print(f"[local] stress threads -> {stress_threads}"
+              f"{'' if applied else '  (WARN: compose 里没有 -Dloadtest.threads, 已追加)'}")
+    # 周期慢档: repo 里那份是一次性(本地手动核对用), 远端包成循环
+    if slow_interval_sec > 0 and "stress-slow" in services:
+        slow = services["stress-slow"]
+        slow["command"] = wrap_command_loop(slow.get("command", []), slow_interval_sec)
+        slow["restart"] = "unless-stopped"
+        print(f"[local] stress-slow -> loop every ~{slow_interval_sec}s "
+              f"(+ ~200s per round, restart=unless-stopped)")
     with open(dst, "w", encoding="utf-8") as f:
         yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
     print(f"[local] rendered remote compose -> {dst}")
+    return doc
 
 
 def ssh_connect(host: str, port: int, user: str, password: str) -> paramiko.SSHClient:
@@ -177,12 +232,33 @@ def main() -> int:
     ap.add_argument("--settings", default=DEFAULT_SETTINGS)
     ap.add_argument("--skip-load", action="store_true", help="skip docker save/upload/load")
     ap.add_argument("--keep-tarball", action="store_true", help="keep local temp tar.gz")
-    ap.add_argument("--stress-paths", default=STRESS_PATHS_FULL,
-                    help="压测路径(逗号分隔)。默认=全压(含 /error,/http500)；"
-                         "传 'compose' 沿用 compose 里的值(只压正常路径)")
+    ap.add_argument("--profile", action="append", dest="profiles", default=None,
+                    metavar="NAME", help="要启动的 compose profile(可重复); 默认 stress。"
+                                         "传 none 只起 demo-app")
+    ap.add_argument("--stress-paths", default="compose",
+                    help="stress 档压测路径: 'compose'(默认,沿用 compose 的 ms 级 2xx 集合) / "
+                         "'full'(全压,含 /error、/http500) / 逗号分隔的路径列表")
+    ap.add_argument("--deps-ports", action="store_true",
+                    help="远端也对外发布 deps(redis/mysql/kafka)宿主端口; 默认不发布(只内网用)")
+    ap.add_argument("--stress-slow-interval", type=int, default=0, metavar="SEC",
+                    help="远端 stress-slow 每隔 SEC 秒再跑一轮(0=只跑一次); 需 > 一轮时长(约 200s)")
+    ap.add_argument("--stress-threads", type=int, default=0, metavar="N",
+                    help="远端 stress 档线程数(0=沿用 compose)。线程越多对 demo-app 内存压力越大")
     args = ap.parse_args()
 
-    stress_paths = None if str(args.stress_paths).strip().lower() == "compose" else args.stress_paths
+    raw_paths = str(args.stress_paths).strip()
+    if raw_paths.lower() in ("compose", ""):
+        stress_paths = None
+    elif raw_paths.lower() == "full":
+        stress_paths = STRESS_PATHS_FULL
+    else:
+        stress_paths = raw_paths
+    profiles = args.profiles if args.profiles is not None else ["stress"]
+    profiles = [] if [p for p in profiles if p.strip().lower() == "none"] else [p for p in profiles if p.strip()]
+    # 周期慢档必须真的起到 stress-slow 服务, 否则 interval 无效 —— 自动补上它的 profile
+    if args.stress_slow_interval > 0 and profiles and "stress-slow" not in profiles:
+        profiles.append("stress-slow")
+        print("[local] --stress-slow-interval>0 -> 自动加入 profile: stress-slow")
 
     if not args.host or not args.password:
         ap.error("--host and --password (or DEPLOY_SSH_HOST/DEPLOY_SSH_PASSWORD) are required")
@@ -201,7 +277,16 @@ def main() -> int:
             build_tarball(args.image, tarball)
 
         compose_tmp = os.path.join(tempfile.gettempdir(), "docker-compose.remote.yaml")
-        render_remote_compose(args.compose, compose_tmp, stress_paths)
+        doc = render_remote_compose(args.compose, compose_tmp, stress_paths,
+                                    deps_ports=args.deps_ports, slow_interval_sec=args.stress_slow_interval,
+                                    stress_threads=args.stress_threads)
+        services = doc.get("services", {})
+        # 选定 profile 覆盖的服务 + 无常驻 profile 的 demo-app
+        selected = ["demo-app"] + [
+            n for n, s in services.items()
+            if n != "demo-app" and isinstance(s, dict) and set(s.get("profiles") or []) & set(profiles)
+        ]
+        print(f"[local] profiles={profiles or '(none)'} -> start {', '.join(selected)}")
 
         print(f"[ssh] connecting {args.user}@{args.host}:{args.port}")
         client = ssh_connect(args.host, args.port, args.user, args.password)
@@ -231,20 +316,24 @@ def main() -> int:
             run(client, f"docker load -i {shlex.quote(remote_tar)}")
 
         d = shlex.quote(args.remote_dir)
-        run(client, f"cd {d} && {compose_cmd} -f docker-compose.yaml up -d")
+        profile_flags = "".join(f" --profile {shlex.quote(p)}" for p in profiles)
+        run(client, f"cd {d} && {compose_cmd} -f docker-compose.yaml{profile_flags} up -d")
 
-        deadline = time.time() + 240
+        deadline = time.time() + 300
         healthy = False
         while time.time() < deadline:
-            _, ps = run(client, f"cd {d} && {compose_cmd} ps", check=False)
+            _, ps = run(client, f"cd {d} && {compose_cmd} {profile_flags} ps", check=False)
             if "(healthy)" in ps:
                 healthy = True
                 break
             time.sleep(10)
         print(f"[remote] demo-app healthy: {healthy}")
+        run(client, f"cd {d} && {compose_cmd} {profile_flags} ps", check=False)
 
         time.sleep(30)
-        run(client, f"cd {d} && {compose_cmd} logs --tail 20 stress", check=False)
+        for svc in selected:
+            run(client, f"cd {d} && {compose_cmd} {profile_flags} logs --tail 15 {shlex.quote(svc)}",
+                check=False)
         print(f"[OK] deployed to {args.user}@{args.host}:{args.remote_dir} (image {args.image})")
         return 0
     finally:

@@ -13,12 +13,12 @@
 #      实测 16 线程约 **1280 RPS**;未显式给 -Threads 时默认用 32。
 #      **要"应用能跑多快"的数字就用这一档** —— 它是唯一不受慢端点与 5xx 干扰的档。
 #
-#   3) -NormalOnly = 业务正常端点(排除 5xx),但**含 /longTimeTask(固定 sleep ~1.5s)**,
+#   3) -NormalOnly = 业务正常端点(排除 5xx),但**含 /longTimeTask(随机 200~2000ms、median≈1.1s)**,
 #      16 线程只有约 50 RPS。它测的是"指标聚合"而非吞吐,别拿它的数字当上限。
 #
 #   4) -AllEndpoints = **所有**端点,**含慢端点与 5xx**。
 #      慢端点(/api/export/report 裸调 65s、/api/order/1 8.5s、/fullSample 裸调 4.8s、
-#      /debug 5s、trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 1.5s)在这里是
+#      /debug 随机(实测 2.6s)、trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 随机 0.2~2.0s)在这里是
 #      **故意留的** —— 本档求**覆盖度**(每个页面接口都打到),不求吞吐。
 #      实测 16 线程只有 ~40 QPS:那是秒级端点在等,不是插件慢。
 #      ⚠️ `/api/export/report` 裸调睡 65s,而本脚本 -TimeoutMs 默认 10s:客户端 10s 放弃后
@@ -123,7 +123,7 @@ param(
     # 与 -NormalOnly / -WithDeps / -MaxRps 互斥。
     [switch]$AllEndpoints,
     # **极限 RPS**:只压 ms 级、只 2xx 的端点,冲吞吐上限(实测 16 线程约 1280 RPS)。
-    # 与 -NormalOnly 的区别是本档**不含 /longTimeTask**(它固定 sleep ~1.5s,会把上限压到 ~50 RPS);
+    # 与 -NormalOnly 的区别是本档**不含 /longTimeTask**(它随机 200~2000ms、median≈1.1s,会把上限压到 ~50 RPS);
     # 与 -AllEndpoints 的区别是本档**不含 5xx 与慢端点**,所以不会触发告警自环、
     # 也不会因 Connection:close 泄漏连接打爆本机端口池。四者互斥。
     [switch]$MaxRps,
@@ -163,7 +163,7 @@ $NORMAL_PATHS = "/hello,/fullSample?deps=false,/queryDbByMybatis,/queryDbByJdbc,
 $DEPS_PATHS = "/api/deps-demo/redis?op=set,/api/deps-demo/redis?op=get,/api/deps-demo/mysql,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc"
 
 # 极限 RPS 档(-MaxRps)专用路径集:**只 ms 级、只 2xx**。
-# 与 -NormalOnly 的区别:NormalOnly 里留着 /longTimeTask(固定 sleep ~1.5s),它把延迟均值
+# 与 -NormalOnly 的区别:NormalOnly 里留着 /longTimeTask(随机 200~2000ms、median≈1.1s),它把延迟均值
 # 抬到 ~300ms,16 线程也只有 ~50 RPS —— 那是"纯指标聚合"档的代价,不是吞吐上限。
 # 本档把那类慢端点全去掉,只留能真正压出上限的:实测 4 条 16 线程约 **1280 RPS**。
 #
@@ -181,20 +181,20 @@ $MAXRPS_DEFAULT_THREADS = 32
 # 显式清单还有一个好处:新增页面时"要不要进压测"变成一次显式决定。
 #
 # ★ 本档 = **所有**端点,**含慢端点与 5xx**(与默认档的根本区别就在这)。
-#   慢端点(/api/order/1 8.5s、/api/export/report 65s、/fullSample 裸调 4.8s、/debug 5s、
-#   trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 1.5s)在这里是**故意留的** ——
+#   慢端点(/api/order/1 8.5s、/api/export/report 65s、/fullSample 裸调 4.8s、/debug 随机(实测 2.6s)、
+#   trace-alert-demo/slow 4s、kafka 3.3s、/longTimeTask 随机 0.2~2.0s)在这里是**故意留的** ——
 #   本档求覆盖度,不求吞吐。实测 16 线程只有 ~40 QPS,那是秒级端点在等,不是插件慢。
 #   要吞吐数字用默认档(ms 级,16 线程 ~500 RPS);要单看慢端点用 stress-slow.ps1。
 $ALL_GROUPS = [ordered]@{
     # 初学者演示页(/9527.html)与官方 sample。/helloBlock 在 0.6~2.0s 抖动,按 ms 级看待
     "hello"      = "/hello,/helloAsync,/helloAsync2,/helloAsync3,/helloAsyncServlet,/helloBlock,/helloException"
-    # /debug 睡 5s(HelloService.debug(5))
+    # /debug 随机(RandomUtil.randomLong(2000) + profile2 递归,容器内实测 P50 2.6s)
     "trace"      = "/debug,/log,/logError,/traceInvokePrivateMethod,/traceServiceMethodWithAnnotation,/traceServiceMethod2WithApi"
     "sql"        = "/queryDbByMybatis,/queryDbByJdbc"
     # fullSample 是"全貌入口"(每种监控组件各一次)。两条都在:毫秒级的 ?deps=false 与秒级的裸调 ——
     # 本档求覆盖度,两个变体都要打到(裸调那条会带 Redis/MySQL/Kafka/外呼,中间件未起时约 8s)。
     "fullSample" = "/fullSample?deps=false,/fullSample"
-    # profile 采样页;/longTimeTask 固定 sleep ~1.5s
+    # profile 采样页;/longTimeTask 随机 200~2000ms(median≈1.1s)
     "profile"    = "/profileData,/profileData2,/longTimeTask"
     # 各仪表盘的数据源读口(有界,不回全量)
     "readout"    = "/statisticJVM,/statisticMeter,/statisticLogs,/statisticInstanceProperties,/statisticTraceAlert"
