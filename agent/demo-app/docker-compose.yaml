@@ -327,8 +327,8 @@ services:
       #     GET:/debug                           2.6s(RandomUtil.randomLong(2000) + profile2 递归)
       #     GET:/longTimeTask                    1.1s(**随机 200~2000ms**,median≈1.1s;不是固定值)
       #     GET:/api/deps-demo/grpc              0.03s(进程内 gRPC,**不依赖中间件**)
-      #   ⚠️ 上面这些实测值是**服务端**耗时;压测脚本头注释里那几个(3.1s/1.5s/0.3s)是 Windows
-      #      上一次性的客户端测量,含 JIT 与建连开销,偏高,别拿来判"指标不准"。
+      #   ⚠️ 上面这些实测值是**服务端**耗时;`stress-slow.ps1` 头注释里并列的还有一组 Windows
+      #      客户端墙钟值(含 JIT 与建连开销,偏高) —— 两处口径已对齐,判"指标准不准"用服务端那组。
       #   · /api/export/report 用 {rand:min,max} 让每请求随机睡 1~4s:一条路径就能压出
       #     **连续的耗时分布**,而写死 3s 只压出一条线。它裸调默认睡 65s,
       #     容器内 timeoutMs=30000 会直接放弃 —— 所以必须带 ms 参数。
