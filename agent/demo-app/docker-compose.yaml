@@ -93,7 +93,9 @@ services:
     # 纯指标长跑时删掉下面两行 alert 参数即可(见 NOTES-docker-stress.md)。
     command:
       - java
-      - -Xms512m
+      # -Xms 刻意给 128m 而非 512m: 实测堆 used 只有 ~42MB, 而 -Xms512m 会**启动即提交**
+      # 491MB 常驻, 纯占 RSS。上限仍固定 512m(-Xmx), "堆可见、趋势可观察"的意图不变。
+      - -Xms128m
       - -Xmx512m
       - -javaagent:/opt/skywalking-agent/skywalking-agent.jar
       - -Dskywalking.agent.keep_tracing=true
@@ -106,7 +108,11 @@ services:
       - -Dskywalking.plugin.logfilereporter.alert.slow_rules=operation:GET:/api/order/*=8000
       - -jar
       - /opt/demo-app/target/demo-app-1.0.0.jar
-    mem_limit: 1g
+    # ★ 实测: 固定 512m 堆 + ~440MB native(126 线程栈 / netty / agent 字节码) 下, RSS 稳定在
+    #   ~960MB 且不增长(采样 105s 波动 <1MB, 非泄漏) —— 旧的 1g 只剩 ~60MB 余量, 32 线程压测
+    #   (5860 rps) 的瞬时尖峰即触发 cgroup OOM 重启(实测两次, 10:44 与 11:20, 每次归零内存 H2)。
+    #   给到 2g, 与 stress / stress-slow 对齐; 主机 128G, 余量充足。
+    mem_limit: 2g
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9600/"]
       interval: 10s

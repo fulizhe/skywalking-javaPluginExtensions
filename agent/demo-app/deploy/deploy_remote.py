@@ -15,11 +15,14 @@ Profiles (--profile, 可重复; 默认 `stress`):
   demo-app 不带 profile; `stress` / `stress-slow` / `deps` 各自收在 profile 里。
   远端按需指定, 如 `--profile stress --profile deps`; `--profile none` 只起 demo-app。
 
-Stress paths (--stress-paths):
-  默认 `compose` = 沿用 compose 里的值(`stress` 档刻意只压 ms 级 2xx 路径, 理由见 compose
-  注释)。传 `full` 用本文件的全压列表(含 /error、/http500, 会触发同步 webhook 自环),
-  也可直接传逗号分隔的路径列表。**只作用于 `stress` 服务**, `stress-slow` 的慢端点清单
-  是它自己的设计, 不受影响。
+Stress paths / threads (--stress-paths, --stress-threads):
+  `--stress-paths` 默认 `compose` = 沿用 compose 里的值(`stress` 档刻意只压 ms 级 2xx 路径,
+  理由见 compose 注释); 传 `full` 用本文件的全压列表(含 /error、/http500, 会触发同步 webhook
+  自环), 也可直接传逗号分隔的路径列表。**只作用于 `stress` 服务**, `stress-slow` 的慢端点
+  清单是它自己的设计, 不受影响。
+  `--stress-threads` 覆盖 `stress` 档线程数(默认 0 = 沿用 compose 的 32)。线程越多、对
+  demo-app 的内存压力越大 —— 108 上曾因 32 线程把 demo-app 顶到 `mem_limit` 上限触发
+  cgroup OOM 重启, 故该机用 16。
 
 Deps on remote (--deps-ports):
   远端 deps(redis/mysql/kafka)只给 compose 内部用, 故默认**剥掉宿主端口映射**;
@@ -64,6 +67,7 @@ DEFAULT_SETTINGS = os.path.normpath(os.path.join(HERE, "..", "..", "settings.xml
 STRESS_PATHS_FULL = ("/hello,/fullSample,/queryDbByMybatis,/queryDbByJdbc,"
                       "/api/trace-alert-demo/error,/api/trace-alert-demo/http500,/longTimeTask")
 LOADTEST_PATHS_PREFIX = "-Dloadtest.paths="
+LOADTEST_THREADS_PREFIX = "-Dloadtest.threads="
 SETTINGS_LOCAL_MOUNT = "../settings.xml"
 SETTINGS_REMOTE_MOUNT = "./settings.xml"
 # 远端 deps(redis/mysql/kafka)只给 compose 内网用, 按 profile 识别后剥掉宿主端口
@@ -94,15 +98,15 @@ def build_tarball(image: str, out_path: str) -> None:
     print(f"[local] tarball ready: {size_mb:.0f} MB")
 
 
-def set_loadtest_paths(command: list, paths: str) -> bool:
-    """把 command 里的 -Dloadtest.paths 覆盖成 paths；没有就追加。返回是否发生了覆盖。"""
+def set_loadtest_arg(command: list, prefix: str, value: str) -> bool:
+    """把 command 里的 <prefix>... 覆盖成 <prefix><value>；没有就追加。返回是否发生了覆盖。"""
     if not isinstance(command, list):
         return False
     for i, arg in enumerate(command):
-        if isinstance(arg, str) and arg.startswith(LOADTEST_PATHS_PREFIX):
-            command[i] = LOADTEST_PATHS_PREFIX + paths
+        if isinstance(arg, str) and arg.startswith(prefix):
+            command[i] = prefix + value
             return True
-    command.append(LOADTEST_PATHS_PREFIX + paths)
+    command.append(prefix + value)
     return False
 
 
@@ -113,7 +117,8 @@ def wrap_command_loop(command: list, interval_sec: int) -> list:
 
 
 def render_remote_compose(src: str, dst: str, stress_paths: str | None = None,
-                          deps_ports: bool = False, slow_interval_sec: int = 0) -> None:
+                          deps_ports: bool = False, slow_interval_sec: int = 0,
+                          stress_threads: int = 0) -> None:
     with open(src, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     services = doc["services"]
@@ -135,9 +140,15 @@ def render_remote_compose(src: str, dst: str, stress_paths: str | None = None,
         print(f"[local] deps ports NOT published on host: {', '.join(stripped) or '(none)'}")
     # 压测路径覆盖(只作用于 stress 服务; stress-slow 的慢端点清单是它自己的设计)
     if stress_paths and "stress" in services:
-        applied = set_loadtest_paths(services["stress"].get("command", []), stress_paths)
+        applied = set_loadtest_arg(services["stress"].get("command", []), LOADTEST_PATHS_PREFIX, stress_paths)
         print(f"[local] stress paths -> {stress_paths}"
               f"{'' if applied else '  (WARN: compose 里没有 -Dloadtest.paths, 已追加)'}")
+    # 线程数覆盖(同上, 只作用于 stress): 线程越多对 demo-app 的内存压力越大
+    if stress_threads > 0 and "stress" in services:
+        applied = set_loadtest_arg(services["stress"].get("command", []), LOADTEST_THREADS_PREFIX,
+                                   str(stress_threads))
+        print(f"[local] stress threads -> {stress_threads}"
+              f"{'' if applied else '  (WARN: compose 里没有 -Dloadtest.threads, 已追加)'}")
     # 周期慢档: repo 里那份是一次性(本地手动核对用), 远端包成循环
     if slow_interval_sec > 0 and "stress-slow" in services:
         slow = services["stress-slow"]
@@ -231,6 +242,8 @@ def main() -> int:
                     help="远端也对外发布 deps(redis/mysql/kafka)宿主端口; 默认不发布(只内网用)")
     ap.add_argument("--stress-slow-interval", type=int, default=0, metavar="SEC",
                     help="远端 stress-slow 每隔 SEC 秒再跑一轮(0=只跑一次); 需 > 一轮时长(约 200s)")
+    ap.add_argument("--stress-threads", type=int, default=0, metavar="N",
+                    help="远端 stress 档线程数(0=沿用 compose)。线程越多对 demo-app 内存压力越大")
     args = ap.parse_args()
 
     raw_paths = str(args.stress_paths).strip()
@@ -265,7 +278,8 @@ def main() -> int:
 
         compose_tmp = os.path.join(tempfile.gettempdir(), "docker-compose.remote.yaml")
         doc = render_remote_compose(args.compose, compose_tmp, stress_paths,
-                                    deps_ports=args.deps_ports, slow_interval_sec=args.stress_slow_interval)
+                                    deps_ports=args.deps_ports, slow_interval_sec=args.stress_slow_interval,
+                                    stress_threads=args.stress_threads)
         services = doc.get("services", {})
         # 选定 profile 覆盖的服务 + 无常驻 profile 的 demo-app
         selected = ["demo-app"] + [

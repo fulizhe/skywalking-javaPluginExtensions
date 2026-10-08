@@ -49,7 +49,7 @@ param(
     [int]$Requests = 25,
     [int]$Threads = 4,
     # 目标地址（应用需已在跑：run-with-agent.ps1）
-    [string]$BaseUrl = "http://127.0.0.1:9600",
+    [string]$BaseUrl = "http://172.16.1.108:9600",
     # 包含告警演示端点 → **会触发告警自环**
     [switch]$All,
     # 无限模式：死循环慢压，Ctrl+C 停（对齐 stress.ps1 -Continuous）
