@@ -86,9 +86,8 @@ docker compose down
 这是为了让人手路径开箱即见告警面板的效果。因此 `stress` 侧显式收窄了
 `loadtest.paths` 为**正常端点**——错误请求会触发插件**同步 webhook 回打自身**
 形成放大回路，恰好污染这里要看的 `persistErrors` / `aggregateErrors` 与 heap 趋势。
-**远端压力机要的是"指标 + 告警"全压**，由 `deploy_remote.py` 在渲染远端 compose 时
-覆盖成含错误路径的混合列表（见下文「远端部署」），**不需要手改 compose**。
-要让远端也只压正常路径（纯指标长跑），给部署命令加 `--stress-paths compose`。
+**远端默认沿用 compose 的路径集**（即 `stress` 档那 5 条 ms 级 2xx），脚本不再覆盖；
+只有明确要连告警链路一起压时才传 `--stress-paths full`（见下文「远端部署」）。
 
 ## 远端部署（Paramiko）
 
@@ -100,7 +99,7 @@ python agent/demo-app/deploy/deploy_remote.py `
 
 脚本流程：`docker save <image> | gzip`(本地) → `mkdir -p` → SFTP 上传
 `*.tar.gz` + `docker-compose.yaml` + `settings.xml` → 远端 `docker load` →
-`docker compose up -d` → 轮询 `healthy` → tail stress 日志。
+`docker compose --profile … up -d` → 轮询 `healthy` → 逐个 tail 日志。
 
 ### 两种部署方式，先想清楚再敲
 
@@ -118,14 +117,41 @@ python agent/demo-app/deploy/deploy_remote.py `
 | --- | --- | --- |
 | 本地 compose `stress` 档 | 5 条 **ms 级、只 2xx**（`/hello` + 两个 SQL + 两个 `/statistic*` 读口） | 错误路径会同步 webhook 回打自身形成放大环路、污染稳定性观测；慢端点（`/longTimeTask` 1.5s、`/fullSample` 自调回环）会把上限从千级压到几十 RPS |
 | 本地 compose `stress-slow` 档 | 6 条**慢端点**（耗时 0.3s~8.5s，均不含 5xx） | 目的是**核对分位准确性** —— 慢端点耗时已知，面板上的 P50/P95 有真值可对；常规档的 ms 级端点分位差异淹没在噪声里 |
-| 远端（脚本默认） | 7 条**全压**（含 `/api/trace-alert-demo/error`、`/http500`） | 压力机要看"指标 + 告警"耦合下的表现 |
+| 远端（脚本默认） | **沿用 compose**：`stress` 档 5 条 ms 级 2xx，`stress-slow` 档它的 6 条慢端点 | 远端是长期压力机，稳定性口径要与本机一致；要"指标 + 告警"全压才显式传 `--stress-paths full` |
 
-- 覆盖发生在 `render_remote_compose()`：就地替换 `-Dloadtest.paths` 并打印实际生效值；
-  传 `--stress-paths compose` 则沿用 compose `stress` 档那 5 条 ms 级路径（仍不含 5xx，
-  语义不变 —— 换档没改"本档不含错误端点"这件事）。
+- 覆盖发生在 `render_remote_compose()`：`--stress-paths` 默认 `compose`（**不覆盖**）；
+  传 `full` 用脚本内置的 7 条全压列表（含 `/api/trace-alert-demo/error`、`/http500`），
+  或直接传逗号分隔的路径列表。**只作用于 `stress` 服务**，`stress-slow` 的慢端点清单
+  是它自己的设计，不受影响。
 - **远端 compose 是脚本渲染出来的**，直接 SSH 上去手改会被下一次部署覆盖。
-- 远端那套**没有慢接口档**：它要的是"指标 + 告警"耦合下的稳定性，掺慢端点只会压低吞吐。
-  要在本机核对分位准确性，用 `--profile stress-slow`。
+- 108 上**两档有意并存**（compose 注释里那句"别一起起"针对的是本地手动核对）：
+  `stress` 常驻冲高，`stress-slow` 由 `--stress-slow-interval` 包成周期循环。
+  代价：大盘的全局 P50/P95 与"慢调用"占比会包含慢端点，不再是纯 ms 级口径。
+
+### 远端 profile 与选项
+
+`demo-app` 无常驻 profile；`stress` / `stress-slow` / `deps` 各收在独立 profile 里，
+由 `--profile` 指定（可重复，默认 `stress`）。
+
+| 选项 | 默认 | 作用 |
+| --- | --- | --- |
+| `--profile NAME` | `stress` | 要启动的 profile，可重复。远端已改成给 `up -d` 传 `--profile`（不再改 compose 字段）。传 `none` 只起 `demo-app` |
+| `--stress-slow-interval SEC` | `0`（只跑一次） | 把远端 `stress-slow` 包成 `while true; do <原命令>; sleep SEC; done` + `restart: unless-stopped`。会自动补上 `stress-slow` profile |
+| `--stress-paths` | `compose` | `compose` / `full` / 逗号分隔列表；只作用于 `stress` 服务 |
+| `--deps-ports` | 关（**远端剥掉**） | deps（redis/mysql/kafka）默认只走 compose 内网，不占宿主端口；加此参数才对外发布 |
+
+108 的推荐命令（压测常驻 + 依赖三层 + 慢档约 10min 一轮）：
+
+```powershell
+$env:DEPLOY_SSH_PASSWORD='***'
+python agent/demo-app/deploy/deploy_remote.py `
+  --host 172.16.1.108 --user root --remote-dir /root/_demo_app_sw_stress `
+  --profile stress --profile deps --stress-slow-interval 420
+```
+
+⚠️ `stress-slow` **一轮约 3.3 分钟**（240 请求 / 4 线程 / 端点均耗时 3.3s），
+周期必须大于一轮时长，否则会背靠背连跑。`420`（7min 间隔）实测约 10min 一轮、
+每端点 40 个样本 —— 这是分位可用的下限，再减样本 P95 就成噪声了。
 
 ### 切换压测路径后，错误率要等一个窗口
 
