@@ -33,7 +33,7 @@ ClassNotFoundException: Can't find cn.hutool.core.util.ReflectUtil
 
 - 在 Agent **启动的最早阶段** 被加载
 - 由 **AgentClassLoader** 加载，其 classpath 仅包含 Agent 核心和部分基础依赖
-- Hutool 不在 Agent 核心依赖中（pom 仅有 `hutool-json`），`ReflectUtil` 所在 `hutool-core` 不可见
+- Hutool 不在 Agent 核心依赖中（插件 pom 仅声明 `hutool-core`，且未 shade 进插件 jar），`ReflectUtil` 所在 `hutool-core` 对 Agent 核心类加载器不可见
 - 加载 `MemoryModeGRPCChannelManager` 时，若字节码引用了 `ReflectUtil`，JVM 会解析并加载 `ReflectUtil`，导致 `ClassNotFoundException`
 
 ### 2. 拦截器的加载流程

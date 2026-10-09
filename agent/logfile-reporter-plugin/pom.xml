@@ -36,11 +36,11 @@
 	<dependencies>
 		<dependency>
 			<groupId>cn.hutool</groupId>
-			<artifactId>hutool-json</artifactId>
+			<artifactId>hutool-core</artifactId>
 			<version>${hutool.version}</version>			
 		</dependency>
 		<!-- H2 影子存储依赖:经 maven-shade-plugin 重定位 org.h2 -> org.apache.skywalking.apm.dependencies.h2,
-		     打入插件 jar,不依赖应用 classpath;hutool-json 则沿用编译期声明 + 运行期经 PluginClassLoader 回落到应用 classpath 的既有策略 -->
+		     打入插件 jar,不依赖应用 classpath;hutool-core 则沿用编译期声明 + 运行期经 PluginClassLoader 回落到应用 classpath 的既有策略 -->
 		<dependency>
 			<groupId>com.h2database</groupId>
 			<artifactId>h2</artifactId>
@@ -120,7 +120,7 @@
 					</execution>
 				</executions>
 			</plugin>
-			<!-- H2 shade 重定位:只打 com.h2database:h2,不卷 hutool-json(后者运行期经 PluginClassLoader 回落到应用 classpath) -->
+			<!-- H2 shade 重定位:只打 com.h2database:h2,不卷 hutool-core(后者运行期经 PluginClassLoader 回落到应用 classpath) -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-shade-plugin</artifactId>
