@@ -18,6 +18,8 @@
 #   docker compose --profile stress-slow up --build stress-slow      # 打完即退,不 up -d
 #   docker compose logs stress-slow
 #   浏览器打开 http://127.0.0.1:9600/dashboards/metrics.html 与 slow-topn.html 对照:
+#     ⚠️ 下表只列**有已知真值**的 6 条;本档路径集是 **13 条**(另含 ms 级基线与 4 个依赖端点),
+#        完整清单见下面 `stress-slow` 服务的注释。
 #     ⚠️ 下表第一列是**指标里记录的端点名**(Spring 会把路径参数模板化成 {id}),
 #        与压测实际打的 URL 可能不同;第二列是**服务端**耗时(不含客户端/建连开销)。
 #     GET:/api/order/{id}                        8.5s  → P50 应在 8s 量级(容器内实测 8.50s)
@@ -293,8 +295,8 @@ services:
     #   有真值可对 —— 这是"指标准不准"唯一能验的方式。常规档做不到:ms 级端点的
     #   分位差异淹没在噪声里,压出来也看不出对错。
     #
-    #   和常规档**互斥,不要一起起**:本档单请求 1~8.5s,req/s 天花板极低(4 线程约 1~2 req/s),
-    #   和 stress 一起跑会把那侧的吞吐数字彻底压垮,两边的观测都失真。
+    #   和常规档**互斥,不要一起起**:本档单请求 0.01~8.5s(均值约 2.4s),req/s 天花板极低
+    #   (4 线程约 1.6 req/s),和 stress 一起跑会把那侧的吞吐数字彻底压垮,两边的观测都失真。
     profiles: ["stress-slow"]
     image: demo-app-agent:9.4.0
     restart: "no"          # 有限请求数,打完就退出 —— "no" 免得 restart 反复重跑
@@ -316,39 +318,49 @@ services:
       - -Dtest=HttpLoadTest
       - -Dloadtest=true
       - -Dloadtest.baseUrl=http://demo-app:9600
-      # 240 次 / 6 端点 = **每端点约 40 个样本**。分位至少要几十个样本才有意义:
-      # 25 次(Windows 侧默认值)摊到 6 个端点只剩每端点 4 个,P95 完全是噪声。
+      # 520 次 / 13 端点 = **每端点约 40 个样本**(与 Windows 侧 stress-slow.ps1 的默认全量集对齐)。
+      # 分位至少要几十个样本才有意义:25 次(Windows 侧默认值)摊到 13 个端点只剩每端点 2 个,
+      # P95 完全是噪声。⚠️ 改路径集条数时**请求数要跟着改**(样本数 ≈ 请求数 / 端点数)。
       # 想看"数据在积累"的走势就改用 -Dloadtest.durationSec=-1(但那时看不到准确分位)。
-      - -Dloadtest.requests=240
+      - -Dloadtest.requests=520
       - -Dloadtest.threads=4
       # 30s 而非默认 10s:最慢端点 /api/order/1 睡 8.5s,并发下尾延迟会超过 10s ——
       # 那样会攒出"网络异常"让断言非零退出,而超时在慢端点压测里是预期现象,不是缺陷。
       - -Dloadtest.timeoutMs=30000
       - -Dloadtest.progressSec=10
-      # ★ 慢端点清单。**左侧是指标里的端点名,右侧是代码/容器内实测的耗时**:
-      #     GET:/api/order/{id}                  8.5s   ← 命中 demo-app 的 /api/order/*=8000 SLOW 规则
-      #                                            (压测打的是 /api/order/1,Spring 把路径参数模板化成 {id})
+      # ★ 路径集 = `stress-slow.ps1` 的**默认全量集(13 条)**。本档求"覆盖全面",而 deps 已在
+      #   108 常驻 → 依赖端点不再是"connect refused 的假慢端点",故把完整集写进编排。
+      #   左边是指标里的端点名,右边是代码/容器内实测耗时(**服务端**):
+      #     GET:/api/order/{id}                   8.5s   ← 命中 demo-app 的 /api/order/*=8000 SLOW 规则
+      #                                             (压测打的是 /api/order/1,Spring 把路径参数模板化成 {id})
+      #     GET:/fullSample                       约 5s(with deps;不起中间件时约 8s)
       #     GET:/api/trace-alert-demo/slow?ms=4000  4.0s
-      #     GET:/api/export/report?ms={rand:1000,4000}  每请求随机 1~4s,P50≈2.5s
-      #     GET:/debug                           2.6s(RandomUtil.randomLong(2000) + profile2 递归)
-      #     GET:/longTimeTask                    1.1s(**随机 200~2000ms**,median≈1.1s;不是固定值)
-      #     GET:/api/deps-demo/grpc              0.03s(进程内 gRPC,**不依赖中间件**)
-      #   ⚠️ 上面这些实测值是**服务端**耗时;`stress-slow.ps1` 头注释里并列的还有一组 Windows
+      #     GET:/api/deps-demo/mysql?sleepMs=1000  **6.0s 且 100% 报错** ┐ `sleepMs` 是按**秒**传给
+      #     GET:/api/deps-demo/mysql?sleepMs=30    **6.0s 且 100% 报错** ┘ `SELECT SLEEP()` 的,上限
+      #       `MAX_SLEEP_MS=3000` → SLEEP(30)/SLEEP(1000) 都远超 `socketTimeout=3000` → 必然抛
+      #       CommunicationsException。**这两条实际是"错误端点"而不是"慢端点"**:每条请求都产生
+      #       一条 ERROR+SLOW 告警(经 webhook 回打本机),也会推高大盘错误率。要"真慢但不报错"
+      #       用 `?sleepMs=2`(≈2s,低于 socketTimeout)。
+      #     GET:/debug                            2.6s(RandomUtil.randomLong(2000) + profile2 递归)
+      #     GET:/api/deps-demo/http?site=httpbin  约 1~2s(外呼,取决于宿主出网)
+      #     GET:/longTimeTask                     1.1s(**随机 200~2000ms**,median≈1.1s;不是固定值)
+      #     GET:/api/deps-demo/grpc               0.03s(进程内 gRPC,**不依赖中间件**)
+      #     GET:/api/deps-demo/kafka?op=produce / GET:/api/hutool-demo/post-json?value=v /
+      #     GET:/queryDbByMybatis                 毫秒级(基线;deps 起着时 kafka 很快)
+      #   ⚠️ 上面实测值是**服务端**耗时;`stress-slow.ps1` 头注释里并列的还有一组 Windows
       #      客户端墙钟值(含 JIT 与建连开销,偏高) —— 两处口径已对齐,判"指标准不准"用服务端那组。
       #   · /api/export/report 用 {rand:min,max} 让每请求随机睡 1~4s:一条路径就能压出
       #     **连续的耗时分布**,而写死 3s 只压出一条线。它裸调默认睡 65s,
       #     容器内 timeoutMs=30000 会直接放弃 —— 所以必须带 ms 参数。
       #     (YAML 里值含 `{}` 与 `:`,必须整体加引号)
-      #   · 刻意**不含**依赖三层的 redis/mysql/kafka:它们只在 deps profile 里起,
-      #     本档单独跑时连接建不起来 → 退化成 connect refused(毫秒级),不是慢端点。
-      #     要连依赖面一起压,加 --profile deps 并在末尾追加
-      #     ,/api/deps-demo/mysql?sleepMs=30(实测约 3s)。
+      #   · 依赖端点(mysql/kafka/http)**需要 deps profile 起着**;单独跑本档(不带 deps)时它们
+      #     会退化成 connect refused(毫秒级)—— 那是预期,不是指标坏了。
       #   · 刻意**不含**告警演示端点(/api/trace-alert-demo/error|http500):
       #     5xx 会触发插件 webhook 同步回打本机 → 负载自环,且 Tomcat 对 5xx 强制
       #     Connection: close、每个泄漏一条连接。要压告警链路请另起带 error 的路径集。
       #   · /api/order/1 会真的触发一条 SLOW 告警(这是预期):本档看的是"慢 → 指标 + 告警"
       #     的完整链路,告警面板出现事件属正常。
-      - "-Dloadtest.paths=/api/order/1,/api/trace-alert-demo/slow?ms=4000,/api/export/report?ms={rand:1000,4000},/debug,/longTimeTask,/api/deps-demo/grpc"
+      - "-Dloadtest.paths=/api/deps-demo/mysql?sleepMs=1000,/api/deps-demo/mysql?sleepMs=30,/api/deps-demo/kafka?op=produce,/api/deps-demo/http?site=httpbin,/api/deps-demo/grpc,/api/hutool-demo/post-json?value=v,/queryDbByMybatis,/api/trace-alert-demo/slow?ms=4000,/api/order/1,/api/export/report?ms={rand:1000,4000},/longTimeTask,/debug,/fullSample"
       - -DargLine=-Xmx512m
     mem_limit: 2g
     logging:
