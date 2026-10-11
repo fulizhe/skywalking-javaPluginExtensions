@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — 抛砖用的、一次性代码，不属于生产。评审完删除，答案沉淀进实现 issue。
+  设计问题：「RPC 出站·按方法排行榜页面该长什么样？聚合行（次数/错误率/P50·P95·P99/最大/首末见，
+  默认 P95 降序）+ 点开某行看证据（最慢 1 条 + 随机 4 条，带 traceId 下钻链路）——这个交互用哪种形态最好读？」
+  四个结构不同的方案，`?variant=A|B|C|D` 切换，底部浮动开关或 ← → 键翻页。
+  数据全部为页面内模拟（契约对齐读口 /inner/sw/rpc-topn 列表 + /inner/sw/rpc-topn/detail 证据），仅用于效果评审。
+  参考外壳与做法：同目录 topology-prototype.html / metrics-prototype.html。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPC 调用排行原型 · 视觉方案</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:#0b0f17;color:#e6edf3;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+:root{--mono:"Cascadia Code",Consolas,"Courier New",monospace;
+  --bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;--ok:#34d399;--warn:#fbbf24;--err:#fb7185}
+a{color:inherit}
+code{font-family:var(--mono)}
+
+/* ================= 原型外壳（不参与评比） ================= */
+.proto-bar{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;gap:14px;
+  padding:9px 18px;background:#141821;border-bottom:1px solid #2a3142;color:#c7d0e0;font-size:12.5px}
+.proto-tag{background:#f43f5e;color:#fff;font-weight:800;letter-spacing:.14em;font-size:11px;padding:3px 9px;border-radius:5px}
+.proto-title{font-weight:700;color:#fff;white-space:nowrap}
+.proto-q{color:#8b96ad;margin-left:auto;max-width:64%;text-align:right;line-height:1.5}
+.proto-q b{color:#7cc4ff}
+.pv{padding:58px 0 96px;min-height:100vh}
+.switcher{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:70;
+  display:flex;align-items:center;gap:14px;background:rgba(15,18,26,.94);border:1px solid #39415a;
+  border-radius:999px;padding:7px 10px;box-shadow:0 10px 34px rgba(0,0,0,.55);backdrop-filter:blur(8px)}
+.switcher button{width:32px;height:32px;border-radius:999px;border:1px solid #454f6b;background:#1d2230;color:#e8edf7;
+  cursor:pointer;font-size:14px;line-height:1;display:grid;place-items:center}
+.switcher button:hover{background:#2a3145;border-color:#5f6b8f}
+.sw-label{display:flex;flex-direction:column;align-items:center;min-width:240px}
+.sw-label .k{font-family:var(--mono);font-weight:800;font-size:13px;color:#7cc4ff;letter-spacing:.1em}
+.sw-label .n{font-size:12.5px;color:#cfd7e6}
+.sw-hint{position:fixed;left:50%;bottom:4px;transform:translateX(-50%);z-index:70;color:#5f6980;font-size:11px}
+
+/* 通用小件 */
+.chip{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:5px;
+  background:#16233d;color:#8fbfe8;border:1px solid #24365c;vertical-align:middle}
+.op{font-family:var(--mono);color:#e8eefc}
+.num{font-family:var(--mono);text-align:right;white-space:nowrap}
+.mut{color:var(--mut)}
+.badge-err{font-family:var(--mono);font-size:11px;font-weight:700;color:#ffd7de;background:rgba(251,113,133,.18);
+  border:1px solid rgba(251,113,133,.5);border-radius:5px;padding:1px 6px}
+.caveat{max-width:1320px;margin:0 auto 4px;border-top:1px dashed var(--bd);color:var(--mut);font-size:11.5px;line-height:1.85;padding:10px 22px 0}
+.caveat b{color:#c7cff0}
+
+/* ============================================================
+   A) 排障台 —— 经典排行表 + 右侧证据抽屉
+   ============================================================ */
+.vA .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vA .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.vA .head h2{margin:0;font-size:19px}
+.vA .head .since{color:var(--mut);font-size:12.5px}
+.vA .head .sp{flex:1}
+.vA .fld{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.vA select,.vA input{background:#0f1930;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;padding:4px 8px;font-size:12px;font-family:inherit}
+.vA .body{display:grid;grid-template-columns:1fr 0px;gap:0;transition:grid-template-columns .18s ease}
+.vA .body.open{grid-template-columns:1fr 420px;gap:14px}
+.vA .card{background:var(--panel);border:1px solid var(--bd);border-radius:12px}
+.vA table{width:100%;border-collapse:collapse;font-size:12.5px}
+.vA th,.vA td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}
+.vA th{position:sticky;top:0;background:#0c1526;color:var(--mut);font-weight:600;z-index:1;cursor:default}
+.vA tbody tr{cursor:pointer;border-left:3px solid transparent}
+.vA tbody tr:hover{background:#16233d}
+.vA tbody tr.hot{background:#16233d;border-left-color:var(--ac)}
+.vA td.rk{font-family:var(--mono);color:var(--mut);width:1%}
+.vA .bar{display:inline-block;height:6px;border-radius:3px;background:linear-gradient(90deg,#38bdf8,#fb7185);vertical-align:middle;margin-right:7px}
+.vA .drawer{background:linear-gradient(180deg,#101a30,#0c1424);border:1px solid var(--bd);border-radius:12px;
+  overflow:hidden;position:sticky;top:66px;max-height:calc(100vh - 140px);display:none;flex-direction:column}
+.vA .body.open .drawer{display:flex}
+.vA .drawer .dh{padding:14px 16px;border-bottom:1px solid var(--bd)}
+.vA .drawer .dh .t{font-size:15px;font-weight:700}
+.vA .drawer .dh .s{color:var(--mut);font-size:12px;margin-top:3px}
+.vA .drawer .db{padding:12px 16px;overflow:auto}
+.vA .kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.vA .kpi{background:#0d1526;border:1px solid var(--bd);border-radius:9px;padding:8px 10px}
+.vA .kpi .k{font-size:11px;color:var(--mut)}
+.vA .kpi .v{font-family:var(--mono);font-weight:800;font-size:17px;margin-top:2px}
+.vA .plabel{font-size:11.5px;color:var(--mut);margin:2px 0 6px}
+.vA .pleg{display:flex;height:28px;border-radius:7px;overflow:hidden;border:1px solid var(--bd);margin-bottom:14px}
+.vA .pleg i{display:grid;place-items:center;font-family:var(--mono);font-size:10.5px;font-style:normal;color:#0a1120;font-weight:700}
+.vA .ev-h{font-size:11.5px;color:var(--mut);margin:0 0 8px}
+.vA .ev{display:flex;align-items:center;gap:10px;padding:8px 9px;border:1px solid var(--bd);border-radius:8px;margin-bottom:7px;background:#0d1526}
+.vA .ev.slow{border-color:rgba(251,113,133,.55);background:rgba(251,113,133,.08)}
+.vA .ev .d{font-family:var(--mono);font-weight:800;font-size:15px;min-width:74px}
+.vA .ev.slow .d{color:var(--err)}
+.vA .ev .m{flex:1;min-width:0}
+.vA .ev .m .tag{font-size:10.5px;color:var(--mut)}
+.vA .ev .m .tr{font-family:var(--mono);font-size:10.5px;color:#8ea3c7;overflow:hidden;text-overflow:ellipsis}
+.vA .ev a{font-size:11.5px;color:var(--ac);white-space:nowrap}
+.vA .hint{padding:40px 18px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.9}
+
+/* ============================================================
+   B) 框架看板 —— 按 RPC 框架分组的卡片 + 行内展开
+   ============================================================ */
+.vB .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vB .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+.vB .head h2{margin:0;font-size:19px}
+.vB .head .since{color:var(--mut);font-size:12.5px}
+.vB .grp{margin-bottom:22px}
+.vB .grp-h{display:flex;align-items:center;gap:12px;padding:9px 14px;background:linear-gradient(90deg,#12203a,#0d1526);
+  border:1px solid var(--bd);border-left:4px solid var(--ac);border-radius:10px;margin-bottom:11px}
+.vB .grp-h .nm{font-family:var(--mono);font-weight:800;font-size:14px;color:#cfe6ff}
+.vB .grp-h .ly{font-size:11px;color:var(--mut)}
+.vB .grp-h .sp{flex:1}
+.vB .grp-h .st{font-size:12px;color:var(--mut)}
+.vB .grp-h .st b{font-family:var(--mono);color:#dbeafe}
+.vB .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.vB .mcard{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:13px 15px;cursor:pointer;
+  transition:border-color .15s ease}
+.vB .mcard:hover{border-color:#31527f}
+.vB .mcard.open{border-color:var(--ac);background:#0f1b32}
+.vB .mc-top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.vB .mc-top .op{font-size:13px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vB .mc-main{display:flex;align-items:flex-end;gap:12px}
+.vB .mc-p95{font-family:var(--mono);font-weight:800;font-size:26px;line-height:1;letter-spacing:-.02em}
+.vB .mc-p95 .u{font-size:12px;color:var(--mut);font-weight:400;margin-left:3px}
+.vB .mc-sub{font-size:11px;color:var(--mut);line-height:1.7;flex:1;text-align:right}
+.vB .mc-sub b{font-family:var(--mono);color:#c7d3ea}
+.vB .mc-bar{display:flex;height:20px;border-radius:6px;overflow:hidden;border:1px solid var(--bd);margin-top:10px}
+.vB .mc-bar i{display:grid;place-items:center;font-style:normal;font-family:var(--mono);font-size:9.5px;color:#0a1120;font-weight:700}
+.vB .mc-ev{display:none;margin-top:12px;border-top:1px dashed var(--bd);padding-top:10px}
+.vB .mcard.open .mc-ev{display:block}
+.vB .ev{display:flex;align-items:center;gap:9px;padding:6px 8px;border:1px solid var(--bd);border-radius:7px;margin-bottom:6px;background:#0d1526}
+.vB .ev.slow{border-color:rgba(251,113,133,.55);background:rgba(251,113,133,.08)}
+.vB .ev .d{font-family:var(--mono);font-weight:800;font-size:13px;min-width:66px}
+.vB .ev.slow .d{color:var(--err)}
+.vB .ev .tr{flex:1;min-width:0;font-family:var(--mono);font-size:10.5px;color:#8ea3c7;overflow:hidden;text-overflow:ellipsis}
+.vB .ev a{font-size:11.5px;color:var(--ac)}
+
+/* ============================================================
+   C) 双栏工作台 —— 左方法列表 / 右详情常驻（分位梯 + 证据时间线）
+   ============================================================ */
+.vC .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vC .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.vC .head h2{margin:0;font-size:19px}
+.vC .head .since{color:var(--mut);font-size:12.5px}
+.vC .cols{display:grid;grid-template-columns:400px 1fr;gap:14px;align-items:start}
+@media(max-width:1080px){.vC .cols{grid-template-columns:1fr}}
+.vC .panel{background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+.vC .list{max-height:calc(100vh - 200px);overflow:auto}
+.vC .lhead,.vC .lrow{display:grid;grid-template-columns:26px 1fr 74px 62px;gap:8px;align-items:center;padding:9px 12px}
+.vC .lhead{position:sticky;top:0;background:#0c1526;color:var(--mut);font-size:11px;z-index:1;border-bottom:1px solid var(--bd)}
+.vC .lrow{border-bottom:1px solid var(--bd);cursor:pointer;border-left:3px solid transparent}
+.vC .lrow:hover{background:#16233d}
+.vC .lrow.hot{background:#16233d;border-left-color:var(--ac)}
+.vC .lrow .rk{font-family:var(--mono);color:var(--mut);font-size:12px}
+.vC .lrow .op{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vC .lrow .op .chip{margin-right:6px}
+.vC .detail{padding:18px 20px}
+.vC .dt-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.vC .dt-head .op{font-size:17px;font-weight:700}
+.vC .dt-head .ly{color:var(--mut);font-size:12px}
+.vC .dt-stat{display:flex;gap:22px;flex-wrap:wrap;margin:14px 0 18px;padding-bottom:16px;border-bottom:1px solid var(--bd)}
+.vC .dt-stat .it .k{font-size:11.5px;color:var(--mut)}
+.vC .dt-stat .it .v{font-family:var(--mono);font-weight:800;font-size:19px;margin-top:2px}
+.vC .sec-t{font-size:12px;color:var(--mut);margin:0 0 10px;letter-spacing:.02em}
+.vC .ladder{display:flex;align-items:flex-end;gap:18px;height:170px;padding:0 4px;margin-bottom:6px}
+.vC .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.vC .bar .col{width:100%;max-width:78px;border-radius:7px 7px 0 0;background:linear-gradient(180deg,#38bdf8,#2563eb);position:relative;min-height:6px}
+.vC .bar.mx .col{background:linear-gradient(180deg,#fb7185,#be123c)}
+.vC .bar .vv{font-family:var(--mono);font-weight:800;font-size:13px;margin-bottom:6px}
+.vC .bar.mx .vv{color:var(--err)}
+.vC .bar .kk{font-size:11.5px;color:var(--mut);margin-top:7px}
+.vC .tl{position:relative;margin:10px 0 0 6px;padding-left:22px}
+.vC .tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:1px;background:var(--bd)}
+.vC .tli{position:relative;display:flex;align-items:center;gap:12px;padding:9px 0}
+.vC .tli::before{content:"";position:absolute;left:-21px;top:50%;transform:translateY(-50%);width:9px;height:9px;border-radius:50%;
+  background:var(--ac);border:2px solid #0b1220}
+.vC .tli.slow::before{background:var(--err)}
+.vC .tli .d{font-family:var(--mono);font-weight:800;font-size:15px;min-width:76px}
+.vC .tli.slow .d{color:var(--err)}
+.vC .tli .t{color:var(--mut);font-size:11.5px;min-width:88px}
+.vC .tli .tr{flex:1;min-width:0;font-family:var(--mono);font-size:10.5px;color:#8ea3c7;overflow:hidden;text-overflow:ellipsis}
+.vC .tli a{font-size:11.5px;color:var(--ac)}
+
+/* ============================================================
+   D) 慢调用证据流 —— SkyWalking 慢语句风：跨方法按耗时排序的实例流
+   ============================================================ */
+.vD .wrap{max-width:1320px;margin:0 auto;padding:20px 22px}
+.vD .head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.vD .head h2{margin:0;font-size:19px}
+.vD .head .since{color:var(--mut);font-size:12.5px}
+.vD .head .sp{flex:1}
+.vD .head .fld{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+.vD select{background:#0f1930;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;padding:4px 8px;font-size:12px;font-family:inherit}
+.vD .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.vD .chipf{display:inline-flex;align-items:center;gap:7px;background:#0c1526;border:1px solid var(--bd);border-radius:999px;
+  padding:4px 12px;cursor:pointer;font-size:11.5px;transition:border-color .15s}
+.vD .chipf:hover{border-color:var(--ac)}
+.vD .chipf.on{border-color:var(--ac);background:rgba(56,189,248,.1);color:#cfe6ff}
+.vD .chipf .nm{font-family:var(--mono)}
+.vD .chipf .c{color:var(--mut)}
+.vD .cols{display:grid;grid-template-columns:1fr 330px;gap:14px;align-items:start}
+@media(max-width:1080px){.vD .cols{grid-template-columns:1fr}}
+.vD .panel{background:var(--panel);border:1px solid var(--bd);border-radius:12px}
+.vD .stream{overflow:hidden}
+.vD .srow{display:grid;grid-template-columns:34px 96px 1fr 130px 92px;gap:10px;align-items:center;padding:10px 14px;
+  border-bottom:1px solid var(--bd)}
+.vD .srow:hover{background:#16233d}
+.vD .srow .rk{font-family:var(--mono);color:var(--mut)}
+.vD .srow.slow .rk{color:var(--err);font-weight:800}
+.vD .sdur{font-family:var(--mono);font-weight:800;font-size:15px}
+.vD .srow.slow .sdur{color:var(--err)}
+.vD .sop{min-width:0}
+.vD .sop .op{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vD .sop .tr{font-family:var(--mono);font-size:10.5px;color:#8ea3c7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vD .stime{color:var(--mut);font-size:11.5px}
+.vD .side{padding:14px 16px}
+.vD .side h3{margin:0 0 4px;font-size:13.5px}
+.vD .side .cap{color:var(--mut);font-size:11.5px;margin-bottom:10px;line-height:1.6}
+.vD .side .mrow{display:grid;grid-template-columns:1fr 66px;gap:8px;padding:7px 0;border-bottom:1px dashed var(--bd);cursor:pointer}
+.vD .side .mrow:hover .op{color:var(--ac)}
+.vD .side .mrow .op{font-family:var(--mono);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vD .side .mrow .p{font-family:var(--mono);text-align:right;font-size:11.5px;color:#c7d3ea}
+</style>
+</head>
+<body>
+
+<header class="proto-bar">
+  <span class="proto-tag">PROTOTYPE</span>
+  <span class="proto-title">RPC 调用排行 · 视觉方案</span>
+  <span class="proto-q" id="proto-q"></span>
+</header>
+
+<main id="app"></main>
+
+<div class="switcher">
+  <button id="sw-prev" title="上一个方案（←）">◀</button>
+  <div class="sw-label"><span class="k" id="sw-k">A</span><span class="n" id="sw-n"></span></div>
+  <button id="sw-next" title="下一个方案（→）">▶</button>
+</div>
+<div class="sw-hint">← → 切换方案 · ?variant=A|B|C|D · 数据为模拟，契约对齐 /inner/sw/rpc-topn，仅用于效果评审</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   数据（模拟；契约对齐读口）
+   列表行 = 聚合行：次数/错误率/P50·P95·P99/最大/首末见
+   证据   = 点开某行才拉：最慢 1 条 + 随机 4 条（带 traceId）
+   ============================================================ */
+var SINCE_AGO_MIN = 47;   // 进程启动于 47 分钟前（"自启动以来"）
+
+var METHODS = [
+  { cid:23, comp:"GRPC",  layer:"RPCFramework", op:"demo.DepsDemo/StreamData",
+    n:96,   err:1,  p50:1420, p95:3000, p99:6400, max:8210, firstMin:46, lastMin:2 },
+  { cid:23, comp:"GRPC",  layer:"RPCFramework", op:"demo.DepsDemo/BatchSync",
+    n:180,  err:0,  p50:640,  p95:1180, p99:1900, max:2400, firstMin:45, lastMin:1 },
+  { cid:11, comp:"Dubbo", layer:"RPCFramework", op:"com.acme.OrderService/create",
+    n:960,  err:48, p50:210,  p95:320,  p99:610,  max:1400, firstMin:44, lastMin:0.4 },
+  { cid:11, comp:"Dubbo", layer:"RPCFramework", op:"com.acme.OrderService/query",
+    n:2100, err:3,  p50:54,   p95:65,   p99:120,  max:380,  firstMin:46, lastMin:0.1 },
+  { cid:23, comp:"GRPC",  layer:"RPCFramework", op:"demo.DepsDemo/Echo",
+    n:3240, err:12, p50:18,   p95:42,   p99:88,   max:2001, firstMin:46, lastMin:0 },
+  { cid:11, comp:"Dubbo", layer:"RPCFramework", op:"com.acme.UserService/getById",
+    n:5400, err:0,  p50:9,    p95:12,   p99:30,   max:95,   firstMin:46, lastMin:0 }
+];
+
+/* ---- 证据样本（最慢 1 + 随机 4；原型里用确定性伪随机生成，避免每次刷新都跳） ---- */
+function lcg(seed){ var s=(seed|0)||1; return function(){ s=(s*1103515245+12345)&0x7fffffff; return s/0x7fffffff; }; }
+function tid(seed,i){ var s=((seed*92821+i*68917)>>>0)||1,out=""; for(var k=0;k<32;k++){ s=(s*1103515245+12345)>>>0; out+="0123456789abcdef"[(s>>>28)&15]; } return out; }
+function mkSamples(m, seed){
+  var r=lcg(seed), out=[{ d:m.max, t:m.lastMin, trace:tid(seed,0), e:m.err>0 }];
+  for(var i=1;i<=4;i++){
+    // 典型样本：在 p50 与 p95 之间抖动，偶尔更高
+    var base = m.p50 + (m.p95-m.p50)*r();
+    if(r()>0.82) base = m.p95 + (m.p99-m.p95)*r();
+    out.push({ d:Math.max(1,Math.round(base)), t:Math.round((SINCE_AGO_MIN-0.5)*r()*10)/10, trace:tid(seed,i), e:(r()>0.9 && m.err>0) });
+  }
+  return out;
+}
+var SAMPLES = {};
+METHODS.forEach(function(m,i){ SAMPLES[m.comp+"|"+m.op]=mkSamples(m, m.cid*131+i*17); });
+
+/* ============================================================
+   工具
+   ============================================================ */
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+function fmtInt(n){ return n==null? "-" : Number(n).toLocaleString("en-US"); }
+function fmtMs(v){ if(v==null) return "-"; return v>=1000 ? (v/1000).toFixed(2)+" s" : Math.round(v)+" ms"; }
+function pct(v){ return v==null? "-" : (v*100).toFixed(2)+"%"; }
+function errRate(m){ return m.n? m.err/m.n : 0; }
+function ago(min){ if(min==null) return "-"; return min<1 ? "刚刚" : (Math.round(min)+" 分前"); }
+function sinceLabel(){ return "进程启动于 "+SINCE_AGO_MIN+" 分钟前"; }
+function shortTrace(t){ return t.slice(0,12)+"…"+t.slice(-4); }
+function barW(v,max){ return (!max||v==null)?"":Math.max(4,Math.round(v/max*100))+"%"; }
+function sortedBy(key){
+  var f={ p95:function(m){return m.p95;}, p99:function(m){return m.p99;}, cnt:function(m){return m.n;},
+           avg:function(m){return m.p50;}, max:function(m){return m.max;}, err:function(m){return errRate(m);} }[key];
+  return METHODS.slice().sort(function(a,b){ return (f(b)||0)-(f(a)||0) || b.n-a.n; });
+}
+function caveat(){
+  return '<div class="caveat">口径：只算<b>出站</b> <code>spanLayer=RPCFramework</code>（GRPC/Dubbo/…）；'
+    + '计数全量精确、分位来自每方法分位样本池；<b>证据 = 最慢 1 条 + 随机 4 条</b>（抽样，非全量）；'
+    + '孤段不计、入站不计、<b>进程累计</b>（重启即失、不落库）。</div>';
+}
+
+/* 证据行（画法 A/B 复用）：slow 为最慢那条 */
+function evRow(s){
+  return '<div class="ev'+(s.slow?" slow":"")+'">'
+    + '<span class="d">'+fmtMs(s.d)+'</span>'
+    + '<span class="m"><span class="tag">'+(s.slow?"最慢":"样本")+' · '+ago(s.t)+'</span>'
+    +   '<div class="tr">'+esc(shortTrace(s.trace))+(s.e?' <span class="badge-err">error</span>':'')+'</div></span>'
+    + '<a href="trace-view.html?traceId='+esc(s.trace)+'" target="_blank">链路 ›</a></div>';
+}
+function evList(key){
+  var arr=SAMPLES[key]||[];
+  return arr.map(function(s,i){ var o=Object.assign({},s,{slow:i===0}); return evRow(o); }).join("");
+}
+function keyOf(m){ return m.comp+"|"+m.op; }
+
+/* ============================================================
+   A) 排障台 —— 排行表 + 右侧证据抽屉
+   ============================================================ */
+var A_SORT="p95", A_SEARCH="";
+function tableA(){
+  var q=A_SEARCH.toLowerCase();
+  var rows=sortedBy(A_SORT).filter(function(m){ return !q || keyOf(m).toLowerCase().indexOf(q)>=0; });
+  var head='<thead><tr><th class="rk">#</th><th>方法</th><th class="num">次数</th><th class="num">错误率</th>'
+    +'<th class="num">P50</th><th class="num">P95</th><th class="num">P99</th><th class="num">最大</th>'
+    +'<th class="num">首见</th><th class="num">末见</th></tr></thead>';
+  var body=rows.map(function(m,i){
+    return '<tr data-k="'+esc(keyOf(m))+'">'
+      + '<td class="rk">'+(i+1)+'</td>'
+      + '<td><span class="chip">'+esc(m.comp)+'</span> <span class="op">'+esc(m.op)+'</span></td>'
+      + '<td class="num">'+fmtInt(m.n)+'</td>'
+      + '<td class="num">'+pct(errRate(m))+'</td>'
+      + '<td class="num">'+fmtMs(m.p50)+'</td>'
+      + '<td class="num"><span class="bar" style="width:'+barW(m.p95,sortedBy(A_SORT)[0].p95)+'"></span>'+fmtMs(m.p95)+'</td>'
+      + '<td class="num">'+fmtMs(m.p99)+'</td>'
+      + '<td class="num">'+fmtMs(m.max)+'</td>'
+      + '<td class="num mut">'+ago(m.firstMin)+'</td>'
+      + '<td class="num mut">'+ago(m.lastMin)+'</td></tr>';
+  }).join("");
+  return '<table>'+head+'<tbody>'+body+'</tbody></table>';
+}
+function drawerA(m){
+  if(!m) return '<div class="hint">点左侧任一行，查看该方法的<br><b>最慢 1 条 + 随机 4 条</b>证据。</div>';
+  var max=Math.max(m.p50,m.p95,m.p99,m.max);
+  return '<div class="dh"><div class="t"><span class="chip">'+esc(m.comp)+'</span> '+esc(m.op)+'</div>'
+    + '<div class="s">'+esc(m.layer)+' · componentId='+m.cid+' · 自启动以来</div></div>'
+    + '<div class="db">'
+    +   '<div class="kpis">'
+    +     '<div class="kpi"><div class="k">调用次数</div><div class="v">'+fmtInt(m.n)+'</div></div>'
+    +     '<div class="kpi"><div class="k">错误率</div><div class="v" style="color:'+(errRate(m)>0.01?"#fb7185":"#34d399")+'">'+pct(errRate(m))+'</div></div>'
+    +     '<div class="kpi"><div class="k">最大耗时</div><div class="v" style="color:#fb7185">'+fmtMs(m.max)+'</div></div>'
+    +   '</div>'
+    +   '<div class="plabel">耗时分位（P50 / P95 / P99 / 最大）</div>'
+    +   '<div class="pleg">'
+    +     '<i style="width:25%;background:#38bdf8">'+fmtMs(m.p50)+'</i>'
+    +     '<i style="width:25%;background:#22a0d8">'+fmtMs(m.p95)+'</i>'
+    +     '<i style="width:25%;background:#7c5cf0">'+fmtMs(m.p99)+'</i>'
+    +     '<i style="width:25%;background:#fb7185">'+fmtMs(m.max)+'</i>'
+    +   '</div>'
+    +   '<div class="ev-h">证据样本（最慢 1 + 随机 4）</div>'
+    +   evList(keyOf(m))
+    + '</div>';
+}
+function renderA(){
+  var opts=[["p95","P95 降序"],["p99","P99 降序"],["cnt","调用次数"],["avg","平均耗时"],["max","最大耗时"],["err","错误率"]]
+    .map(function(o){return '<option value="'+o[0]+'"'+(A_SORT===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join("");
+  return '<div class="vA pv"><div class="wrap">'
+    + '<div class="head"><h2>RPC 调用排行 · 出站按方法</h2>'
+    +   '<span class="since">自启动以来 · '+sinceLabel()+'</span><span class="sp"></span>'
+    +   '<label class="fld">排序 <select id="aSort">'+opts+'</select></label>'
+    +   '<label class="fld">找方法 <input id="aSearch" placeholder="如 OrderService / DepsDemo" style="width:190px"></label>'
+    + '</div>'
+    + '<div class="body" id="aBody"><div class="card">'+tableA()+'</div>'
+    +   '<aside class="drawer" id="aDrawer">'+drawerA(null)+'</aside></div>'
+    + caveat()+'</div></div>';
+}
+var A_HOT=null;
+function initA(){
+  var body=document.getElementById("aBody"), dr=document.getElementById("aDrawer");
+  function bind(){
+    Array.prototype.forEach.call(document.querySelectorAll(".vA tbody tr"),function(tr){
+      tr.addEventListener("click",function(){
+        var m=METHODS.filter(function(x){return keyOf(x)===tr.getAttribute("data-k");})[0];
+        body.classList.add("open");
+        dr.innerHTML=drawerA(m);
+        Array.prototype.forEach.call(document.querySelectorAll(".vA tbody tr"),function(x){x.classList.toggle("hot",x===tr);});
+      });
+    });
+  }
+  bind();
+  document.getElementById("aSort").addEventListener("change",function(){ A_SORT=this.value; document.querySelector(".vA .card").innerHTML=tableA(); bind(); });
+  document.getElementById("aSearch").addEventListener("input",function(){ A_SEARCH=this.value.trim(); document.querySelector(".vA .card").innerHTML=tableA(); bind(); });
+}
+
+/* ============================================================
+   B) 框架看板 —— 按框架分组 + 行内展开证据
+   ============================================================ */
+function renderB(){
+  var groups={}, order=[];
+  METHODS.forEach(function(m){ if(!groups[m.comp]){ groups[m.comp]={comp:m.comp,layer:m.layer,items:[]}; order.push(m.comp);} groups[m.comp].items.push(m); });
+  var html=order.map(function(comp){
+    var g=groups[comp];
+    var totN=g.items.reduce(function(a,m){return a+m.n;},0);
+    var totE=g.items.reduce(function(a,m){return a+m.err;},0);
+    var cards=g.items.slice().sort(function(a,b){return b.p95-a.p95;}).map(function(m){
+      var sum=m.p50+m.p95+m.p99+m.max;
+      return '<div class="mcard" data-k="'+esc(keyOf(m))+'">'
+        + '<div class="mc-top"><span class="op">'+esc(m.op)+'</span>'
+        +   (errRate(m)>0.01?'<span class="badge-err">'+pct(errRate(m))+'</span>':'')+'</div>'
+        + '<div class="mc-main"><span class="mc-p95">'+fmtMs(m.p95).replace(/ (ms|s)$/,"")+'<span class="u">'+(m.p95>=1000?"s":"ms")+'</span></span>'
+        +   '<span class="mc-sub">P50 <b>'+fmtMs(m.p50)+'</b> · P99 <b>'+fmtMs(m.p99)+'</b><br>最大 <b style="color:#fb7185">'+fmtMs(m.max)+'</b> · '+fmtInt(m.n)+' 次</span></div>'
+        + '<div class="mc-bar" title="P50 / P95 / P99 / 最大 的占比">'
+        +   '<i style="width:'+(m.p50/sum*100)+'%;background:#38bdf8"></i>'
+        +   '<i style="width:'+(m.p95/sum*100)+'%;background:#22a0d8"></i>'
+        +   '<i style="width:'+(m.p99/sum*100)+'%;background:#7c5cf0"></i>'
+        +   '<i style="width:'+(m.max/sum*100)+'%;background:#fb7185"></i>'
+        + '</div>'
+        + '<div class="mc-ev"><div class="ev-h" style="font-size:11.5px;color:#7d8db3;margin-bottom:7px">证据（最慢 1 + 随机 4）</div>'+evList(keyOf(m))+'</div>'
+        + '</div>';
+    }).join("");
+    return '<div class="grp"><div class="grp-h"><span class="nm">'+esc(g.comp)+'</span>'
+      + '<span class="ly">'+esc(g.layer)+'</span><span class="sp"></span>'
+      + '<span class="st">'+g.items.length+' 个方法 · 合计 <b>'+fmtInt(totN)+'</b> 次 · 错误率 <b>'+pct(totN?totE/totN:0)+'</b></span></div>'
+      + '<div class="grid">'+cards+'</div></div>';
+  }).join("");
+  return '<div class="vB pv"><div class="wrap">'
+    + '<div class="head"><h2>RPC 调用排行 · 按框架看</h2><span class="since">自启动以来 · '+sinceLabel()+'</span></div>'
+    + html + caveat()+'</div></div>';
+}
+function initB(){
+  Array.prototype.forEach.call(document.querySelectorAll(".vB .mcard"),function(c){
+    c.addEventListener("click",function(){ c.classList.toggle("open"); });
+  });
+}
+
+/* ============================================================
+   C) 双栏工作台 —— 左列表 / 右详情常驻
+   ============================================================ */
+var C_SEL=0;
+function detailC(m){
+  var max=Math.max(m.p50,m.p95,m.p99,m.max);
+  function lad(label,v,cls){ return '<div class="bar '+cls+'"><span class="vv">'+fmtMs(v)+'</span>'
+    + '<div class="col" style="height:'+Math.max(6,Math.round(v/max*130))+'px"></div><span class="kk">'+label+'</span></div>'; }
+  var ev=(SAMPLES[keyOf(m)]||[]).map(function(s,i){
+    return '<div class="tli'+(i===0?" slow":"")+'"><span class="d">'+fmtMs(s.d)+'</span>'
+      + '<span class="t">'+(i===0?"最慢":"样本")+' · '+ago(s.t)+'</span>'
+      + '<span class="tr">'+esc(shortTrace(s.trace))+(s.e?' <span class="badge-err">error</span>':'')+'</span>'
+      + '<a href="trace-view.html?traceId='+esc(s.trace)+'" target="_blank">链路 ›</a></div>';
+  }).join("");
+  return '<div class="detail">'
+    + '<div class="dt-head"><span class="chip">'+esc(m.comp)+'</span><span class="op">'+esc(m.op)+'</span>'
+    +   '<span class="ly">'+esc(m.layer)+' · componentId='+m.cid+'</span></div>'
+    + '<div class="dt-stat">'
+    +   '<div class="it"><div class="k">调用次数</div><div class="v">'+fmtInt(m.n)+'</div></div>'
+    +   '<div class="it"><div class="k">错误率</div><div class="v" style="color:'+(errRate(m)>0.01?"#fb7185":"#34d399")+'">'+pct(errRate(m))+'</div></div>'
+    +   '<div class="it"><div class="k">首见</div><div class="v" style="font-size:15px">'+ago(m.firstMin)+'</div></div>'
+    +   '<div class="it"><div class="k">末见</div><div class="v" style="font-size:15px">'+ago(m.lastMin)+'</div></div>'
+    + '</div>'
+    + '<div class="sec-t">耗时分位梯（P50 / P95 / P99 / 最大）</div>'
+    + '<div class="ladder">'+lad("P50",m.p50,"")+lad("P95",m.p95,"")+lad("P99",m.p99,"")+lad("最大",m.max,"mx")+'</div>'
+    + '<div class="sec-t" style="margin-top:16px">证据时间线（最慢 1 + 随机 4）</div>'
+    + '<div class="tl">'+ev+'</div>'
+    + '</div>';
+}
+function renderC(){
+  var rows=sortedBy("p95");
+  var list=rows.map(function(m,i){
+    return '<div class="lrow'+(i===C_SEL?" hot":"")+'" data-i="'+i+'">'
+      + '<span class="rk">'+(i+1)+'</span>'
+      + '<span class="op"><span class="chip">'+esc(m.comp)+'</span>'+esc(m.op)+'</span>'
+      + '<span class="num" style="font-weight:700">'+fmtMs(m.p95)+'</span>'
+      + '<span class="num mut" style="font-size:11px">'+fmtInt(m.n)+'</span></div>';
+  }).join("");
+  return '<div class="vC pv"><div class="wrap">'
+    + '<div class="head"><h2>RPC 调用排行 · 方法与证据</h2><span class="since">自启动以来 · '+sinceLabel()+'</span></div>'
+    + '<div class="cols"><div class="panel list">'
+    +   '<div class="lhead"><span>#</span><span>方法（按 P95）</span><span style="text-align:right">P95</span><span style="text-align:right">次数</span></div>'
+    +   list + '</div>'
+    + '<div class="panel" id="cDetail">'+detailC(rows[C_SEL])+'</div></div>'
+    + caveat()+'</div></div>';
+}
+function initC(){
+  Array.prototype.forEach.call(document.querySelectorAll(".vC .lrow"),function(r){
+    r.addEventListener("click",function(){
+      C_SEL=Number(r.getAttribute("data-i"));
+      Array.prototype.forEach.call(document.querySelectorAll(".vC .lrow"),function(x){x.classList.toggle("hot",x===r);});
+      document.getElementById("cDetail").innerHTML=detailC(sortedBy("p95")[C_SEL]);
+    });
+  });
+}
+
+/* ============================================================
+   D) 慢调用证据流 —— 跨方法按耗时排序的实例流（SkyWalking 慢语句风）
+   ============================================================ */
+var D_ON={}, D_THRESH=0;
+function dInstances(){
+  var out=[];
+  METHODS.forEach(function(m){
+    if(Object.keys(D_ON).length && !D_ON[m.comp]) return;
+    (SAMPLES[keyOf(m)]||[]).forEach(function(s){ out.push({ m:m, s:s }); });
+  });
+  out=out.filter(function(x){ return x.s.d>=D_THRESH; });
+  out.sort(function(a,b){ return b.s.d-a.s.d; });
+  return out;
+}
+function renderD(){
+  var comps={}; METHODS.forEach(function(m){ comps[m.comp]=1; });
+  var chips=Object.keys(comps).map(function(c){
+    return '<span class="chipf'+(D_ON[c]?" on":"")+'" data-c="'+esc(c)+'"><span class="nm">'+esc(c)+'</span>'
+      + '<span class="c">'+METHODS.filter(function(m){return m.comp===c;}).length+' 方法</span></span>';
+  }).join("");
+  var inst=dInstances();
+  var stream=inst.map(function(x,i){
+    var slow=x.s.d>=1000;
+    return '<div class="srow'+(slow?" slow":"")+'">'
+      + '<span class="rk">'+(i+1)+'</span>'
+      + '<span class="sdur">'+fmtMs(x.s.d)+'</span>'
+      + '<span class="sop"><span class="op"><span class="chip">'+esc(x.m.comp)+'</span> '+esc(x.m.op)+'</span>'
+      +   '<span class="tr">trace '+esc(shortTrace(x.s.trace))+(x.s.e?' <span class="badge-err">error</span>':'')+'</span></span>'
+      + '<span class="stime">'+(x.s.slow?"最慢条":"样本")+' · '+ago(x.s.t)+'</span>'
+      + '<a href="trace-view.html?traceId='+esc(x.s.trace)+'" target="_blank" style="color:#38bdf8;font-size:11.5px">链路 ›</a>'
+      + '</div>';
+  }).join("") || '<div class="hint" style="padding:34px;text-align:center;color:#7d8db3">该阈值下没有样本，放宽阈值或加回框架筛选。</div>';
+  var side=sortedBy("p95").map(function(m){
+    return '<div class="mrow" data-c="'+esc(m.comp)+'"><span class="op"><span class="chip">'+esc(m.comp)+'</span> '+esc(m.op)+'</span>'
+      + '<span class="p">'+fmtMs(m.p95)+'</span></div>';
+  }).join("");
+  var thOpts=[[0,"全部"],[100,"慢于 100ms"],[500,"慢于 500ms"],[1000,"慢于 1s"],[3000,"慢于 3s"]]
+    .map(function(o){return '<option value="'+o[0]+'"'+(D_THRESH===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join("");
+  return '<div class="vD pv"><div class="wrap">'
+    + '<div class="head"><h2>慢 RPC 调用证据流</h2><span class="since">自启动以来 · '+sinceLabel()+'</span><span class="sp"></span>'
+    +   '<label class="fld">阈值 <select id="dTh">'+thOpts+'</select></label></div>'
+    + '<div class="chips">'+chips+'<span class="chipf" id="dClear"><span class="nm">全部框架</span></span></div>'
+    + '<div class="cols"><div class="panel stream">'+stream+'</div>'
+    +   '<div class="panel side"><h3>方法一览</h3><div class="cap">跨方法证据流；点方法名可只看该框架</div>'
+    +   side + '</div></div>'
+    + caveat()+'</div></div>';
+}
+function initD(){
+  Array.prototype.forEach.call(document.querySelectorAll(".vD .chipf[data-c]"),function(c){
+    c.addEventListener("click",function(){
+      var k=c.getAttribute("data-c");
+      if(D_ON[k]) delete D_ON[k]; else D_ON[k]=1;
+      rerenderD();
+    });
+  });
+  var clr=document.getElementById("dClear");
+  if(clr) clr.addEventListener("click",function(){ D_ON={}; rerenderD(); });
+  var th=document.getElementById("dTh");
+  if(th) th.addEventListener("change",function(){ D_THRESH=Number(this.value)||0; rerenderD(); });
+  Array.prototype.forEach.call(document.querySelectorAll(".vD .mrow"),function(r){
+    r.addEventListener("click",function(){ D_ON={}; D_ON[r.getAttribute("data-c")]=1; rerenderD(); });
+  });
+}
+function rerenderD(){
+  var app=document.getElementById("app");
+  app.innerHTML=renderD();
+  initD();
+}
+
+/* ============================================================
+   切换器（?variant= + ← →）
+   ============================================================ */
+var VARIANTS=[
+  {key:"A",name:"排障台（表 + 抽屉）",render:renderA,init:initA,
+    q:"<b>A · 默认推荐</b>｜全宽排行表（次数/错误率/分位/最大/首末见，默认 P95 降序），点行从右侧滑出证据抽屉（最慢 1 + 随机 4）。最贴近现有 slow-topn，密集、熟悉、适合审计。"},
+  {key:"B",name:"框架看板（卡片）",render:renderB,init:initB,
+    q:"<b>B · 分组视角</b>｜按 RPC 框架分组，方法做成卡片、卡上带分位色条，点卡片行内展开证据。把「调了哪个框架 / 哪个方法」的空间关系摆出来，适合汇报。"},
+  {key:"C",name:"双栏工作台（列表+详情）",render:renderC,init:initC,
+    q:"<b>C · 证据常驻</b>｜左方法列表、右详情常驻：分位梯 + 证据时间线一览无余。不用点开就能看证据，最适合「对峙取证」。"},
+  {key:"D",name:"慢调用证据流（SkyWalking）",render:renderD,init:initD,
+    q:"<b>D · 实例优先</b>｜跨方法把「最慢的那些调用」排成一条流（可按框架筛、按阈值滤），方法聚合退居侧栏。最像 SkyWalking 慢语句，直接给证据。"}
+];
+function currentKey(){
+  var k=(new URLSearchParams(location.search).get("variant")||"A").toUpperCase();
+  return VARIANTS.some(function(v){return v.key===k;})?k:"A";
+}
+function idxOf(k){for(var i=0;i<VARIANTS.length;i++) if(VARIANTS[i].key===k) return i; return 0;}
+function render(){
+  var k=currentKey(),v=VARIANTS[idxOf(k)];
+  document.getElementById("app").innerHTML=v.render();
+  document.getElementById("proto-q").innerHTML=v.q;
+  document.getElementById("sw-k").textContent=v.key;
+  document.getElementById("sw-n").textContent=v.name;
+  document.title="RPC 调用排行原型 · "+v.name;
+  if(v.init){try{v.init();}catch(e){console.warn("init "+v.key+" failed",e);}}
+}
+function go(delta){
+  var i=(idxOf(currentKey())+delta+VARIANTS.length)%VARIANTS.length;
+  history.replaceState(null,"","?variant="+VARIANTS[i].key);
+  render();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+document.getElementById("sw-prev").addEventListener("click",function(){go(-1);});
+document.getElementById("sw-next").addEventListener("click",function(){go(1);});
+document.addEventListener("keydown",function(e){
+  var t=e.target,tag=(t&&t.tagName)||"";
+  if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"||(t&&t.isContentEditable)) return;
+  if(e.key==="ArrowLeft"){go(-1);} else if(e.key==="ArrowRight"){go(1);}
+});
+window.addEventListener("popstate",render);
+render();
+</script>
+</body>
+</html>
