@@ -42,6 +42,8 @@ import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.MetricsSink
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeMetricsAggregator;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeLifetimeRow;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.EdgeRow;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.RpcMethodRow;
+import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.RpcMetricsAggregator;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsAggregator;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsQuery;
 import org.apache.skywalking.apm.agent.core.reporter.logfile.metrics.TraceMetricsRollup;
@@ -96,6 +98,11 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 	 * 随 metrics 开关一起初始化——它与 Trace 指标同源同生命周期，单独开关会多一个配置项（本仓原则：只留 enabled 一个）。
 	 */
 	private EdgeMetricsAggregator edgeAggregator;
+	/**
+	 * RPC 调用排行聚合器（出站 RPCFramework span 按 componentId × operationName 进程累计；纯内存、不落库）。
+	 * 随 metrics 开关一起初始化——与 Trace 指标/依赖边同源同生命周期。
+	 */
+	private RpcMetricsAggregator rpcAggregator;
 	/** 指标翻转定时线程（30s 周期：分钟翻转 → 分钟落库 → 上小时 rollup → 保留期清理） */
 	private ScheduledExecutorService metricsFlushExecutor;
 	private boolean metricsEnabled;
@@ -383,6 +390,72 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		}
 		result.put("dependencies", dependencyRows);
 		result.put("lifetimeSinceMs", edgeAggregator.getStartedAtMs());
+		return result;
+	}
+
+	/**
+	 * RPC 调用排行快照（供 {@code SWMetricsUtils.rpcTopn()} 经拦截器反射调用）。
+	 * <p>
+	 * 本 JVM <b>出站</b>的 RPC span（{@code spanLayer = RPCFramework}）按 {@code componentId × operationName}
+	 * <b>进程累计</b>（自启动以来）：次数 / 错误率 / P50·P95·P99 / 最大耗时 / 首末见，默认按 P95 降序。
+	 * </p>
+	 * <p>
+	 * 口径（读口与页面须写明）：
+	 * <ul>
+	 *   <li><b>孤段不计</b>——喂入在段消费的孤段过滤之后，无 Entry 且无 ref 的"无上下文 RPC"不进榜；</li>
+	 *   <li><b>入站不计</b>——本 JVM 当 RPC 服务端的 Entry 不进这张榜（已在 endpoint 指标里）；</li>
+	 *   <li>纯内存、<b>进程累计</b>、重启即失、不落库。</li>
+	 * </ul>
+	 * 组件名<b>不在这里翻译</b>（插件侧不打包组件库），由宿主侧用 {@code component-libraries.yml} 补。
+	 * 返回 JDK 原生 Map，不暴露 Agent 自定义类型。
+	 * </p>
+	 */
+	public Map<String, Object> getRpcTopn() {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		if (rpcAggregator == null) {
+			result.put("enabled", false);
+			result.put("count", 0);
+			result.put("rows", Collections.emptyList());
+			result.put("counters", Collections.emptyMap());
+			return result;
+		}
+		final List<RpcMethodRow> snapshot = rpcAggregator.snapshot();
+		final List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>(snapshot.size());
+		for (int i = 0; i < snapshot.size(); i++) {
+			rows.add(snapshot.get(i).toMap());
+		}
+		result.put("enabled", true);
+		result.put("count", rows.size());
+		result.put("rows", rows);
+		result.put("counters", rpcAggregator.snapshotCounters());
+		result.put("lifetimeSinceMs", rpcAggregator.getStartedAtMs());
+		result.put("methodCap", RpcMetricsAggregator.MAX_METHODS);
+		result.put("samplePoolPerMethod", RpcMetricsAggregator.MAX_SAMPLES_PER_METHOD);
+		result.put("evidencePerMethod", RpcMetricsAggregator.EVIDENCE_SIZE);
+		return result;
+	}
+
+	/**
+	 * 单个 RPC 方法的<b>证据样本</b>（供 {@code SWMetricsUtils.rpcTopnDetail()} 经拦截器反射调用）。
+	 * <p>
+	 * 每方法留"最慢 1 条 + 随机 4 条"（各带 {@code durationMs / startTimeMs / traceId / isError}），
+	 * 点行才拉。样本是<b>抽样</b>、非全量；兜底方法 {@code (other)} 返回空证据。返回 JDK 原生类型。
+	 * </p>
+	 */
+	public Map<String, Object> getRpcTopnEvidence(final Integer componentId, final String operation) {
+		final Map<String, Object> result = new LinkedHashMap<String, Object>();
+		if (rpcAggregator == null || componentId == null) {
+			result.put("enabled", false);
+			result.put("count", 0);
+			result.put("samples", Collections.emptyList());
+			return result;
+		}
+		final List<Map<String, Object>> samples = rpcAggregator.evidence(componentId.intValue(), operation);
+		result.put("enabled", true);
+		result.put("componentId", componentId);
+		result.put("operation", operation);
+		result.put("count", samples.size());
+		result.put("samples", samples);
 		return result;
 	}
 
@@ -896,6 +969,7 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 		this.metricsAggregator = new TraceMetricsAggregator(sink, Config.Agent.SERVICE_NAME, slowThresholdMs,
 				SlowRuleThresholdResolver.fromConfig());
 		this.edgeAggregator = new EdgeMetricsAggregator();
+		this.rpcAggregator = new RpcMetricsAggregator();
 		startMetricsFlushTimer();
 		LOGGER.info("### [Metrics] TraceMetricsAggregator initialized (service={}, slowThresholdMs={}, storageEnabled={}).",
 				Config.Agent.SERVICE_NAME, slowThresholdMs, traceSegmentStorage != null);
@@ -1172,6 +1246,9 @@ public class LogFileTraceSegmentServiceClient extends TraceSegmentServiceClient
 			}
 			if (edgeAggregator != null) {
 				edgeAggregator.onSegment(segment);
+			}
+			if (rpcAggregator != null) {
+				rpcAggregator.onSegment(segment);
 			}
 			keptObjs.add(segment);
 			keptRaw.add(raw);

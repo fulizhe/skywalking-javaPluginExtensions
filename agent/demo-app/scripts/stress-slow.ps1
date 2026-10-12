@@ -84,7 +84,7 @@ $SLOW_PATHS = [ordered]@{
     "/api/deps-demo/mysql?sleepMs=30"   = "MySQL 慢查询 30ms 档(实测约 3.0s —— H2 的 SLEEP 有秒级下限,别按参数值估耗时)"
     "/api/deps-demo/kafka?op=produce"     = "Kafka 生产(broker 不可达时约 3s 超时,见拓扑页 caveats)"
     "/api/deps-demo/http?site=httpbin"   = "外呼 httpbin 约 1~2s(网络往返)"
-    "/api/deps-demo/grpc"                = "进程内 gRPC **毫秒级**(容器内实测 P50 0.03s;首次建链约 4s)"
+    "/api/deps-demo/grpc"                = "进程内 gRPC（Echo/BatchSync/StreamData **三方法各调一次**；服务端模拟动态耗时，按方法 5~40 / 50~200 / 150~500ms；可用 deps.grpc.simulateLatency=false 关掉）"
     # 不带 phase 参数：它是给断言区分回环阶段的，压测用不上。
     # （早先这里写成 ?value=v&phase=P，而 `&` 会被 Windows 的 cmd.exe 当命令分隔符 —— 见 stress.ps1 里的说明）
     "/api/hutool-demo/post-json?value=v" = "Hutool 出口回环自调(毫秒级,作为对照基线)"

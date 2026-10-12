@@ -53,4 +53,26 @@ public class SWMetricsUtils {
     public static Map<String, Object> dependencyTopology(Map<String, Object> condition) {
         return Collections.emptyMap();
     }
+
+    /**
+     * RPC 调用排行快照:本 JVM <b>出站</b> RPC span(spanLayer=RPCFramework)按 componentId × operationName
+     * <b>进程累计</b>(次数/错误率/P50·P95·P99/最大/首末见,默认按 P95 降序)。
+     * <p>
+     * 口径:<b>孤段不计</b>(无上下文的后台 RPC 不进榜)、<b>入站不计</b>(本 JVM 当服务端的 RPC 已在 endpoint 指标里)、
+     * 纯内存、重启即失。组件名由宿主侧补(组件库 → spanLayer(#id) → component-&lt;id&gt; 三级 fallback)。
+     * </p>
+     * 无 agent 时返回空 Map;挂载 agent 后由 {@code MetricsExposeInterceptor} 接管。
+     */
+    public static Map<String, Object> rpcTopn() {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * 单个 RPC 方法的证据样本:每方法"最慢 1 条 + 随机 4 条",各带 durationMs / startTimeMs / traceId / isError。
+     * 点行才拉;样本为抽样、非全量;兜底方法 {@code (other)} 返回空证据。
+     * 无 agent 时返回空 Map;挂载 agent 后由拦截器接管。
+     */
+    public static Map<String, Object> rpcTopnDetail(int componentId, String operation) {
+        return Collections.emptyMap();
+    }
 }

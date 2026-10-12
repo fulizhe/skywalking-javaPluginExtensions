@@ -50,6 +50,13 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
                 final Map<String, Object> condition = (allArguments != null && allArguments.length > 0
                         && allArguments[0] instanceof Map) ? (Map<String, Object>) allArguments[0] : null;
                 value = ReflectUtil.invoke(client, "getDependencyTopology", condition);
+            } else if ("rpcTopn".equals(method.getName())) {
+                value = ReflectUtil.invoke(client, "getRpcTopn");
+            } else if ("rpcTopnDetail".equals(method.getName())) {
+                final Object componentId = (allArguments != null && allArguments.length > 0) ? allArguments[0] : null;
+                final Object operation = (allArguments != null && allArguments.length > 1) ? allArguments[1] : null;
+                value = componentId == null ? null
+                        : ReflectUtil.invoke(client, "getRpcTopnEvidence", componentId, operation);
             } else {
                 value = ReflectUtil.invoke(client, "getMetricsStatus");
             }
@@ -84,6 +91,21 @@ public class MetricsExposeInterceptor implements StaticMethodsAroundInterceptor 
             empty.put("count", 0);
             empty.put("totalEdges", 0);
             empty.put("truncated", false);
+            return empty;
+        }
+        if ("rpcTopn".equals(methodName)) {
+            final Map<String, Object> empty = new HashMap<String, Object>();
+            empty.put("enabled", false);
+            empty.put("rows", Collections.emptyList());
+            empty.put("counters", Collections.emptyMap());
+            empty.put("count", 0);
+            return empty;
+        }
+        if ("rpcTopnDetail".equals(methodName)) {
+            final Map<String, Object> empty = new HashMap<String, Object>();
+            empty.put("enabled", false);
+            empty.put("samples", Collections.emptyList());
+            empty.put("count", 0);
             return empty;
         }
         return new HashMap<String, Object>();

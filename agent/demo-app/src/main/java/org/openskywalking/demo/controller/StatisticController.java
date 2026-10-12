@@ -217,6 +217,44 @@ public class StatisticController {
     }
 
     /**
+     * RPC 调用排行读口:/inner/sw/rpc-topn 返回本 JVM <b>出站</b> RPC 方法(spanLayer=RPCFramework)的
+     * <b>进程累计</b>(次数/错误率/P50·P95·P99/最大/首末见,默认 P95 降序)。
+     * <p>
+     * 插件侧只透出 componentId 整数,组件名在宿主侧翻译(与 /inner/sw/topology 同一套三级 fallback)。
+     * 口径:孤段不计、入站不计、进程累计、重启即失(详见页内 caveats)。
+     * </p>
+     */
+    @GetMapping("/inner/sw/rpc-topn")
+    public Map<String, Object> rpcTopn() {
+        Map<String, Object> result = SWMetricsUtils.rpcTopn();
+        Object rowsObj = result.get("rows");
+        if (rowsObj instanceof List) {
+            loadComponentMapIfNeeded();
+            List<?> rows = (List<?>) rowsObj;
+            for (Object rowObj : rows) {
+                if (!(rowObj instanceof Map)) {
+                    continue;
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> row = (Map<String, Object>) rowObj;
+                Object cidObj = row.get("componentId");
+                if (cidObj instanceof Number) {
+                    row.put("componentName", componentDisplayName(((Number) cidObj).intValue(),
+                            String.valueOf(row.get("spanLayer"))));
+                }
+            }
+        }
+        return result;
+    }
+
+    /** 单个 RPC 方法的证据样本读口:点行才拉(最慢 1 条 + 随机 4 条,带 traceId 供下钻链路) */
+    @GetMapping("/inner/sw/rpc-topn/detail")
+    public Map<String, Object> rpcTopnDetail(@RequestParam("componentId") int componentId,
+            @RequestParam("operation") String operation) {
+        return SWMetricsUtils.rpcTopnDetail(componentId, operation);
+    }
+
+    /**
      * 组件显示名:先查组件库,查不到则按 spanLayer 归类,再查不到才退化成 {@code component-<id>}。
      * 三级 fallback 的原因见 {@code /inner/sw/topology} 的注释——组件库并不覆盖全部插件注册的组件。
      */

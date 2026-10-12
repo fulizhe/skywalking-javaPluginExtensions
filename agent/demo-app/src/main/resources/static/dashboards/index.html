@@ -96,6 +96,11 @@
         <div class="nav-title">监控的监控</div>
         <div class="nav-desc">监控系统自身:DataCarrier 丢弃数、消费线程单批耗时、未提交 segment 积压、H2 行数与内存估算、环形载荷文件写指针与压缩率、JVM 堆</div>
     </a>
+    <a class="nav-card" href="rpc-topn.html">
+        <div class="nav-num">16</div>
+        <div class="nav-title">RPC 调用排行</div>
+        <div class="nav-desc">本 JVM 出站 RPC(spanLayer=RPCFramework)按方法排行:次数/错误率/P50·P95·P99/最大/首末见(默认 P95 降序);点行看证据样本(最慢 1 + 随机 4)并下钻链路</div>
+    </a>
 </main>
 <section class="nav-endpoints">
     <h2>原始读口（JSON，点击直开）</h2>
@@ -110,6 +115,7 @@
         <li><a href="/inner/sw/metrics/query?endpoint=%2A&amp;limit=20" target="_blank">/inner/sw/metrics/query?endpoint=*&amp;limit=20</a> —— 指标条件查询（加 &amp;aggregate=true 出每端点一行）</li>
         <li><a href="/inner/sw/metrics/extremes" target="_blank">/inner/sw/metrics/extremes</a> —— 每端点最大耗时那次的 traceId</li>
         <li><a href="/inner/sw/topology" target="_blank">/inner/sw/topology</a> —— 依赖边（entry × 组件），加 <code>&amp;view=summary</code> 出总览档</li>
+        <li><a href="/inner/sw/rpc-topn" target="_blank">/inner/sw/rpc-topn</a> —— 出站 RPC 方法排行（进程累计）；明细证据 <a href="/inner/sw/rpc-topn/detail?componentId=23&amp;operation=demo.DepsDemo%2FEcho" target="_blank">/inner/sw/rpc-topn/detail</a></li>
     </ul>
 </section>
 <footer class="nav-footer">运行方式:<code>pwsh ./scripts/validate.ps1</code>(一键验证)或 <code>pwsh ./scripts/run-with-agent.ps1</code>(手动模式,保持运行后浏览器打开本页)</footer>

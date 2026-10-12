@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPC 调用排行</title>
+<script src="presenter.js"></script>
+<script src="poll.js"></script>
+<link rel="stylesheet" href="presenter.css">
+<style>
+  *{box-sizing:border-box}
+  :root{--bg:#0a1120;--panel:#101a30;--bd:#1d2a49;--tx:#dde6f5;--mut:#7d8db3;--ac:#38bdf8;
+        --ok:#34d399;--warn:#fbbf24;--err:#fb7185;--mono:"Cascadia Code",Consolas,"Courier New",monospace}
+  body{margin:0;background:linear-gradient(180deg,#0a1120,#0c1426 55%,#0a1120);color:var(--tx);
+       font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;font-size:14px;
+       -webkit-font-smoothing:antialiased;min-height:100vh}
+  a{color:var(--ac);text-decoration:none} a:hover{text-decoration:underline}
+  .bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 18px;
+       background:#0c1526;border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:5}
+  .bar h1{font-size:17px;margin:0}
+  .bar .home{font-size:12.5px;color:var(--mut)}
+  .field{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut)}
+  .btn{background:#1c2b4a;border:1px solid var(--bd);color:#dbeafe;border-radius:8px;padding:4px 8px;
+       font-size:12px;font-family:inherit}
+  input.btn{width:200px}
+  .summary{font-size:12px;color:var(--mut);margin-left:auto}
+  .page{padding:16px 18px 40px;max-width:1360px;margin:0 auto}
+  .caveats{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:12px 16px;margin-bottom:14px}
+  .caveats h2{margin:0 0 8px;font-size:12.5px;color:var(--ac)}
+  .caveats ul{margin:0;padding-left:18px}
+  .caveats li{font-size:12px;color:var(--mut);line-height:1.85;margin-bottom:2px}
+  .caveats b{color:#c7cff0}
+  .wrap2{display:grid;grid-template-columns:1fr 0px;gap:0;transition:grid-template-columns .18s ease}
+  .wrap2.open{grid-template-columns:1fr 420px;gap:14px}
+  .card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}
+  th{position:sticky;top:0;background:#0c1526;color:var(--mut);font-weight:600;z-index:1}
+  td.num{text-align:right;font-family:var(--mono)}
+  tbody tr{cursor:pointer;border-left:3px solid transparent}
+  tbody tr:hover{background:#16233d}
+  tbody tr.hot{background:#16233d;border-left-color:var(--ac)}
+  td.rk{font-family:var(--mono);color:var(--mut);width:1%}
+  .chip{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:5px;
+        background:#16233d;color:#8fbfe8;border:1px solid #24365c;vertical-align:middle}
+  .op{font-family:var(--mono);color:#e8eefc}
+  .barw{display:inline-block;height:6px;border-radius:3px;background:linear-gradient(90deg,#38bdf8,#fb7185);
+        vertical-align:middle;margin-right:7px;min-width:2px}
+  .mut{color:var(--mut)}
+  .badge-err{font-family:var(--mono);font-size:11px;font-weight:700;color:#ffd7de;background:rgba(251,113,133,.18);
+             border:1px solid rgba(251,113,133,.5);border-radius:5px;padding:1px 6px}
+  .drawer{background:linear-gradient(180deg,#101a30,#0c1424);border:1px solid var(--bd);border-radius:12px;
+          overflow:hidden;position:sticky;top:66px;max-height:calc(100vh - 140px);display:none;flex-direction:column}
+  .wrap2.open .drawer{display:flex}
+  .drawer .dh{padding:14px 16px;border-bottom:1px solid var(--bd)}
+  .drawer .dh .t{font-size:15px;font-weight:700}
+  .drawer .dh .s{color:var(--mut);font-size:12px;margin-top:3px}
+  .drawer .db{padding:12px 16px;overflow:auto}
+  .kpis{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+  .kpi{background:#0d1526;border:1px solid var(--bd);border-radius:9px;padding:8px 10px}
+  .kpi .k{font-size:11px;color:var(--mut)}
+  .kpi .v{font-family:var(--mono);font-weight:800;font-size:17px;margin-top:2px}
+  .plabel{font-size:11.5px;color:var(--mut);margin:2px 0 6px}
+  .pleg{display:flex;height:28px;border-radius:7px;overflow:hidden;border:1px solid var(--bd);margin-bottom:14px}
+  .pleg i{display:grid;place-items:center;font-family:var(--mono);font-size:10.5px;font-style:normal;color:#0a1120;font-weight:700}
+  .ev-h{font-size:11.5px;color:var(--mut);margin:0 0 8px}
+  .ev{display:flex;align-items:center;gap:10px;padding:8px 9px;border:1px solid var(--bd);border-radius:8px;
+      margin-bottom:7px;background:#0d1526}
+  .ev.slow{border-color:rgba(251,113,133,.55);background:rgba(251,113,133,.08)}
+  .ev .d{font-family:var(--mono);font-weight:800;font-size:15px;min-width:74px}
+  .ev.slow .d{color:var(--err)}
+  .ev .m{flex:1;min-width:0}
+  .ev .m .tag{font-size:10.5px;color:var(--mut)}
+  .ev .m .tr{font-family:var(--mono);font-size:10.5px;color:#8ea3c7;overflow:hidden;text-overflow:ellipsis}
+  .ev a{font-size:11.5px;color:var(--ac);white-space:nowrap}
+  .hint{padding:40px 18px;text-align:center;color:var(--mut);font-size:12.5px;line-height:1.9}
+  .empty{padding:30px 12px;text-align:center;color:var(--mut);font-size:13px;line-height:1.9}
+  .foot{margin-top:10px;color:var(--mut);font-size:11.5px;line-height:1.9}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>RPC 调用排行 · 出站按方法</h1>
+  <a class="home" href="topology.html">← 依赖拓扑</a>
+  <a class="home" href="metrics.html">指标大屏 ↗</a>
+  <span class="field presenter-hide">排序
+    <select class="btn" id="sort">
+      <option value="p95">P95 降序</option>
+      <option value="p99">P99 降序</option>
+      <option value="count">调用次数</option>
+      <option value="avg">平均耗时</option>
+      <option value="max">最大耗时</option>
+      <option value="err">错误率</option>
+    </select>
+  </span>
+  <span class="field presenter-hide">找方法
+    <input class="btn" id="search" placeholder="如 OrderService / DepsDemo">
+  </span>
+  <span class="summary presenter-hide" id="hint">加载中…</span>
+  <span class="presenter-only" id="scope-chip" title="当前看的是哪一档"></span>
+</div>
+
+<div class="page">
+  <div id="presenter-slot"></div>
+
+  <section class="caveats presenter-collapse">
+    <h2>口径说明（看这张榜之前必读）</h2>
+    <ul>
+      <li><b>只算本 JVM 的出站 RPC</b>（<code>spanLayer = RPCFramework</code>：gRPC / Dubbo / …）；
+          <b>入站不计</b>——本进程当 RPC 服务端的处理已在<a href="metrics.html">指标大屏</a>的 endpoint 里。</li>
+      <li><b>进程累计（自启动以来），不跟时间窗走</b>；纯内存、<b>重启即失、不落库</b>。</li>
+      <li><b>孤段不计</b>：无 active trace 的后台 / 保活 RPC（无 Entry 且无 ref 的段）不出现——别把"没出现"读成"没调用过"。</li>
+      <li><b>计数全量精确、分位来自每方法样本池</b>（蓄水池抽样）；样本不足 20 条时 P95/P99 显示为 <code>-</code>。</li>
+      <li><b>点行弹出的证据是抽样</b>（最慢 1 条 + 随机 4 条），<b>不是全量</b>；证据给的 traceId 可能已超出链路存储窗口，点进去可能是空。</li>
+    </ul>
+  </section>
+
+  <div class="wrap2" id="wrap">
+    <div class="card">
+      <table>
+        <thead><tr>
+          <th class="rk">#</th><th>方法</th><th class="num">次数</th><th class="num">错误率</th>
+          <th class="num">P50</th><th class="num">P95</th><th class="num">P99</th><th class="num">最大</th>
+          <th class="num">首见</th><th class="num">末见</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <aside class="drawer" id="drawer"></aside>
+  </div>
+  <div class="empty" id="empty" style="display:none"></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+"use strict";
+var state = { sort: "p95", search: "", rows: [], sinceMs: 0, selected: null };
+
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+  return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]; }); }
+function fmtInt(n){ return n == null ? "-" : Number(n).toLocaleString("en-US"); }
+function fmtMs(v){ return (v == null || v < 0) ? "-" : (v >= 1000 ? (v/1000).toFixed(2) + " s" : Math.round(v) + " ms"); }
+function pct(v){ return v == null ? "-" : (v * 100).toFixed(2) + "%"; }
+function agoByMs(ms){
+  if (ms == null || ms <= 0) return "-";
+  var min = (Date.now() - ms) / 60000;
+  return min < 1 ? "刚刚" : (Math.round(min) + " 分前");
+}
+function agoByBucket(bucket){
+  if (bucket == null || bucket <= 0) return "-";
+  var min = Math.floor(Date.now()/60000) - bucket;
+  return min <= 0 ? "本分钟" : (min + " 分前");
+}
+function errRate(r){ return r.errorRate == null ? 0 : r.errorRate; }
+
+var SORTS = {
+  p95:   function(r){ return r.p95; },
+  p99:   function(r){ return r.p99; },
+  count: function(r){ return r.requestCount; },
+  avg:   function(r){ return r.avgLatency; },
+  max:   function(r){ return r.maxLatency; },
+  err:   function(r){ return errRate(r); }
+};
+
+function sortedRows(){
+  var f = SORTS[state.sort] || SORTS.p95;
+  var q = state.search.toLowerCase();
+  return state.rows.slice()
+    .filter(function(r){ return !q || ((r.componentName || "") + " " + r.operation).toLowerCase().indexOf(q) >= 0; })
+    .sort(function(a, b){
+      var d = (f(b) || 0) - (f(a) || 0);
+      return d || (b.requestCount || 0) - (a.requestCount || 0) || String(a.operation).localeCompare(String(b.operation));
+    });
+}
+
+function renderTable(){
+  var list = sortedRows();
+  var maxP95 = 0;
+  list.forEach(function(r){ if (r.p95 > maxP95) maxP95 = r.p95; });
+  var html = list.map(function(r, i){
+    var cid = Number(r.componentId);
+    var w = (r.p95 > 0 && maxP95 > 0) ? Math.max(4, Math.round(r.p95 / maxP95 * 70)) : 0;
+    var hot = state.selected && state.selected.cid === cid && state.selected.op === r.operation;
+    return '<tr' + (hot ? ' class="hot"' : '') + ' data-cid="' + cid + '" data-op="' + esc(r.operation) + '">'
+      + '<td class="rk">' + (i + 1) + '</td>'
+      + '<td><span class="chip">' + esc(r.componentName || r.spanLayer + "(#" + cid + ")") + '</span> '
+      +   '<span class="op">' + esc(r.operation) + '</span></td>'
+      + '<td class="num">' + fmtInt(r.requestCount) + '</td>'
+      + '<td class="num">' + pct(errRate(r)) + '</td>'
+      + '<td class="num">' + fmtMs(r.p50) + '</td>'
+      + '<td class="num">' + (w ? '<span class="barw" style="width:' + w + 'px"></span>' : '') + fmtMs(r.p95) + '</td>'
+      + '<td class="num">' + fmtMs(r.p99) + '</td>'
+      + '<td class="num">' + fmtMs(r.maxLatency) + '</td>'
+      + '<td class="num mut">' + agoByBucket(r.firstSeenBucket) + '</td>'
+      + '<td class="num mut">' + agoByBucket(r.lastSeenBucket) + '</td></tr>';
+  }).join("");
+  document.getElementById("rows").innerHTML = html;
+  Array.prototype.forEach.call(document.querySelectorAll("#rows tr"), function(tr){
+    tr.addEventListener("click", function(){
+      var cid = Number(tr.getAttribute("data-cid"));
+      var op = tr.getAttribute("data-op");
+      state.selected = { cid: cid, op: op };
+      var r = state.rows.filter(function(x){ return Number(x.componentId) === cid && x.operation === op; })[0];
+      document.getElementById("wrap").classList.add("open");
+      renderTable();
+      openDrawer(r, null);
+      loadEvidence(cid, op, r);
+    });
+  });
+}
+
+function evRow(s){
+  return '<div class="ev' + (s.slowest ? ' slow' : '') + '">'
+    + '<span class="d">' + fmtMs(s.durationMs) + '</span>'
+    + '<span class="m"><span class="tag">' + (s.slowest ? "最慢" : "样本") + ' · ' + agoByMs(s.startTimeMs) + '</span>'
+    +   '<div class="tr">' + esc(String(s.traceId || "").slice(0,12) + "…" + String(s.traceId || "").slice(-4))
+    +     (s.isError ? ' <span class="badge-err">error</span>' : '') + '</div></span>'
+    + '<a href="trace-view.html?traceId=' + esc(s.traceId) + '" target="_blank">链路 ›</a></div>';
+}
+
+function renderDrawer(r, samples){
+  var el = document.getElementById("drawer");
+  if (!r){ el.innerHTML = '<div class="hint">点左侧任一行，查看该方法的<br><b>最慢 1 条 + 随机 4 条</b>证据。</div>'; return; }
+  var body;
+  if (samples === null){
+    body = '<div class="hint">证据加载中…</div>';
+  } else if (!samples.length){
+    body = '<div class="hint">该方法暂无证据样本。</div>';
+  } else {
+    body = samples.map(evRow).join("");
+  }
+  el.innerHTML =
+      '<div class="dh"><div class="t"><span class="chip">' + esc(r.componentName || ("component-" + r.componentId)) + '</span> '
+    +   esc(r.operation) + '</div>'
+    + '<div class="s">' + esc(r.spanLayer) + ' · componentId=' + Number(r.componentId) + ' · 自启动以来</div></div>'
+    + '<div class="db">'
+    +   '<div class="kpis">'
+    +     '<div class="kpi"><div class="k">调用次数</div><div class="v">' + fmtInt(r.requestCount) + '</div></div>'
+    +     '<div class="kpi"><div class="k">错误率</div><div class="v" style="color:' + (errRate(r) > 0.01 ? "#fb7185" : "#34d399") + '">' + pct(errRate(r)) + '</div></div>'
+    +     '<div class="kpi"><div class="k">最大耗时</div><div class="v" style="color:#fb7185">' + fmtMs(r.maxLatency) + '</div></div>'
+    +   '</div>'
+    +   '<div class="plabel">耗时分位（P50 / P95 / P99 / 最大）</div>'
+    +   '<div class="pleg">'
+    +     '<i style="width:25%;background:#38bdf8">' + fmtMs(r.p50) + '</i>'
+    +     '<i style="width:25%;background:#22a0d8">' + fmtMs(r.p95) + '</i>'
+    +     '<i style="width:25%;background:#7c5cf0">' + fmtMs(r.p99) + '</i>'
+    +     '<i style="width:25%;background:#fb7185">' + fmtMs(r.maxLatency) + '</i>'
+    +   '</div>'
+    +   '<div class="ev-h">证据样本（最慢 1 + 随机 4 · 抽样）</div>'
+    +   body
+    + '</div>';
+}
+
+function openDrawer(r, samples){ renderDrawer(r, samples); }
+
+function loadEvidence(cid, op, r){
+  fetch('/inner/sw/rpc-topn/detail?componentId=' + encodeURIComponent(cid) + '&operation=' + encodeURIComponent(op))
+    .then(function(resp){ return resp.json(); })
+    .then(function(data){ if (state.selected && state.selected.cid === cid && state.selected.op === op) renderDrawer(r, data.samples || []); })
+    .catch(function(){ if (state.selected && state.selected.cid === cid && state.selected.op === op) renderDrawer(r, []); });
+}
+
+function renderFoot(){
+  var since = state.sinceMs > 0 ? ('进程启动于 ' + Math.round((Date.now() - state.sinceMs)/60000) + ' 分钟前 · ') : "";
+  document.getElementById("foot").innerHTML = since
+    + '共 ' + state.rows.length + ' 个方法（= 读口 rows 长度）· 进程累计 · 点行看证据 · '
+    + '组件名由宿主侧按组件库翻译（缺则退化为「层(#id)」）。';
+}
+
+function refresh(){
+  return fetch('/inner/sw/rpc-topn').then(function(resp){ return resp.json(); }).then(function(data){
+    state.rows = (data && data.rows) ? data.rows : [];
+    state.sinceMs = (data && data.lifetimeSinceMs) ? data.lifetimeSinceMs : 0;
+    if (!state.selected && state.rows.length){ /* 不自动选，保持抽屉空态 */ }
+    renderTable();
+    renderFoot();
+    var empty = document.getElementById("empty");
+    if (!state.rows.length){
+      empty.style.display = "block";
+      empty.innerHTML = '还没有出站 RPC 调用。<br>造数：访问 <a href="/api/deps-demo/grpc">/api/deps-demo/grpc</a>（进程内 gRPC echo）后稍候再看。';
+    } else {
+      empty.style.display = "none";
+    }
+    document.getElementById("hint").textContent = (data && data.enabled === false) ? "指标聚合未启用" : (state.rows.length + " 个方法");
+    // 若当前有选中行，按其最新数据刷新抽屉头部
+    if (state.selected){
+      var r = state.rows.filter(function(x){ return Number(x.componentId) === state.selected.cid && x.operation === state.selected.op; })[0];
+      if (r){ renderDrawer(r, null); loadEvidence(state.selected.cid, state.selected.op, r); }
+      else { state.selected = null; document.getElementById("wrap").classList.remove("open"); renderDrawer(null, []); }
+    }
+  }).catch(function(){
+    document.getElementById("hint").textContent = "读口不可用";
+  });
+}
+
+document.getElementById("sort").addEventListener("change", function(){ state.sort = this.value; renderTable(); });
+document.getElementById("search").addEventListener("input", function(){ state.search = this.value.trim(); renderTable(); });
+
+var timer = null;
+function startPolling(){ if (timer) return; timer = setInterval(refresh, SWPoll ? SWPoll.intervalMs("rpc-topn", 5000) : 5000); }
+function stopPolling(){ if (timer){ clearInterval(timer); timer = null; } }
+SWPoll.attach({ key: "rpc-topn", defaultMs: 5000, start: startPolling, stop: stopPolling, once: refresh });
+renderDrawer(null, []);
+refresh();
+</script>
+</body>
+</html>

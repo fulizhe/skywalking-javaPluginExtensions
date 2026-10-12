@@ -37,6 +37,22 @@ mvn clean package '-Dmaven.test.skip=true' -T 2C -pl logfile-reporter-plugin -am
 
 产物：`logfile-reporter-plugin/target/logfile-reporter-plugin-1.0.0.jar`（class 版本仍为 8，可运行于 JDK 8 应用）
 
+## 构建中的 `expand-h2-data-zip`（别误跳）
+
+构建链里有一步 antrun `expand-h2-data-zip`：把 H2 嵌套的 `org/h2/util/data.zip`（**Web Console 静态资源 + 消息包**）展开、平铺到 shade 重定位后的路径 `org/apache/skywalking/apm/dependencies/h2/**`。它是**补偿 shade 的缺口**，不是多余步骤——shade 只改 zip 的路径名、**不改 zip 内部条目名**，不展开的话重定位后的 H2 找不到这些资源。
+
+| 场景 | `-Dmaven.antrun.skip=true` | 为什么 |
+|---|---|---|
+| `test` / `test-compile` | ✅ 可以 | 单测不碰 H2 控制台/消息资源；本地若这一步卡住（`[unzip] Expanding ...` 后无进展）可临时跳过 |
+| `package` / 发版 / 拷进 agent | ❌ **不可** | 跳了 shade 出的 jar 里 `.../dependencies/h2/**` 是空的 → **H2 Web Console 与 H2 资源加载损坏** |
+
+只跑单测时的最稳写法（跳过该步）：
+
+```powershell
+cd "$repo\agent"
+mvn -o -pl logfile-reporter-plugin -Dmaven.antrun.skip=true test -Dtest=SomeTest
+```
+
 ## 演示运行时
 
 插件在两种应用 JVM 下都受支持（运行兼容，见 `docs/adr/adr-01-jdk17-migration.md`）：

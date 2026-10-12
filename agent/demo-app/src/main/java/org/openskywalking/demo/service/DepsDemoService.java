@@ -260,15 +260,19 @@ public class DepsDemoService {
     }
 
     /**
-     * RPC 造数：调一次进程内的 gRPC echo（{@link GrpcDemoServer}），补上 Database/Cache/MQ/Http
-     * 之外的第四类依赖。客户端有 2s deadline，故这一层最坏 2s，不会把造数端点拖挂。
+     * RPC 造数：各调一次进程内 gRPC 的三个方法（{@link GrpcDemoServer}：Echo / BatchSync / StreamData），
+     * 补上 Database/Cache/MQ/Http 之外的第四类依赖。三个方法服务端耗时档位不同（快/中/慢），
+     * 为「RPC 调用排行」页产出**可排行的方法集**；每个方法各有 2s deadline，故这一层最坏约 6s（有界）。
      */
     public Map<String, Object> grpc() {
-        Map<String, Object> out = newResult("grpc://127.0.0.1/demo.DepsDemo/Echo");
+        Map<String, Object> out = newResult("grpc://127.0.0.1/demo.DepsDemo/{Echo,BatchSync,StreamData}");
         long begin = start();
         try {
             final byte[] payload = ("sw-demo-" + System.currentTimeMillis()).getBytes("UTF-8");
-            out.put("detail", String.valueOf(grpcDemo.echo(payload).length) + " bytes echoed");
+            final int bytes = grpcDemo.echo(payload).length
+                    + grpcDemo.batchSync(payload).length
+                    + grpcDemo.streamData(payload).length;
+            out.put("detail", bytes + " bytes echoed (Echo + BatchSync + StreamData)");
         } catch (Exception e) {
             markFailed(out, e);
         }

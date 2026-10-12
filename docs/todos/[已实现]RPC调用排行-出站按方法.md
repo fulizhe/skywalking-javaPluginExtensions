@@ -1,10 +1,10 @@
-# [待办] RPC 调用排行 — 出站、按方法、进程累计
+# [已实现] RPC 调用排行 — 出站、按方法、进程累计
 
 > 范围：`agent/logfile-reporter-plugin` + `agent/demo-app`
 > 定位：本文件是 `[待办]可扩展空间-按可观测性价值排序.md` 中 **P2-2（指标维度单一）** 的落地项；对应 `[待办]覆盖DB与Threadpool监控-按SkyWalking实现.md` §1.3 **路径 B「TopN」** 的 RPC 兄弟项。
 > 前提（硬约束）：**单 JVM、断 OAP 的本地探针**——只答"这一个进程往外调了哪些 RPC 方法"，不做跨实例 / 服务地图。
 > 目的：监控本进程 RPC 调用情况——**审计优化自身调用**（如同步转异步）、并为对外沟通 / 对峙留存**可下钻的证据**。
-> 状态：**待办（讨论中，今日不执行）**。方案已随本轮讨论收敛（见 §3 + §3.1），**UI 形态已用原型定稿（方案 A）**；spec 待转。
+> 状态：**已在 2.0.0 线（`master`）落地，并经活体 E2E 复核通过**（读口 `/inner/sw/rpc-topn` 返回三行、按 P95 降序；插件单测 17/17 绿）。方案见 §3 + §3.1；UI 方案 A 已实现为 `rpc-topn.html`（抛砖原型已删）。
 
 ---
 
@@ -49,7 +49,7 @@
 | Q6 | 性质 | **纯新增**，无 bug 要修 |
 | Q7 | 版本线 | **不同步** `release/1.0.0`（纯 2.0.0 功能） |
 | Q8 | 落点 | **新开独立聚合器**（不动既有依赖边键与语义） |
-| Q9 | UI | **独立页** `rpc-topn.html`；形态 = **方案 A：排行表 + 右侧证据抽屉**（原型 `rpc-topn-prototype.html?variant=A` 定稿）；无时间窗档，标签写死"自启动以来" |
+| Q9 | UI | **独立页** `rpc-topn.html`；形态 = **方案 A：排行表 + 右侧证据抽屉**（定稿原型已删）；无时间窗档，标签写死"自启动以来" |
 | Q10 | 读口 | **独立读口** `SWMetricsUtils.rpcTopn()`，**拆两动作**：列表（聚合行）/ 单行明细（带证据样本）；证据**按需拉**；宿主补组件名 + 累计起点 |
 | Q11 | 上限 | 方法 **512**（超出并入 `(other)` + 计数）/ 分位样本池 **2048** / **证据集每方法 ≤5** / 组件名三级 fallback |
 | Q12 | 证据下钻 | 每方法留 **最慢 1 条 + 随机 4 条**（`≤5`），各带 `duration / 时点 / traceId / isError`；点行才拉，页面下钻 `trace-view.html?traceId=` |
@@ -81,11 +81,18 @@
 
 ---
 
-## 5. 落地顺序（草案）
+## 5. 落地顺序（实现状态）
 
-1. **数据链路**：`RpcMetricsAggregator`（方法键 / 分位池 2048 / 证据集 ≤5 硬编码 / 上限 512 / 健康计数）+ 喂入点 + 只读口（列表）+ 聚合器单测；跑通到页面（次数 / 错误率 / 分位）。
-2. **证据下钻**：证据集（最慢 1 + 随机 4）+ 单行明细读口 + 前端**方案 A**（表 + 抽屉）+ 下钻 `trace-view` + 前端纯逻辑冒烟。
-3. **口径收口**：首末见（含"距启动多久"）、组件名三级 fallback、空态、页内口径文案、导航入口、演示动线、`checks.sh` 端到端断言。
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | **数据链路**：`RpcMetricsAggregator`（方法键 / 分位池 2048 / 证据集 / 上限 512 / 健康计数）+ 喂入点 + 列表读口 + 聚合器单测 | ✅ 已实现 |
+| 2 | **证据下钻**：证据集（最慢 1 + 随机 4）+ 单行明细读口 + 前端方案 A（表 + 抽屉）+ 下钻 `trace-view.html?traceId=` | ✅ 已实现；前端纯逻辑冒烟 ☐ 待做 |
+| 3 | **口径收口**：首末见、组件名三级 fallback、空态、页内口径文案、导航入口（仪表盘索引 16）、`checks.sh` 端到端断言 | ✅ 已实现；演示动线（presenter 翻页）☐ 待接 |
+| 4 | **遗留（非阻塞）**：前端纯逻辑冒烟测试（对齐 `slow-topn-render.test.js`）；presenter 演示动线接入本页 | ☐ 待做 |
+
+**实测结果（2026-10-12，活体实例）**：一次 `stress-rpc.ps1`（2000 请求）后，读口 `/inner/sw/rpc-topn` 返回三行、按 P95 降序——
+`demo.DepsDemo.streamData` P95 485 · `batchSync` P95 194 · `echo` P95 41；`componentName=GRPC`、`methodOverflow=0`、`aggregateErrors=0`。
+插件单测 `RpcMetricsAggregatorTest` **17/17 通过**（`mvn -o -pl logfile-reporter-plugin -Dmaven.antrun.skip=true test -Dtest=RpcMetricsAggregatorTest`）。
 
 ---
 
@@ -96,6 +103,7 @@
 - `docs/notes/2026-09-30-edge-aggregator-tradeoffs.md`（只做段内配对 / 组件名留宿主侧）
 - `docs/notes/2026-09-30-exit-span-runtime-probe.md`（`operationName` 已归一化，不需自写规则）
 - `docs/reference/skywalking-component-icons.md`（gRPC 实测名 = 大写 `GRPC` / 层 `RPCFramework`）
-- UI 定稿原型：`agent/demo-app/src/main/resources/static/dashboards/rpc-topn-prototype.html`（方案 A；**抛砖件，定稿后删**）
+- UI 方案 A 已实现：`agent/demo-app/src/main/resources/static/dashboards/rpc-topn.html`（抛砖原型 `rpc-topn-prototype.html` 已按定稿删除）
+- 演示压测脚本：`agent/demo-app/scripts/stress-rpc.ps1`（只打 `/api/deps-demo/grpc`，跑完打印 RPC 排行摘要）
 - SkyWalking `Slow Database Statement`（借鉴"典型实例 + 下钻"，不取阈值门控 / 周期持久化）：https://skywalking.apache.org/docs/main/next/en/setup/backend/slow-db-statement/
 - 代码：`metrics/TraceMetricsAggregator.java`、`metrics/EdgeMetricsAggregator.java`、`metrics/EdgeLifetimeRow.java`、`LogFileTraceSegmentServiceClient.java`、`plugin/logfilereporter/MetricsExposeInterceptor.java`、`agent/demo-app/.../dashboards/slow-topn.html`

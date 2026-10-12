@@ -202,6 +202,7 @@ run_checks() {
   # 页面可达(不测渲染 —— 本仓验证回路只打读口、从不看页面 HTML,无先例不新建基建)
   assert_eq "依赖拓扑页 HTTP 200" 200 "$(http_code "/dashboards/topology.html")"
   assert_eq "监控的监控页 HTTP 200" 200 "$(http_code "/dashboards/self-stat.html")"
+  assert_eq "RPC 调用排行页 HTTP 200" 200 "$(http_code "/dashboards/rpc-topn.html")"
 
   log ""
   log "---- 断言 F: 依赖面造数端点(组件识别 / 超时不挂住 / 白名单)----"
@@ -231,6 +232,10 @@ run_checks() {
     budget=5
     case "$api" in
       *kafka*) budget=10 ;;
+      # grpc 造数现在一次打三个 RPC(各有 2s deadline;服务端模拟延时合计上限 740ms),且这是本场景里
+      # 该端点的**首次调用**,含 gRPC 建链开销(stress-slow.ps1 旧注记"首次建链约 4s")——最坏逼近 5s,
+      # 故给它单独放宽到 8s,避免容器/负载下误红。
+      *grpc*) budget=8 ;;
     esac
     t0=$(date +%s)
     assert_eq "造数端点返回 200: $api" 200 "$(http_code "$api")"
@@ -303,6 +308,35 @@ run_checks() {
     '[.edges[]? | select(.componentName == "GRPC" and .spanLayer == "RPCFramework")] | length >= 1'
   assert_jq "造数端点产出的边有样本(不是空壳行)" "$depTopology" \
     '[.edges[]? | select(.endpoint | test("/api/deps-demo/")) | select(.sampleCount > 0)] | length >= 1'
+
+  # ---- 断言 2b:RPC 调用排行(出站按方法)—— 独立读口,与依赖边同源同生命周期 ----
+  # 口径:只算出站 spanLayer=RPCFramework 的 RPC span;进程累计、纯内存、重启即失。
+  # 操作名格式由 agent 决定(不在此钉死具体串),故只断言"有 GRPC 行 + 字段齐全 + 分位单调"。
+  local rpcTop
+  rpcTop=$(http_get_or_empty "/inner/sw/rpc-topn")
+  assert_jq "RPC 排行读口可用(进程累计起点可读)" "$rpcTop" '.enabled == true and (.lifetimeSinceMs > 0)'
+  assert_jq "RPC 排行至少有一条 gRPC 记录(组件名 GRPC / 层 RPCFramework)" "$rpcTop" \
+    '[.rows[]? | select(.componentName == "GRPC" and .spanLayer == "RPCFramework")] | length >= 1'
+  assert_jq "RPC 排行每行字段齐全(次数/错误率/分位/最大/首末见)" "$rpcTop" \
+    '[.rows[]? | select(.componentName == "GRPC")] | all(has("requestCount") and has("errorRate") and has("p50") and has("p95") and has("p99") and has("maxLatency") and has("firstSeenBucket") and has("lastSeenBucket"))'
+  assert_jq "RPC 排行有调用量(不是空壳行)" "$rpcTop" \
+    '[.rows[]? | select(.componentName == "GRPC") | select(.requestCount > 0)] | length >= 1'
+  assert_jq "RPC 排行分位单调(p50<=p95<=p99<=max;尾部样本不足或样本<20 时 p95/p99 置 -1)" "$rpcTop" \
+    '[.rows[]? | select(.componentName == "GRPC")] | all((.p95 == -1) or (.p50 <= .p95 and .p95 <= .p99 and .p99 <= .maxLatency))'
+  assert_jq "RPC 排行组件名已翻译(不是裸 id / 兜底名)" "$rpcTop" \
+    '[.rows[]? | select(.componentName == null or .componentName == "" or (.componentName | test("^component-[0-9]+$")))] | length == 0'
+
+  # 证据下钻:点行才拉。取第一条 GRPC 行,证据应为"最慢 1 + 随机 4"(1~5 条),首条标记 slowest。
+  local rpcCid rpcOp rpcEv
+  rpcCid=$(echo "$rpcTop" | jq -r '[.rows[]? | select(.componentName == "GRPC")][0].componentId')
+  rpcOp=$(echo "$rpcTop" | jq -r '[.rows[]? | select(.componentName == "GRPC")][0].operation')
+  rpcEv=$(http_get_or_empty "/inner/sw/rpc-topn/detail?componentId=${rpcCid}&operation=$(printf %s "$rpcOp" | jq -sRr @uri)")
+  assert_jq "RPC 证据下钻:返回 1~5 条样本且 count 与数组长度一致" "$rpcEv" \
+    '.enabled == true and (.count >= 1) and (.count <= 5) and ((.samples | length) == .count)'
+  assert_jq "RPC 证据下钻:样本带 traceId/耗时/时点/错误位(可下钻链路)" "$rpcEv" \
+    '.samples | all((has("traceId")) and (has("durationMs")) and (has("startTimeMs")) and (has("isError")) and (has("slowest")))'
+  assert_jq "RPC 证据下钻:第一条是最慢那条" "$rpcEv" '.samples[0].slowest == true'
+  log "RPC 排行(实测): $(echo "$rpcTop" | jq -c '[.rows[]? | select(.componentName == "GRPC") | {op: .operation, n: .requestCount, p50: .p50, p95: .p95, p99: .p99}]')"
 
   # 断言 3(可选):中间件在场时,Cache / Database 两层才**有边**(连接建立成功才有边),
   # 且应为绿边。中间件不在场时这两层没有边是**预期**,跳过时说清楚,不改断言。
