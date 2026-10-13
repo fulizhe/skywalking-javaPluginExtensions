@@ -18,7 +18,7 @@
     <p>logfile-reporter-plugin 六类数据流(链路段 / JVM / meter / 实例属性 / 告警 / profile)的本地内存报告可视化,
     外加一项 H2 影子对账调试面(H2 影子写入状态与新内存视图的一致性比对)。
     页面轮询与验证回路(<code>scripts/validate.ps1</code>)同一批 JSON 契约,静态资源随应用打包,无外部网络依赖。
-    09–11 为 <b>链路查询面</b>(双源对照 / 慢查询 / 可视化);页面底部另列 <b>原始 JSON 读口</b>。</p>
+    09–11 为 <b>链路查询面</b>(双源对照 / 慢查询 / 可视化);17 是另一插件 <b>dynamic-debug-runtime</b> 的<b>运行时调试开关验证</b>页;页面底部另列 <b>原始 JSON 读口</b>。</p>
 </header>
 <main class="nav-grid">
     <a class="nav-card" href="dashboard.html?p=statistic">
@@ -100,6 +100,11 @@
         <div class="nav-num">16</div>
         <div class="nav-title">RPC 调用排行</div>
         <div class="nav-desc">本 JVM 出站 RPC(spanLayer=RPCFramework)按方法排行:次数/错误率/P50·P95·P99/最大/首末见(默认 P95 降序);点行看证据样本(最慢 1 + 随机 4)并下钻链路</div>
+    </a>
+    <a class="nav-card" href="../SWDynamicDebugVerify.html">
+        <div class="nav-num">17</div>
+        <div class="nav-title">动态调试开关（验证）</div>
+        <div class="nav-desc">dynamic-debug-runtime:运行时打开/关闭各官方插件的详尽采集(SQL 参数 / HTTP 入出参 / HTTP 头 / Dubbo / Tomcat),造代表流量并看链路 tag 的增/消;含该开关改写的字段清单</div>
     </a>
 </main>
 <section class="nav-endpoints">

@@ -6,7 +6,7 @@
 
 面向活跃插件的演示应用与验证台,单目录三块结构:
 
-- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器、两个 override 插件的出口触发端点(Hutool HttpClient / Apache HttpClient),以及 dynamic-debug-runtime 插件的运行时调试开关端点(`/sw/debug/enable`、`/sw/debug/disable`);
+- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器、两个 override 插件的出口触发端点(Hutool HttpClient / Apache HttpClient),以及 dynamic-debug-runtime 插件的运行时调试开关端点(`/sw/debug/enable`、`/sw/debug/disable`,验证页 `static/SWDynamicDebugVerify.html`);
 - **验证回路**:每个已接入 verify 的插件各有一个容器化场景(`verify/scenarios/`,主路径),`scripts/` 下另有一套本地 `pwsh` 次选回路;
 - **能力导览**:本 README + 导览首页(`/`,即 `src/main/resources/static/index.html`),讲清插件是什么、logfile 命名来历、怎么跑。
 

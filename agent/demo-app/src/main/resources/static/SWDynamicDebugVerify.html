@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>动态调试开关验证 · dynamic-debug-runtime</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <style>
+        body { background: #f6f8fb; }
+        .page-wrap { padding: 1rem 1.25rem 2rem; }
+        .panel {
+            background: #fff;
+            border: 1px solid #dfe6ee;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 0.9rem;
+        }
+        .hint { color: #6c757d; font-size: 13px; }
+        #toggleResult, #triggerResult { max-height: 5em; overflow: auto; }
+        table.recent td, table.recent th { font-size: 12.5px; vertical-align: middle; }
+        code { background: #eef1f6; padding: 1px 4px; border-radius: 4px; }
+        #recentBody td { white-space: nowrap; }
+    </style>
+</head>
+<body>
+<div class="container-fluid page-wrap">
+    <header class="mb-3">
+        <h4 class="mb-1">动态调试开关验证 <small class="hint">dynamic-debug-runtime-9.x-plugin</small></h4>
+        <p class="hint mb-0">
+            运行时开关：一次改写多个官方插件的"详尽上下文采集"字段 —— <code>GET /sw/debug/enable</code> / <code>GET /sw/debug/disable</code>。
+            开关本身**不返回链路数据**，它改写的是官方插件 <code>PluginConfig</code> 的静态字段；效果体现在**链路的 span tag** 上。
+            需 demo-app 挂载 agent（含 logfile-reporter 才能读回链路）。
+        </p>
+    </header>
+
+    <!-- ① 开关 -->
+    <section class="panel">
+        <h6 class="mb-2">① 打开 / 关闭调试</h6>
+        <div class="d-flex align-items-center flex-wrap">
+            <button id="enableBtn" class="btn btn-sm btn-primary mr-2 mb-2">打开调试 <code>enableDebug</code></button>
+            <button id="disableBtn" class="btn btn-sm btn-outline-secondary mr-2 mb-2">关闭调试 <code>disableDebug</code></button>
+            <span id="toggleState" class="badge badge-secondary mb-2 mr-2">未操作</span>
+            <a class="btn btn-sm btn-link mb-2" href="dashboards/trace-view.html" target="_blank">链路可视化 ›</a>
+            <a class="btn btn-sm btn-link mb-2" href="SWLogfileReporterStatistic.html" target="_blank">链路统计页 ›</a>
+        </div>
+        <div id="toggleResult" class="mt-1 small text-muted"></div>
+        <p class="hint mb-0 mt-1">
+            开关动作会在 agent 的 <code>logs/skywalking-api.log</code> 留痕：<code>### [ &lt;类&gt;#&lt;字段&gt; ] -&gt; [ true|false ]</code>（缺失的插件会记 "not found, skipped"）。
+        </p>
+    </section>
+
+    <!-- ② 造数据 -->
+    <section class="panel">
+        <h6 class="mb-2">② 造一条代表流量（开关前后各点一次，对比 tag）</h6>
+        <div class="btn-toolbar">
+            <div class="btn-group mr-2 mb-2">
+                <button class="btn btn-sm btn-outline-info" data-trigger="./queryDbByMybatis" title="MyBatis 参数化查询 → SQL 参数">SQL · MyBatis</button>
+                <button class="btn btn-sm btn-outline-info" data-trigger="./queryDbByJdbc" title="JdbcTemplate 参数化查询 → SQL 参数">SQL · JdbcTemplate</button>
+            </div>
+            <div class="btn-group mr-2 mb-2">
+                <button class="btn btn-sm btn-outline-primary" data-trigger="./api/trace-alert-demo/slow?ms=50" title="入站请求带 query → SpringMVC/Tomcat 参数">HTTP 入参（入口）</button>
+                <button class="btn btn-sm btn-outline-primary" data-trigger="./api/trace-alert-demo/httpclient-post?value=SW-DEBUG-PROBE" title="出站 HttpClient 表单体">HTTP 出参 · HttpClient</button>
+            </div>
+            <div class="btn-group mb-2">
+                <button class="btn btn-sm btn-outline-primary" data-trigger="./api/hutool-demo/post-form?value=SW-DEBUG-PROBE&phase=debug" title="出站 Hutool 表单体">HTTP 出参 · Hutool</button>
+            </div>
+        </div>
+        <div id="triggerResult" class="mt-1 small text-muted"></div>
+    </section>
+
+    <!-- ③ 观察 -->
+    <section class="panel">
+        <div class="d-flex align-items-center flex-wrap mb-2">
+            <h6 class="mb-0 mr-3">③ 看链路 tag（最近 10 条）</h6>
+            <button id="refreshBtn" class="btn btn-sm btn-outline-secondary mb-2">刷新</button>
+            <span class="hint ml-3 mb-2">
+                打开调试后，链路里应<strong>多出</strong>：<code>db.sql.parameters</code>（SQL 绑定参数值）、
+                <code>http.params</code>（官方 HTTP 参数标签；本仓 override 插件另用 <code>http.request.params</code>）、
+                <code>http.headers</code>；关闭后消失。注意 <code>db.statement</code>（SQL 文本，含 <code>?</code> 占位符）
+                <strong>本就一直在</strong>，不受本开关控制。"链路"列点进 <code>trace-view</code> 看 span 明细。
+            </span>
+        </div>
+        <div class="table-responsive" style="max-height: 42vh; overflow: auto;">
+            <table class="table table-sm table-hover recent mb-0">
+                <thead class="thead-light">
+                <tr>
+                    <th>traceId</th>
+                    <th>endpoint</th>
+                    <th>耗时(ms)</th>
+                    <th>错误</th>
+                    <th>payload</th>
+                    <th>开始时间</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody id="recentBody">
+                <tr><td colspan="7" class="text-muted">加载中…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ④ 说明 -->
+    <section class="panel">
+        <h6 class="mb-2">这个开关改写了哪些采集字段</h6>
+        <table class="table table-sm mb-0">
+            <thead class="thead-light"><tr><th>采集项</th><th>对应配置键</th><th>被改写的字段</th></tr></thead>
+            <tbody>
+            <tr><td>SpringMVC 参数</td><td><code>plugin.springmvc.collect_http_params</code></td><td><code>SpringMVCPluginConfig$Plugin$SpringMVC#COLLECT_HTTP_PARAMS</code></td></tr>
+            <tr><td>SpringMVC HTTP 头</td><td><code>plugin.springmvc.include_http_headers</code></td><td><code>SpringMVCPluginConfig$Plugin$Http#INCLUDE_HTTP_HEADERS</code>（List；enable 恢复名单、disable 置空）</td></tr>
+            <tr><td>Tomcat 7/8 参数</td><td><code>plugin.tomcat.collect_http_params</code></td><td><code>tomcat78x.TomcatPluginConfig$Plugin$Tomcat#COLLECT_HTTP_PARAMS</code></td></tr>
+            <tr><td>Tomcat 10/11 参数</td><td><code>plugin.tomcat.collect_http_params</code></td><td><code>tomcat10x.TomcatPluginConfig$Plugin$Tomcat#COLLECT_HTTP_PARAMS</code></td></tr>
+            <tr><td>HttpClient 参数</td><td><code>plugin.httpclient.collect_http_params</code></td><td><code>HttpClientPluginConfig$Plugin$HttpClient#COLLECT_HTTP_PARAMS</code></td></tr>
+            <tr><td>Feign 请求体</td><td><code>plugin.feign.collect_request_body</code></td><td><code>FeignPluginConfig$Plugin$Feign#COLLECT_REQUEST_BODY</code></td></tr>
+            <tr><td>Dubbo 消费者入参</td><td><code>plugin.dubbo.collect_consumer_arguments</code></td><td><code>DubboPluginConfig$Plugin$Dubbo#COLLECT_CONSUMER_ARGUMENTS</code>（2.7.x / 3.x）</td></tr>
+            <tr><td>Dubbo 提供者入参</td><td><code>plugin.dubbo.collect_provider_arguments</code></td><td><code>DubboPluginConfig$Plugin$Dubbo#COLLECT_PROVIDER_ARGUMENTS</code>（2.7.x / 3.x）</td></tr>
+            <tr><td>JDBC SQL 参数</td><td><code>plugin.jdbc.trace_sql_parameters</code></td><td><code>JDBCPluginConfig$Plugin$JDBC#TRACE_SQL_PARAMETERS</code></td></tr>
+            </tbody>
+        </table>
+        <p class="hint mb-0 mt-2">
+            缺失的插件（例如本 demo 没装 feign/dubbo）会被安全跳过，只告警不中断 —— 见 agent 日志的 "not found, skipped"。
+            截断阈值（SQL 512 / HTTP 1024 等）本开关**不调整**，故超长参数仍会被截断。
+        </p>
+    </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script>
+    function pretty(obj) {
+        try { return JSON.stringify(obj, null, 2); } catch (e) { return String(obj); }
+    }
+
+    function escapeHtml(s) {
+        return $('<div/>').text(s === null || s === undefined ? '' : String(s)).html();
+    }
+
+    function setBadge(text, cls) {
+        $('#toggleState').removeClass('badge-secondary badge-success badge-light').addClass(cls).text(text);
+    }
+
+    function toggle(action) {
+        $('#toggleResult').text('请求中: /sw/debug/' + action);
+        $.get('./sw/debug/' + action)
+            .done(function (data, status, xhr) {
+                setBadge(action === 'enable' ? '已打开' : '已关闭',
+                    action === 'enable' ? 'badge-success' : 'badge-light');
+                $('#toggleResult').html('GET /sw/debug/' + action + ' → HTTP ' + (xhr.status || 200) +
+                    ' <code>' + escapeHtml(data) + '</code>');
+                setTimeout(loadRecent, 800);
+            })
+            .fail(function (xhr) {
+                setBadge('失败', 'badge-secondary');
+                $('#toggleResult').text('请求失败: ' + xhr.status + ' ' + xhr.statusText +
+                    '（应用是否带 agent 启动？）');
+            });
+    }
+
+    function triggerPath(path) {
+        $('#triggerResult').text('请求中: ' + path);
+        $.get(path)
+            .always(function (data, status, xhr) {
+                var code = xhr.status || (status === 'success' ? 200 : 0);
+                var body = (typeof data === 'string') ? data : pretty(data);
+                $('#triggerResult').html('<strong>' + escapeHtml(path) + '</strong> → HTTP ' + code +
+                    (body ? ' <code>' + escapeHtml(body.substring(0, 300)) + '</code>' : ''));
+                setTimeout(loadRecent, 1200);
+            });
+    }
+
+    function fmtTime(t) {
+        if (!t) { return '-'; }
+        var n = Number(t);
+        if (!isFinite(n) || n <= 0) { return String(t); }
+        return new Date(n).toLocaleString();
+    }
+
+    function loadRecent() {
+        $('#recentBody').html('<tr><td colspan="7" class="text-muted">加载中…</td></tr>');
+        $.getJSON('./inner/sw/trace-recent?limit=10')
+            .done(function (rows) {
+                if (!rows || !rows.length) {
+                    $('#recentBody').html('<tr><td colspan="7" class="text-muted">无数据（agent/logfile-reporter 未挂载，或还没有链路）</td></tr>');
+                    return;
+                }
+                var html = '';
+                rows.forEach(function (r) {
+                    var traceId = r.traceId || r.trace_id || '';
+                    var payload = r.hasPayload
+                        ? (r.payloadExpired ? '<span class="badge badge-warning">已过期</span>' : '<span class="badge badge-success">在</span>')
+                        : '<span class="badge badge-light">无</span>';
+                    var err = r.isError ? '<span class="badge badge-danger">错误</span>' : '<span class="badge badge-light">正常</span>';
+                    html += '<tr>'
+                        + '<td class="mono" title="' + escapeHtml(traceId) + '">' + escapeHtml(traceId.substring(0, 16)) + '…</td>'
+                        + '<td>' + escapeHtml(r.endpoint || '-') + '</td>'
+                        + '<td>' + escapeHtml(r.latency !== undefined ? r.latency : '-') + '</td>'
+                        + '<td>' + err + '</td>'
+                        + '<td>' + payload + '</td>'
+                        + '<td>' + escapeHtml(fmtTime(r.startTime)) + '</td>'
+                        + '<td>' + (traceId
+                            ? '<a class="btn btn-sm btn-outline-primary py-0" target="_blank" href="./dashboards/trace-view.html?traceid=' + encodeURIComponent(traceId) + '">链路</a>'
+                            : '') + '</td>'
+                        + '</tr>';
+                });
+                $('#recentBody').html(html);
+            })
+            .fail(function (xhr) {
+                $('#recentBody').html('<tr><td colspan="7" class="text-danger">读口失败: ' + xhr.status + ' ' + xhr.statusText + '</td></tr>');
+            });
+    }
+
+    $(function () {
+        $('#enableBtn').on('click', function () { toggle('enable'); });
+        $('#disableBtn').on('click', function () { toggle('disable'); });
+        $('#refreshBtn').on('click', loadRecent);
+        $('[data-trigger]').on('click', function () { triggerPath($(this).data('trigger')); });
+        loadRecent();
+    });
+</script>
+</body>
+</html>
