@@ -30,11 +30,21 @@ public class SWController {
 
 | 采集项 | 对应配置键 | 被改写的字段 |
 | --- | --- | --- |
-| Feign 请求体 | `plugin.feign.collect_request_body` | `FeignPluginConfig$Plugin$Feign#COLLECT_REQUEST_BODY` |
-| JDBC SQL 参数 | `plugin.jdbc.trace_sql_parameters` | `JDBCPluginConfig$Plugin$JDBC#TRACE_SQL_PARAMETERS` |
-| HttpClient 参数 | `plugin.httpclient.collect_http_params` | `HttpClientPluginConfig$Plugin$HttpClient#COLLECT_HTTP_PARAMS` |
 | SpringMVC 参数 | `plugin.springmvc.collect_http_params` | `SpringMVCPluginConfig$Plugin$SpringMVC#COLLECT_HTTP_PARAMS` |
-| Tomcat 参数 | `plugin.tomcat.collect_http_params` | `TomcatPluginConfig$Plugin$Tomcat#COLLECT_HTTP_PARAMS` |
+| SpringMVC HTTP 头 | `plugin.springmvc.include_http_headers` | `SpringMVCPluginConfig$Plugin$Http#INCLUDE_HTTP_HEADERS`（**List**，见下） |
+| Tomcat 7/8 参数 | `plugin.tomcat.collect_http_params` | `tomcat78x.TomcatPluginConfig$Plugin$Tomcat#COLLECT_HTTP_PARAMS` |
+| Tomcat 10/11 参数 | `plugin.tomcat.collect_http_params` | `tomcat10x.TomcatPluginConfig$Plugin$Tomcat#COLLECT_HTTP_PARAMS` |
+| HttpClient 参数 | `plugin.httpclient.collect_http_params` | `HttpClientPluginConfig$Plugin$HttpClient#COLLECT_HTTP_PARAMS` |
+| Feign 请求体 | `plugin.feign.collect_request_body` | `FeignPluginConfig$Plugin$Feign#COLLECT_REQUEST_BODY` |
+| Dubbo 消费者入参 | `plugin.dubbo.collect_consumer_arguments` | `DubboPluginConfig$Plugin$Dubbo#COLLECT_CONSUMER_ARGUMENTS`（2.7.x 与 3.x 两个类） |
+| Dubbo 提供者入参 | `plugin.dubbo.collect_provider_arguments` | `DubboPluginConfig$Plugin$Dubbo#COLLECT_PROVIDER_ARGUMENTS`（2.7.x 与 3.x 两个类） |
+| JDBC SQL 参数 | `plugin.jdbc.trace_sql_parameters` | `JDBCPluginConfig$Plugin$JDBC#TRACE_SQL_PARAMETERS` |
+
+> **HTTP 头这一项特殊**：`INCLUDE_HTTP_HEADERS` 不是布尔，而是"要采集的 header 名清单"。
+> 名单来源**沿用 agent 自身配置** `plugin.springmvc.include_http_headers`（本插件不再另立一份）：
+> `enableDebug()` 恢复该名单、`disableDebug()` 置空。名单在开关**首次触碰时抓取一次**。
+> 另外：SpringMVC 的 header 采集**不受** `COLLECT_HTTP_PARAMS` 门控（见 `AbstractMethodInterceptor`），
+> 故必须单独开关，否则配了名单就会一直采集。
 
 ## 构建与验证
 

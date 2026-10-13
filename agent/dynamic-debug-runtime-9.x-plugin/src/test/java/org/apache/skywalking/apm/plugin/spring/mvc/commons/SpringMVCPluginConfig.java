@@ -5,10 +5,17 @@
  */
 package org.apache.skywalking.apm.plugin.spring.mvc.commons;
 
+import java.util.List;
+
 public class SpringMVCPluginConfig {
     public static class Plugin {
         public static class SpringMVC {
             public static boolean COLLECT_HTTP_PARAMS = false;
+        }
+
+        public static class Http {
+            /** agent 配置 plugin.springmvc.include_http_headers 解析出的 header 名清单。 */
+            public static List<String> INCLUDE_HTTP_HEADERS;
         }
     }
 }
