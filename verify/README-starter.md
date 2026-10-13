@@ -249,7 +249,7 @@ docker compose --profile deps ps              # 看三层中间件状态
 
 ```bash
 # 在仓库根目录
-bash verify/run.sh --list                          # 先看有哪些场景(三个活跃插件各一个)
+bash verify/run.sh --list                          # 先看有哪些场景(每个已接入 verify 的插件各一个)
 bash verify/run.sh                                  # 一条命令跑全部场景
 bash verify/run.sh --scenario logfile-reporter    # 主场景
 bash verify/run.sh --matrix                        # 附带跑各场景的依赖版本矩阵

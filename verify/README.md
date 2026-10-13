@@ -107,7 +107,7 @@ verify/scenarios/<plugin>/
 | `override-httpclient` | 采集开关读口 + enable/disable;httpclient POST 表单体采为 `http.request.params` tag 端到端;httpclient `4.5.13`/`4.5.14` 版本矩阵 |
 | `override-hutool` | hutool 四类采集面(query / 表单体 / `body(...)` 原始体 / multipart 文件元数据)+ `http.response.body` + 目标 500 置 `isError` + 超阈值裁剪 + 运行时开关(关断后 span 在、参数与响应体 tag 消失);hutool `5.4.1`/`5.8.47` 版本矩阵 |
 
-> 三个活跃插件(`docs/repo/module-status.md`)各有一个场景:`bash verify/run.sh` 一条命令全跑。
+> 每个已接入 verify 的插件各有一个场景(`bash verify/run.sh` 一条命令全跑);场景清单见 `verify/scenarios/`。
 > override 插件自身不提供数据读口 —— span/tag 一律由 `logfile-reporter` 场景同款的
 > `logfile-reporter-plugin` 捕获后经 `/statistic` 读取,所以 override 场景都一并装载它。
 

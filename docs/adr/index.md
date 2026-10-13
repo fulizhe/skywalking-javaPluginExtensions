@@ -1,6 +1,6 @@
 # 架构决策记录（Architecture Decision Records）
 
-本目录存放 active 模块（`agent/logfile-reporter-plugin`、`agent/override-httpclient-4.x-plugin`、`agent/override-hutool-http-5.x-plugin`）的 ADR。归档模块不在范围。
+本目录存放活跃模块（`docs/repo/module-status.md`）的 ADR。归档/冻结模块不在范围。
 
 命名约定：`adr-NN-short-title.md`
 
