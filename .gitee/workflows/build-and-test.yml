@@ -8,6 +8,7 @@ on:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
 
 jobs:
@@ -34,4 +36,4 @@ jobs:
 
       - name: Build and test active plugins (release 8 bytecode)
         working-directory: ./agent
-        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin -am
+        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin,dynamic-debug-runtime-9.x-plugin -am
