@@ -307,4 +307,3 @@ YAML 解析器、`bash -n`、跑一遍脚本，全都放行。所以新 workflow
 - **`jobs.*.name` 的插值行为只在一处实测**：actionlint 放行、GitHub 原样显示。其它 job 名未逐一确认，但按"静态文本总是安全"处理。
 - **`--clobber` 不删旧资产**：同一个 tag 重跑且这轮少产出一个资产时，旧资产会留在 Release 上（实测留下一个 `original-*.jar`）。是否在 `attach` 里加"清理不在本轮清单里的资产"未定。
 - **Gitee → GitHub 镜像延迟**：分支 0~60s、tag 一次约 4 分钟，各 1 个样本。排查"没触发"时先排掉它（§四 同类误判）。镜像**会**传播 tag 删除。
-- **`1.0.0` 冻结线上的 `build-and-push-jar.yml` 是死代码**：分支名写成 `main`（本仓是 `master`）、没有 `tags` 触发、`-DskipTests`、用 JDK 8（与 ADR-01 的 JDK 17 工具链冲突，`<release>8` 需要 javac 9+）、`[ ! -f ".../target/*.jar" ]` 里glob 没展开所以断言恒假、`./mvnw` 大概率不存在。名字里的"Push to Artifact Repo"也没有对应步骤。待定：删掉，还是改成能用的。
