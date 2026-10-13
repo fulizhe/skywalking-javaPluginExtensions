@@ -6,7 +6,7 @@ name: Package plugins
 #
 # 触发面为什么这么选:
 #   tag 才是本仓的发布点 —— 1.0.0 / 1.0.0-maintN 都是 annotated tag 且约定永不移动
-#   (docs/repo/version-lines.md)。"推了 master"无法区分一次提交和一次发版,而往
+#   (docs/repo/version-lines.md)。"推了 release/1.0.0"无法区分一次提交和一次发版,而往
 #   Release 挂资产不可撤销,所以发布只挂在人类显式打 tag 这件事上。
 #
 #   发布面同时挂 push:tags 与 release:published,因为这两个事件在 GitHub 上不对称:
@@ -21,7 +21,7 @@ name: Package plugins
 on:
   push:
     branches:
-      - master
+      - release/1.0.0
     paths:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
@@ -34,7 +34,7 @@ on:
       - '*'
   pull_request:
     branches:
-      - master
+      - release/1.0.0
     paths:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
@@ -125,7 +125,7 @@ jobs:
     # 只有 run-name 会插值。tag 显示在 run 名与 Validate tag 步骤日志里就够定位了。
     name: attach jars to release
     needs: build
-    # 只在发布场景跑。PR / push to master 时,build 产出的 artifact 就是全部产物。
+    # 只在发布场景跑。PR / push 本线时,build 产出的 artifact 就是全部产物。
     if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-24.04
     permissions:
