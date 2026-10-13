@@ -10,6 +10,8 @@ on:
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
+      # 带自身路径:否则改这个 workflow 永远不触发它自己(同 .github 那份)
+      - '.gitee/workflows/build-and-test.yml'
   pull_request:
     branches:
       - master
@@ -19,6 +21,7 @@ on:
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
+      - '.gitee/workflows/build-and-test.yml'
 
 jobs:
   build-and-test:
