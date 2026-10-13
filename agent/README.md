@@ -7,7 +7,7 @@ Skywalking Java Agent插件
 1. [consul](./consul-1.x-plugin)
 2. [override-hutool-http](./override-hutool-http-5.x-plugin)
 3. [override-httpclient](./override-httpclient-4.x-plugin)
-4. [dynamic-debug-runtime](./dynamic-debug-runtime-8.x-plugin)
+4. [dynamic-debug-runtime](./dynamic-debug-runtime-9.x-plugin)
 5. [dynamic-enable-runtime](./dynamic-enable-runtime-8.x-plugin)
 6. [sqlite](./sqlite-3.x-plugin)
 7. [logfile-reporter](./logfile-reporter-plugin)
