@@ -12,6 +12,7 @@ on:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
       # 带自身路径:否则改这个 workflow 永远不触发它自己(与 master 的同名 workflow 同理)
       - '.github/workflows/build-and-test.yml'
@@ -22,6 +23,7 @@ on:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
       - '.github/workflows/build-and-test.yml'
 
@@ -42,8 +44,9 @@ jobs:
           # 每次 runner 都是全新的,缓存整份 m2 复用
           cache: maven
 
-      # 说明:本线当前为三个活跃模块。若日后 dynamic-debug-runtime-9.x-plugin 回移本线,
-      # 需同步把 'agent/dynamic-debug-runtime-9.x-plugin/**' 加进上面的 paths、并把模块名加进本行 -pl 列表。
+      # 说明:本线此前为三个活跃模块。dynamic-debug-runtime-9.x-plugin 的修复（拆 enable/disable、容错、
+      # NPE、去死代码）已 cherry-pick 回本线，故 paths 与 -pl 列表同步把它算进来 —— 现为四个，
+      # 与 master 的列表口径一致。回移的是本仓自己的插件模块，不涉及 demo-app。
       - name: Build and test active plugins (release 8 bytecode)
         working-directory: ./agent
-        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin -am
+        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin,dynamic-debug-runtime-9.x-plugin -am
