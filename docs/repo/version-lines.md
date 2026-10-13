@@ -11,9 +11,10 @@
     冻结线已于 `09d24d3` 补上（`1.0.0-maint2` 打 tag 时还没有，故那一发只能补跑）。
   - **已打过 tag 的发布点补不了树**（tag 不移）：改用 `workflow_dispatch` 补发，`分支=master`、
     `tag=<目标 tag>`；分支必须选默认分支，因为 dispatch 只认默认分支上那份 workflow。
-  - **资产**：活跃插件的 jar + `SHA256SUMS.txt`。数量**随线而异**：master（2.0.0 线）四个、
-    冻结线（`release/1.0.0`）三个 —— `dynamic-debug-runtime-9.x-plugin` 属新增模块，未回移冻结线
-    （见下面「改动范围」）。`collect` 排除 `original-*.jar` ——
+  - **资产**：活跃插件的 jar + `SHA256SUMS.txt`，两条线同为四个（`logfile-reporter-plugin`、
+    `dynamic-debug-runtime-9.x-plugin`、`override-httpclient-4.x-plugin`、`override-hutool-http-5.x-plugin`）。
+    冻结线此前只有三个（该模块未回移）；本轮把它的修复 cherry-pick 回移，`paths` / `-pl` / `MODULES`
+    一并补齐，随 `1.0.0-maint3` 一起发（见下面「改动范围」）。`collect` 排除 `original-*.jar` ——
     shade（`shadedArtifactAttached=false`）会把打包前那份改名留下，它没做 H2 重定位，发出去装不上。
   - **jar 名不是版本信号，tag 才是**：同一个模块两条线上的 jar 名不同（`logfile-reporter-plugin`
     在 1.0.0 线是 `-1.0.0.jar`，master 上是 `-2.0.0.jar`）。两个 override 插件的文件名走 `finalName`
