@@ -1,0 +1,49 @@
+name: Build and Test Active Plugins (JDK 17)
+
+# 冻结线（release/1.0.0）的测试门禁 —— 补齐本线此前缺失的 push / PR 测试。
+# 与 master 的 build-and-test.yml 同形，唯一的实质差别是分支过滤器指向本线：
+# workflow 从**被推送的那个 ref 的树里**读，若沿用 master 那份的 branches:[master]，
+# 在本线推送时不会触发（等于没有门禁）。见 docs/notes/2026-10-01-github-actions-ci-pitfalls.md §四/§五。
+on:
+  push:
+    branches:
+      - release/1.0.0
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+      # 带自身路径:否则改这个 workflow 永远不触发它自己(与 master 的同名 workflow 同理)
+      - '.github/workflows/build-and-test.yml'
+  pull_request:
+    branches:
+      - release/1.0.0
+    paths:
+      - 'agent/logfile-reporter-plugin/**'
+      - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-hutool-http-5.x-plugin/**'
+      - 'agent/pom.xml'
+      - '.github/workflows/build-and-test.yml'
+
+jobs:
+  build-and-test:
+    # 钉住 24.04:理由同 master 的同名 workflow(ubuntu-latest 2026-10-19 迁 Ubuntu 26)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          # 每次 runner 都是全新的,缓存整份 m2 复用
+          cache: maven
+
+      # 说明:本线当前为三个活跃模块。若日后 dynamic-debug-runtime-9.x-plugin 回移本线,
+      # 需同步把 'agent/dynamic-debug-runtime-9.x-plugin/**' 加进上面的 paths、并把模块名加进本行 -pl 列表。
+      - name: Build and test active plugins (release 8 bytecode)
+        working-directory: ./agent
+        run: mvn -B test -pl logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin -am
