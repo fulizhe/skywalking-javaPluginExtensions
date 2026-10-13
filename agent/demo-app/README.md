@@ -4,10 +4,10 @@
 > 讲「本地跑起来」:一条命令让它留在运行状态、用浏览器看哪些页面、怎么造数据和亲手造一个告警、
 > 出问题按症状怎么查。本 README 是完整参考(全部读口 / 参数 / 压测 / 术语)。
 
-面向三个活跃插件的演示应用与验证台,单目录三块结构:
+面向活跃插件的演示应用与验证台,单目录三块结构:
 
-- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器,以及两个 override 插件的出口触发端点(Hutool HttpClient / Apache HttpClient);
-- **验证回路**:三个活跃插件各有一个容器化场景(`verify/scenarios/`,主路径),`scripts/` 下另有一套本地 `pwsh` 次选回路;
+- **演示应用**:Spring Boot 应用,把插件的本地内存报告可视化——能力导览首页、六个数据流仪表盘、告警验证端点、webhook 接收器、两个 override 插件的出口触发端点(Hutool HttpClient / Apache HttpClient),以及 dynamic-debug-runtime 插件的运行时调试开关端点(`/sw/debug/enable`、`/sw/debug/disable`);
+- **验证回路**:每个已接入 verify 的插件各有一个容器化场景(`verify/scenarios/`,主路径),`scripts/` 下另有一套本地 `pwsh` 次选回路;
 - **能力导览**:本 README + 导览首页(`/`,即 `src/main/resources/static/index.html`),讲清插件是什么、logfile 命名来历、怎么跑。
 
 > 术语(本地内存报告、数据流、统计快照、Trace 告警、运行时开关等)以仓库根 `CONTEXT.md` 为准。
