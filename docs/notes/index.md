@@ -15,3 +15,4 @@
 - **2026-10-01：依赖面造数实跑探针（连接失败不产生边 / 组件名按实测值 / 插件 support 范围 / Kafka 三个坑）** —— 何时读：改 `DepsDemoController`、给依赖拓扑加组件、或给 `checks.sh` 写依赖面断言前。→ `2026-10-01-deps-demo-topology-probe.md`
 - **2026-10-01：GitHub Actions 实跑经验（缓存 / matrix / 镜像分发 / paths 白名单 / schema 校验 / 排错顺序）** —— 何时读：改或抄 `.github/workflows/*.yml`、CI 跑得慢或莫名变红、run 出现 0 job / 资产挂错时。→ `2026-10-01-github-actions-ci-pitfalls.md`
 - **2026-10-02：本机 TCP 端口池耗尽的诊断（真因定位到 Tomcat 源码 `statusDropsConnection` 的 8 个状态码）+ 压测四档分工 + 告警连接数封顶** —— 何时读：页面白屏 / 控制台 `ERR_INVALID_ARGUMENT` / 要回答"这应用能跑多快 RPS" / 要动 `stress.ps1` 档位或告警 webhook 投递时。→ `2026-10-02-tcp-port-pool-exhaustion-and-a-measurement-trap.md`
+- **2026-10-16：Zuul 网关的 CLOSE_WAIT / FIN_WAIT_2 判读（入站/出站分类 · 与端口池那篇互补）** —— 何时读：网关大量 CLOSE_WAIT/FIN_WAIT_2、要判入站还是出站、或有人拿"端口池耗尽"结论来套这两个状态时。→ `2026-10-16-zuul-close-wait-fin-wait-2.md`

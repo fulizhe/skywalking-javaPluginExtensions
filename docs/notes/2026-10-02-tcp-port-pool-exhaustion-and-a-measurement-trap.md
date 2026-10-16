@@ -2,6 +2,9 @@
 
 - **何时读**：仪表盘页面白屏、控制台一片 `net::ERR_INVALID_ARGUMENT` / `Xxx is not defined`、
   要回答"这应用到底能跑多快 RPS"、或压测时怀疑"某个组件在疯狂建连接"时。
+- **何时读（互补篇）**：若看到的是大量 **`CLOSE_WAIT` / `FIN_WAIT_2`**（而非 `TIME_WAIT`），
+  那是**另一类病**（对端先关 / 本进程没关，不吃端口池），见
+  [`2026-10-16-zuul-close-wait-fin-wait-2.md`](./2026-10-16-zuul-close-wait-fin-wait-2.md)。
 - **性质**：**经验沉淀**。数字来自 2026-10-02 本机（Windows）实跑，机制已定位到 **Tomcat 源码行号**。
   走过的弯路集中在**附录 A**，正文不掺。
 - **读者假设**：知道 TIME_WAIT 和 keep-alive 大概是什么。
