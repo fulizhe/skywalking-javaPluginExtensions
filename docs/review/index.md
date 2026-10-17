@@ -4,5 +4,5 @@
 
 本目录内容：
 
-- **评审快照** —— 何时读：阅读某个时间点的架构评审结论时。→ `architecture-review-20260808-220621.html`、`architecture-review-20260816-123118.html`
+- **评审快照** —— 何时读：阅读某个时间点的架构评审结论时。→ `architecture-review-20260808-220621.html`、`architecture-review-20260816-123118.html`、`architecture-review-20261017-204344.html`（2026-10-17，只收前两次评审之后新出现的摩擦：H2 存储三套 repository 单锁、`TraceSegmentStorage` 空 seam、三聚合器重复的 reservoir/分位、内存窗口去重三写、写侧 god-object 的读门面）
 - **评审消费工作流** —— 何时读：从评审快照出发跑流水线（grill → spec → tickets → 迭代 → ADR）时。→ `consume-workflow.md`

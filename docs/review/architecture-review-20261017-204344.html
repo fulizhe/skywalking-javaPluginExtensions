@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>架构评审 — skywalking-javaPluginExtensions</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .band { border-left-width: 4px; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <!-- ───────── header ───────── -->
+      <header class="border-b border-slate-300 pb-6">
+        <h1 class="text-3xl font-serif tracking-tight">架构评审 · skywalking-javaPluginExtensions</h1>
+        <p class="text-sm text-slate-500 mt-2">2026-10-17 · 范围：<span class="font-mono">agent/logfile-reporter-plugin</span>（active）；前两次评审的候选不重复列入</p>
+        <div class="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs uppercase tracking-wider text-slate-500">
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-3 border-2 border-slate-500 bg-white"></span>module</span>
+          <span class="flex items-center gap-2"><svg width="34" height="6"><line x1="0" y1="3" x2="34" y2="3" stroke="#64748b" stroke-width="2" class="seam"/></svg>seam</span>
+          <span class="flex items-center gap-2"><svg width="34" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#dc2626" stroke-width="2"/><path d="M26 0 L34 4 L26 8 Z" fill="#dc2626"/></svg>leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-3 deep"></span>deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+
+        <!-- ───────── Candidate 1 ───────── -->
+        <article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-serif font-semibold">1 · 把 metrics / audit repository 从 <span class="font-mono text-lg">H2TraceSegmentStorage</span> 的单锁里拆出来</h2>
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs font-mono">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-500">storage/H2TraceSegmentStorage.java · storage/TraceSegmentStorage.java · LogFileTraceSegmentServiceClient.java · metrics/MetricsRow.java</p>
+
+          <!-- before / after -->
+          <div class="grid grid-cols-2 gap-4">
+            <!-- before -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before · 一把锁，三个表</p>
+              <div class="relative border-2 border-slate-500 rounded bg-stone-50 h-[290px] p-2">
+                <p class="text-[10px] uppercase tracking-wider text-slate-500 mb-1">H2TraceSegmentStorage（1258 行）</p>
+                <div class="absolute right-1 top-1 bottom-1 w-2 bg-red-500/80 rounded-sm"></div>
+                <div class="space-y-2 pr-5">
+                  <div class="band border-slate-400 bg-white p-2">
+                    <p class="text-[11px] font-mono text-slate-700">trace_segment</p>
+                    <p class="text-[10px] text-slate-400">storeLog:503 · snapshot / queryTrace / recentTraces</p>
+                  </div>
+                  <div class="band border-amber-400 bg-amber-50 p-2">
+                    <p class="text-[11px] font-mono text-slate-700">trace_metrics_minute · hour</p>
+                    <p class="text-[10px] text-slate-500">storeMetricRows:942 · queryMetricRows:997 · aggregateMetricRows:1035 · distinctMetricBuckets · activeBucketCounts</p>
+                  </div>
+                  <div class="band border-slate-300 bg-white p-2">
+                    <p class="text-[11px] font-mono text-slate-700">trace_parity_audit</p>
+                    <p class="text-[10px] text-slate-400">insertAuditRows · recentAuditRows</p>
+                  </div>
+                  <div class="text-[10px] text-slate-500 pt-1">＋ startConsole（H2 Web Console，HTTP 服务也在这类里）</div>
+                  <div class="border border-red-400 bg-red-50 rounded px-2 py-1 text-[10px] text-red-700 font-mono">↑↓ synchronized(this) ×16 横跨上面三张表</div>
+                  <div class="flex flex-wrap gap-2 text-[10px] pt-1">
+                    <span class="bg-slate-800 text-white px-2 py-0.5 rounded">H2Shadow-Writer 写线程 → trace_segment</span>
+                    <span class="bg-amber-600 text-white px-2 py-0.5 rounded">servlet 读口 → trace_metrics</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- after -->
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After · 各自一把锁</p>
+              <div class="h-[260px] space-y-3 pt-1">
+                <div class="relative border-2 border-slate-700 deep text-white rounded p-2 h-[70px]">
+                  <p class="text-[11px] font-mono">SegmentRepository</p>
+                  <p class="text-[10px] text-slate-300">water-level GC · payload 桥 · 写路径</p>
+                  <svg class="absolute -right-3 -bottom-3" width="40" height="20"><rect x="0" y="0" width="28" height="12" fill="#0f172a"/><text x="2" y="10" font-size="8" fill="#fff" font-family="monospace">lock A</text></svg>
+                </div>
+                <div class="border-2 border-amber-500 bg-amber-50 rounded p-2 h-[70px]">
+                  <p class="text-[11px] font-mono text-slate-800">MetricsRepository</p>
+                  <p class="text-[10px] text-slate-500">分钟/小时表 · 6 个 SQL 读口 · 自己的游标与锁 <span class="font-mono">lock B</span></p>
+                </div>
+                <div class="border-2 border-slate-400 bg-white rounded p-2 h-[60px]">
+                  <p class="text-[11px] font-mono text-slate-800">AuditRepository</p>
+                  <p class="text-[10px] text-slate-500">对账行读写 · 行上限 <span class="font-mono">lock C</span></p>
+                </div>
+                <p class="text-[10px] text-emerald-700">读口不再与 segment 写线程争同一把锁</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+              <p>三张互不相关的表挤在同一个 <span class="font-mono">synchronized(this)</span>（16 处）上——servlet 线程的指标查询与 <span class="font-mono">H2Shadow-Writer</span> 的 segment 写共用一把锁，一次慢查询就让写入停顿。</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+              <p>metrics repository（分钟+小时表）与 audit repository 各自成为 module，拥有自己的 SQL、ResultSet 与锁；storage 只保留 segment 写路径与 payload 桥。</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Wins</p>
+            <ul class="list-disc list-inside text-sm space-y-0.5">
+              <li>locality：读口不再阻塞写线程</li>
+              <li>interface 收窄到各 repository 那一组 SQL</li>
+              <li>metrics repository 可脱离写路径单测</li>
+              <li>H2 Web Console 从存储 module 里挪走</li>
+            </ul>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-800">
+            与 ADR-04 / ADR-05（H2 mem 为终态）不冲突：只动锁粒度与 module 边界，不改存储形态。
+          </div>
+        </article>
+
+        <!-- ───────── Candidate 2 ───────── -->
+        <article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-serif font-semibold">2 · <span class="font-mono text-lg">TraceSegmentStorage</span> 是个空 seam：接口 3 个方法，调用方绕开它调 12 个</h2>
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs font-mono">ports &amp; adapters</span>
+          </div>
+          <p class="font-mono text-sm text-slate-500">storage/TraceSegmentStorage.java · storage/H2TraceSegmentStorage.java · LogFileTraceSegmentServiceClient.java</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before · 唯一实现落在 seam 外面</p>
+              <pre class="mermaid">
+flowchart LR
+  C[LogFileTraceSegmentServiceClient] -->|"accept / snapshot / size"| I[TraceSegmentStorage]
+  C -. "12 个方法直连" .-> H[H2TraceSegmentStorage]
+  I --> H
+  classDef mirage stroke:#dc2626,stroke-width:2px;
+  class I mirage
+  linkStyle 1 stroke:#dc2626,stroke-width:2px;
+              </pre>
+              <p class="text-[11px] text-slate-500 mt-2">直连面：storeMetricRows · queryMetricRows · aggregateMetricRows · distinctMetricBuckets · activeBucketCounts · deleteMetricsBefore · insertAuditRows · selfStatSnapshot · awaitIdle · getWriteQueueDropped · auditRowCount · recentAuditRows</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After · seam 变真（或删掉）</p>
+              <pre class="mermaid">
+flowchart LR
+  C[LogFileTraceSegmentServiceClient] -->|"一个深 interface"| S[TraceSegmentStorage]
+  S --> H[H2TraceSegmentStorage]
+  C -. "注入，而非 new" .-> S
+  classDef deep fill:#0f172a,color:#fff,stroke:#0f172a;
+  class S deep
+              </pre>
+              <p class="text-[11px] text-slate-500 mt-2">或：删接口，让 storage 作为具体 module 自报接口——deletion test 说它现在只多一个名字，不带 leverage。</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+              <p>接口声明 3 个方法，背后实现 1258 行；唯一消费方却持有具体类（<span class="font-mono">:92</span>），从 <span class="font-mono">new H2TraceSegmentStorage(...)</span>（<span class="font-mono">:1102</span>）一路直连到 12+ 个非接口方法。跨过 seam 的调用比走 seam 的多得多。</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+              <p>二选一：把读口与指标路径真正需要的那组契约并进 interface，并由外部注入实现（seam 变真）；或删掉 interface，承认 storage 就是一个具体 module。</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Wins</p>
+            <ul class="list-disc list-inside text-sm space-y-0.5">
+              <li>deletion test：留着的它只是一个名字</li>
+              <li>widen 后 rename 变编译错误，不再静默</li>
+              <li>测试可对一个 interface 注入假 H2</li>
+              <li>locality：storage 的公开面就写在它自己的头上</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ───────── Candidate 3 ───────── -->
+        <article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-serif font-semibold">3 · 三份拷贝的 reservoir + 分位：收进一个 deep module</h2>
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs font-mono">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-500">metrics/TraceMetricsAggregator.java · metrics/EdgeMetricsAggregator.java · metrics/RpcMetricsAggregator.java</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before · 同一份算法三份拷贝</p>
+              <div class="h-[230px]">
+                <div class="grid grid-cols-3 gap-2">
+                  <div class="border border-slate-300 bg-white p-2 text-[10px] leading-relaxed">
+                    <p class="font-mono text-slate-700 mb-1">TraceMetrics</p>
+                    nearestRank()<br/>Algorithm-R 池<br/>percentiles()<br/>MIN_SAMPLES_FOR_TAILS=20<br/>MINUTE_MS · LATE_WINDOW=3
+                  </div>
+                  <div class="border border-slate-300 bg-white p-2 text-[10px] leading-relaxed">
+                    <p class="font-mono text-slate-700 mb-1">EdgeMetrics</p>
+                    nearestRank()<br/>Algorithm-R 池<br/>percentiles()<br/>MIN_SAMPLES_FOR_TAILS=20<br/>MINUTE_MS · LATE_WINDOW=3
+                  </div>
+                  <div class="border border-slate-300 bg-white p-2 text-[10px] leading-relaxed">
+                    <p class="font-mono text-slate-700 mb-1">RpcMetrics</p>
+                    nearestRank()<br/>Algorithm-R 池<br/>percentiles()<br/>MIN_SAMPLES_FOR_TAILS=20<br/>bump() / getOrZero() / snapshotCounters()
+                  </div>
+                </div>
+                <div class="mt-2 border-l-4 border-red-500 bg-red-50 px-2 py-1 text-[10px] text-red-700">
+                  逐字重复；注释自称"与端点级/边级同口径"——口径靠人同步
+                </div>
+                <pre class="mt-2 bg-slate-900 text-slate-100 text-[10px] p-2 rounded overflow-hidden">rank = ceil(p/100 * n); rank = clamp(1..n); return sorted[rank-1];
+// TraceMetricsAggregator:373 ≡ EdgeMetricsAggregator:390 ≡ RpcMetricsAggregator:271</pre>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After · 一份算法，三个 key 维度</p>
+              <div class="h-[230px] flex flex-col justify-between">
+                <div class="grid grid-cols-3 gap-2">
+                  <div class="border border-slate-300 bg-white p-2 text-[10px]"><p class="font-mono text-slate-700">endpoint</p><p class="text-slate-400">key 维度</p></div>
+                  <div class="border border-slate-300 bg-white p-2 text-[10px]"><p class="font-mono text-slate-700">endpoint × component</p><p class="text-slate-400">key 维度</p></div>
+                  <div class="border border-slate-300 bg-white p-2 text-[10px]"><p class="font-mono text-slate-700">component × operation</p><p class="text-slate-400">key 维度</p></div>
+                </div>
+                <svg viewBox="0 0 300 60" class="w-full h-[60px]">
+                  <line x1="50" y1="0" x2="150" y2="26" stroke="#94a3b8" stroke-width="1.5"/>
+                  <line x1="150" y1="0" x2="150" y2="26" stroke="#94a3b8" stroke-width="1.5"/>
+                  <line x1="250" y1="0" x2="150" y2="26" stroke="#94a3b8" stroke-width="1.5"/>
+                </svg>
+                <div class="deep text-white rounded p-3">
+                  <p class="font-mono text-xs">Reservoir + Percentiles（一份）</p>
+                  <p class="text-[10px] text-slate-300">add(duration) → p50 / p90 / p95 / p99；水位门槛、池大小、迟窗口参数显式传入</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+              <p><span class="font-mono">nearestRank</span>、Algorithm-R reservoir、<span class="font-mono">percentiles()</span> + <span class="font-mono">MIN_SAMPLES_FOR_TAILS</span>、<span class="font-mono">bump/getOrZero/snapshotCounters</span>、桶脚手架各自复制——"p95 是什么"有三个定义，必须手同步。</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+              <p>一个 deep module 拥有样本池、水位门槛与分位算法（<span class="font-mono">add(duration)</span> → 四个分位）；三个 aggregator 只保留自己的 key 维度、rollup 与溢出。</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Wins</p>
+            <ul class="list-disc list-inside text-sm space-y-0.5">
+              <li>locality：分位口径一处，bug 收敛</li>
+              <li>leverage：一份算法，三个调用方</li>
+              <li>删约 300 行重复（含两份 bump/getOrZero）</li>
+              <li>池大小/门槛差异成为显式参数，不再是复制</li>
+            </ul>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded px-3 py-2 text-xs text-slate-600">
+            注：<span class="font-mono">MetricsRow / EdgeRow / RpcMethodRow / EdgeLifetimeRow</span> 四份 DTO 的"刻意不共用"是另一件事（键维度不同、ClassLoader 原生 DTO），本卡只收算术与样本池。
+          </div>
+        </article>
+
+        <!-- ───────── Candidate 4 ───────── -->
+        <article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-serif font-semibold">4 · "内存窗口还欠哪些桶" 写三遍：一个 module 定口径</h2>
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs font-mono">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-500">LogFileTraceSegmentServiceClient.java（:752 / :794 / :1062）· metrics/TraceMetricsAggregator.java · storage/H2TraceSegmentStorage.java</p>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before · 三处各算一遍，两种去重键</p>
+              <div class="h-[250px] space-y-2">
+                <div class="border border-slate-300 bg-white p-2">
+                  <p class="font-mono text-[11px] text-slate-700">mergeLiveMinuteRows:752</p>
+                  <p class="text-[10px] text-slate-500">去重键 <span class="font-mono">endpoint + "@" + bucket</span></p>
+                  <p class="text-[10px] text-slate-400">来源：H2 结果行自身</p>
+                </div>
+                <div class="border border-slate-300 bg-white p-2">
+                  <p class="font-mono text-[11px] text-slate-700">aggregateMetrics:794</p>
+                  <p class="text-[10px] text-slate-500">去重键 <span class="font-mono">bucket</span></p>
+                  <p class="text-[10px] text-slate-400">来源：distinctMetricBuckets("minute",…)</p>
+                </div>
+                <div class="border border-slate-300 bg-white p-2">
+                  <p class="font-mono text-[11px] text-slate-700">pendingMinuteRows:1062</p>
+                  <p class="text-[10px] text-slate-500">去重键 <span class="font-mono">bucket</span></p>
+                  <p class="text-[10px] text-slate-400">来源：distinctMetricBuckets("minute",…)</p>
+                </div>
+                <div class="border-l-4 border-red-500 bg-red-50 px-2 py-1 text-[10px] text-red-700">
+                  三处必须一致，否则读数重复或漏桶
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After · 一个 module 回答一次</p>
+              <div class="h-[250px] flex flex-col justify-between">
+                <div class="space-y-1 text-[11px]">
+                  <div class="border border-slate-300 bg-white px-2 py-1 font-mono">逐桶读 · 聚合读 · rollup 前并入</div>
+                </div>
+                <svg viewBox="0 0 300 70" class="w-full h-[70px]">
+                  <line x1="40" y1="0" x2="150" y2="34" stroke="#94a3b8" stroke-width="1.5"/>
+                  <line x1="150" y1="0" x2="150" y2="34" stroke="#94a3b8" stroke-width="1.5"/>
+                  <line x1="260" y1="0" x2="150" y2="34" stroke="#94a3b8" stroke-width="1.5"/>
+                </svg>
+                <div class="deep text-white rounded p-3">
+                  <p class="font-mono text-xs">LiveWindow module</p>
+                  <p class="text-[10px] text-slate-300">H2 已落库桶集合 × 内存分钟行 → rowsNotYetPersisted(from, to)</p>
+                  <p class="text-[10px] text-slate-400 mt-1">独占"H2 已落库就以 H2 为准"的语义</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+              <p>"该分钟桶已落库就以 H2 为准，否则补内存行"写在三处，且两处按 <span class="font-mono">bucket</span>、一处按 <span class="font-mono">endpoint@bucket</span> 去重。三份一起漂移就是重复计数或漏桶——正是指标口径最容易出错处，注释里已互相引用提醒。</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+              <p>一个 module 独占"已落库桶 × 内存分钟行"的并集语义，暴露一个读口；逐桶读、聚合读、rollup 前并入三处都调它。</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Wins</p>
+            <ul class="list-disc list-inside text-sm space-y-0.5">
+              <li>locality：口径一处，漂移不可能</li>
+              <li>读口与 rollup 天然同口径</li>
+              <li>可单测：喂内存行 + 假已落库桶集合</li>
+              <li>去掉三份里两份重复的判定</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ───────── Candidate 5 ───────── -->
+        <article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-serif font-semibold">5 · 把读门面从写侧 god-object 里取出：<span class="font-mono text-lg">LogFileTraceSegmentServiceClient</span> 1419 行</h2>
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-600 text-xs font-mono">in-process</span>
+          </div>
+          <p class="font-mono text-sm text-slate-500">LogFileTraceSegmentServiceClient.java · plugin/logfilereporter/*ExposeInterceptor.java</p>
+
+          <!-- cross-section -->
+          <div class="grid grid-cols-2 gap-4">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before · 一个类，七种关切，25 个 public 方法</p>
+              <div class="space-y-1 text-[10px]">
+                <div class="band border-slate-300 bg-white px-2 py-1"><span class="font-mono">字段块 76-176</span> · 配置 / 热层 / H2 / 3 聚合器 / 对账 / 孤儿 / 15 个 self 计数器</div>
+                <div class="band border-amber-400 bg-amber-50 px-2 py-1"><span class="font-mono">读门面 184-480</span> · 13 个查询方法，约 500 行手搓 LinkedHashMap</div>
+                <div class="band border-slate-300 bg-white px-2 py-1"><span class="font-mono">self-stat 渲染 509-664</span> · hotLayerSnapshot 嵌套遍历</div>
+                <div class="band border-slate-400 bg-white px-2 py-1"><span class="font-mono">指标调度 924-1122</span> · 线程 + rollup + retention + config 装载</div>
+                <div class="band border-slate-700 deep text-white px-2 py-1"><span class="font-mono">写管线 1160-1266</span> · consume / doConsume / DataCarrier 生命周期</div>
+                <div class="band border-slate-300 bg-white px-2 py-1"><span class="font-mono">孤儿过滤 1268-1332</span> · OrphanKind 内嵌</div>
+                <div class="band border-slate-300 bg-white px-2 py-1"><span class="font-mono">影子对账 1340-1378</span> · 自带 synchronized 限频</div>
+              </div>
+              <p class="text-[10px] text-slate-500 mt-2">唯一可测面＝两个 static 辅助：<span class="font-mono">isOrphanSegment</span> / <span class="font-mono">hotLayerSnapshot</span>（因为要 bootstrap 才造得出客户端）</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After · 写、读各一个 module</p>
+              <div class="h-[240px] space-y-3 pt-1">
+                <div class="border-2 border-slate-700 deep text-white rounded p-3">
+                  <p class="font-mono text-xs">TraceIngest module</p>
+                  <p class="text-[10px] text-slate-300">consume 管线 · 孤儿过滤 · 载体生命周期 · 3 聚合器喂料</p>
+                </div>
+                <div class="border-2 border-amber-500 bg-amber-50 rounded p-3">
+                  <p class="font-mono text-xs text-slate-800">TraceReadModel module</p>
+                  <p class="text-[10px] text-slate-500">13 个读口 · Map 装配 · self-stat 渲染 · 指标查询编排</p>
+                  <p class="text-[10px] text-slate-400">经注入的 storage / aggregator 读口相接</p>
+                </div>
+                <p class="text-[10px] text-emerald-700">读门面可脱离 agent bootstrap 单测</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+              <p>一个类同时是 writer、read facade（约 500 行 Map 装配）、metrics 调度器、孤儿过滤器、影子对账器与 self-stat 渲染器，25 个 public 方法；只能 bootstrap 才造得出，所以只有两个 static 辅助可测。</p>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+              <p>读门面（13 读口 + Map 装配 + self-stat 渲染）成为一个 module，写侧只留 consume 管线与载体生命周期；两侧经注入的 storage / aggregator 读口相接。</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Wins</p>
+            <ul class="list-disc list-inside text-sm space-y-0.5">
+              <li>locality：写 bug 与读 bug 各落一侧</li>
+              <li>读门面可脱离 bootstrap 单测</li>
+              <li>writer module 缩到管线本身</li>
+              <li>孤儿 / 对账 / self-stat 三段状态各归其 module</li>
+            </ul>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-800">
+            与 20260808 候选 C（给 status-expose seam 一个编译期契约）相邻但不重复：本卡只搬 module 边界；跨 ClassLoader 的字符串反射契约仍留给 C。
+          </div>
+        </article>
+
+      </section>
+
+      <!-- ───────── Top recommendation ───────── -->
+      <section id="top-recommendation">
+        <div class="rounded-xl border-2 border-emerald-600 bg-emerald-50 p-6">
+          <p class="text-xs uppercase tracking-wider text-emerald-700 mb-2">Top recommendation</p>
+          <h2 class="text-xl font-serif font-semibold"><a href="#c1" class="hover:underline">1 · 拆分 H2TraceSegmentStorage 的三套 repository</a></h2>
+          <p class="text-sm text-slate-700 mt-2">
+            先做这个：它是一处真实的并发/局部性缺陷（读口查询与 segment 写线程争同一把 <span class="font-mono">synchronized(this)</span>），
+            改动被 storage 的现有测试覆盖，且它立起的 repository seam 正好是候选 2 与候选 5 落地时的接口落点——后面两张卡都要先有"storage 的公开面"。
+          </p>
+        </div>
+      </section>
+
+      <footer class="border-t border-slate-300 pt-4 text-xs text-slate-500">
+        本轮只收 2026-08-16 之后新出现的摩擦。前两次评审已登记的候选不重复：RulesEngine 深模块已落地（<span class="font-mono">dc7569</span>），
+        LocalStore 见 ADR-02，status-expose 编译期契约 / dispatcher 线程生命周期 / 告警 Map 往返 / <span class="font-mono">CompiledAntPattern</span> /
+        body-collection 引擎 / collection-switch 静态副作用仍按原快照跟踪。
+      </footer>
+
+    </main>
+  </body>
+</html>
