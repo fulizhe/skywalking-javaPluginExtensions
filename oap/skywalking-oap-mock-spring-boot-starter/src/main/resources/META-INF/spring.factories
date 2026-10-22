@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.fulizhe.observability.mockoap.autoconfigure.MockOapAutoConfiguration
