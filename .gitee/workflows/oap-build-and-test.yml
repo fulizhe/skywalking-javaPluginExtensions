@@ -1,0 +1,33 @@
+name: Build and Test OAP Mock Starter (JDK 17)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'oap/skywalking-oap-mock-spring-boot-starter/**'
+      - '.gitee/workflows/oap-build-and-test.yml'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'oap/skywalking-oap-mock-spring-boot-starter/**'
+      - '.gitee/workflows/oap-build-and-test.yml'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build and test OAP mock starter
+        working-directory: ./oap/skywalking-oap-mock-spring-boot-starter
+        run: mvn -B test
