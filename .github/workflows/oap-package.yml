@@ -1,0 +1,121 @@
+name: Package OAP mock starter
+
+# OAP is built and released independently from the agent plugin bundle.
+# Push/PR builds produce a downloadable artifact; tag/release/manual runs attach it to a GitHub Release.
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'oap/skywalking-oap-mock-spring-boot-starter/**'
+      - '.github/workflows/oap-package.yml'
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'oap/skywalking-oap-mock-spring-boot-starter/**'
+      - '.github/workflows/oap-package.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag;留空 = 用本次 run 的 ref'
+        required: false
+        type: string
+
+run-name: package OAP ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || github.ref_name }}
+
+env:
+  TAG: ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || github.ref_name }}
+
+permissions: {}
+
+jobs:
+  build:
+    name: build OAP starter jar
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || startsWith(github.ref, 'refs/tags/') && env.TAG || github.ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build and package OAP mock starter
+        working-directory: ./oap/skywalking-oap-mock-spring-boot-starter
+        run: mvn -B package
+
+      - name: Collect OAP starter jar
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find "oap/skywalking-oap-mock-spring-boot-starter/target" -maxdepth 1 -name '*.jar' \
+            ! -name '*-sources.jar' ! -name 'original-*.jar' \
+            -exec cp {} dist/ \;
+          ls -l dist/
+          test -n "$(find dist -maxdepth 1 -name 'skywalking-oap-mock-spring-boot-starter-*.jar' -print -quit)" \
+            || { echo "::error::OAP mock starter jar 未收集到"; exit 1; }
+
+      - name: Upload OAP starter jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: oap-mock-starter-jar
+          path: dist/*.jar
+          if-no-files-found: error
+
+  attach:
+    name: attach OAP jar to release
+    needs: build
+    if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Validate tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag '$TAG' 不存在。手动运行请填写一个已存在的 tag。"
+            exit 1
+          fi
+          echo "发布目标 tag: $TAG"
+
+      - name: Download OAP starter jar
+        uses: actions/download-artifact@v8
+        with:
+          name: oap-mock-starter-jar
+          path: dist
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./*.jar > SHA256SUMS-oap.txt
+          cat SHA256SUMS-oap.txt
+
+      - name: Attach to release (create if missing)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.jar dist/SHA256SUMS-oap.txt --clobber
+          else
+            gh release create "$TAG" dist/*.jar dist/SHA256SUMS-oap.txt \
+              --title "$TAG" --generate-notes
+          fi
