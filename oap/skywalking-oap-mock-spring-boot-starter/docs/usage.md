@@ -2,6 +2,8 @@
 
 在业务应用中引入 starter、使用原生 SkyWalking Agent 启动，并显式开启 `mock-oap`。不想本地构建时，可从 [GitHub 2.0.0 Release](https://github.com/fulizhe/skywalking-javaPluginExtensions/releases#release-2.0.0) 下载 `skywalking-oap-mock-spring-boot-starter-2.0.0.jar`；本文也说明本地构建、依赖、运行前提、协议和配置。
 
+先了解设计背景：[在业务进程里 Mock 一个 OAP，把多语言链路泥沼一次性抽干](https://fulizhe.blog.csdn.net/article/details/168453067)。业务应用接入示例参见 [`MockOapObservabilityController.java`](https://gitee.com/lqzkcx3/javaLearning/blob/master/demo/sb-skywalking/sb-skywalking/src/main/java/com/fulizhe/demo/controller/MockOapObservabilityController.java)。
+
 ```bash
 cd oap/skywalking-oap-mock-spring-boot-starter
 mvn -B clean test

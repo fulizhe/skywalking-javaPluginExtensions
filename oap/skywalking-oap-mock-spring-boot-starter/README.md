@@ -73,3 +73,6 @@ flowchart LR
 ## 接入与构建
 
 依赖声明、启用方式、Agent 前提、协议端口、配置项和可用 Bean 见[接入与构建指南](docs/usage.md)。
+
+- **方案介绍**：[在业务进程里 Mock 一个 OAP，把多语言链路泥沼一次性抽干](https://fulizhe.blog.csdn.net/article/details/168453067)
+- **业务端示例**：[MockOapObservabilityController.java](https://gitee.com/lqzkcx3/javaLearning/blob/master/demo/sb-skywalking/sb-skywalking/src/main/java/com/fulizhe/demo/controller/MockOapObservabilityController.java)
