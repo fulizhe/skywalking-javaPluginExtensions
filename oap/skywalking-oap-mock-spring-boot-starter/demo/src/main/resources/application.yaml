@@ -1,0 +1,21 @@
+# 业务应用监听 9600,页面入口:http://127.0.0.1:9600/mock-oap.html
+server:
+  port: 9600
+
+spring:
+  application:
+    name: mock-oap-demo
+
+# 进程内 mock-OAP receiver(gRPC)。默认端口与 SkyWalking agent 的
+# collector.backend_service 默认值一致,所以 agent 侧不需要改配置。
+mock-oap:
+  enabled: true
+  port: 11800
+  max-traces: 200
+  max-logs: 2000
+  max-jvm-metrics: 2000
+
+logging:
+  level:
+    root: INFO
+    com.fulizhe.demo.mockoap: INFO

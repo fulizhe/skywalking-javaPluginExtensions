@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+	<meta charset="UTF-8">
+	<title>mock-OAP 采集可观测</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<style>
+		body { font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; margin: 0; padding: 24px; background: #f4f6fb; color: #222; }
+		h1 { font-size: 20px; margin: 0 0 6px; color: #1b2b48; }
+		.tip { color: #5f6f85; font-size: 13px; margin-bottom: 16px; line-height: 1.6; }
+		.panel { background: #fff; border: 1px solid #e8edf5; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+		.panel h2 { font-size: 15px; margin: 0 0 12px; color: #243b5a; }
+		.api { float: right; font-family: Consolas, Menlo, monospace; font-size: 11px; font-weight: 400; color: #94a3b8; }
+		.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 10px; font-size: 12px; color: #5f6f85; }
+		.toolbar label { display: inline-flex; align-items: center; gap: 4px; }
+		.kv { font-size: 13px; border-collapse: collapse; width: 100%; }
+		.kv th { text-align: left; color: #64748b; font-weight: 500; padding: 5px 10px 5px 0; width: 220px; }
+		.kv td { padding: 5px 0; color: #1e293b; word-break: break-all; }
+		table.grid { width: 100%; font-size: 12px; border-collapse: collapse; }
+		table.grid th { background: #f1f5f9; color: #475569; padding: 6px; text-align: left; white-space: nowrap; }
+		table.grid td { padding: 6px; border-bottom: 1px solid #eef2f7; vertical-align: top; word-break: break-all; }
+		table.grid tr.demo td { background: #f6faff; }
+		code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; color: #0d6efd; }
+		button { border: 0; background: #2563eb; color: #fff; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+		button.ghost { background: #eef2f7; color: #334155; }
+		button + button { margin-left: 6px; }
+		input[type=number] { width: 62px; padding: 3px 6px; border: 1px solid #dbe3ef; border-radius: 4px; }
+		input[type=text] { padding: 3px 6px; border: 1px solid #dbe3ef; border-radius: 4px; }
+		.muted { color: #94a3b8; }
+		.svc { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; background: #e0e7ff; color: #3730a3; margin: 0 4px 2px 0; }
+		a { color: #2563eb; }
+	</style>
+	<script src="lib/jquery.min.js"></script>
+</head>
+
+<body>
+	<h1>mock-OAP 采集可观测 <a href="./" style="float:right;font-size:12px;font-weight:400;line-height:28px;">← 演示导航</a></h1>
+	<p class="tip">
+		进程内 mock-OAP gRPC server,按 <strong>SkyWalking 原生 agent 协议</strong>(默认 <code>11800</code>)接收
+		go / node / java 等各语言 agent 的上报。下面每个面板对应一个读接口,<strong>参数都在页面上直接操作</strong>,
+		不需要再敲 curl。点链路清单里的 traceId 看链路图。<a href="./mock-oap-jvm.html">打开 JVM Metrics 监控大盘 →</a>
+	</p>
+
+	<!-- ============ 采集状态:GET /mock-oap/status ============ -->
+	<div class="panel">
+		<h2>采集状态 <span class="api">GET /mock-oap/status</span>
+			<button id="refresh" style="float:right">刷新</button>
+		</h2>
+		<table class="kv"><tbody id="status"></tbody></table>
+	</div>
+
+	<!-- ============ 触发方式:GET /demo/* ============ -->
+	<div class="panel">
+		<h2>触发方式 <span class="api">GET /demo/chain | /demo/slow | /demo/error</span></h2>
+		<p class="tip" style="margin-bottom:10px;">
+			按钮让<strong>本进程</strong>自己调自己:agent 为 HTTP 出口生成 Exit span,并把链路上下文传给下一跳,
+			于是得到一条多段链路。前提:本进程用 <code>-javaagent</code> 挂载了原生 SkyWalking agent
+			(见 <code>demo/README.md</code>),且 agent 上报到本进程内的 collector(默认 <code>127.0.0.1:11800</code>)。
+			不需要 go / node 等外部服务。
+		</p>
+		<div class="toolbar">
+			<label>steps <input id="hops" type="number" value="3" min="1" max="20"></label>
+			<label>每次延迟(ms) <input id="latency" type="number" value="0" min="0" max="5000"></label>
+			<span class="muted">— 每个 step 一次 /demo/leaf 调用</span>
+		</div>
+		<button id="demoChain">生成链路(自己调自己)</button>
+		<button id="demoSlow" class="ghost">慢调用(500ms)</button>
+		<button id="demoError" class="ghost">错误调用</button>
+		<button id="demo10" class="ghost">连打 10 次</button>
+		<div id="demoResult" class="muted" style="margin-top:8px;"></div>
+	</div>
+
+	<!-- ============ 链路清单:GET /mock-oap/graphs?limit= ============ -->
+	<div class="panel">
+		<h2>链路清单(按 traceId 聚合) <span class="api">GET /mock-oap/graphs?limit=</span> <span id="gcount" class="muted"></span></h2>
+		<div class="toolbar">
+			<label>limit <input id="glimit" type="number" value="50" min="1" max="200"></label>
+			<button id="gapply">应用</button>
+			<label>过滤 <input id="gfilter" type="text" placeholder="服务名 / traceId 片段" style="width:220px"></label>
+			<button id="gnewest" class="ghost">打开最新一条链路图</button>
+			<label style="margin-left:auto"><input type="checkbox" id="auto"> 每 5 秒刷新</label>
+		</div>
+		<table class="grid">
+			<thead>
+				<tr><th style="width:150px;">最后接收</th><th style="width:240px;">服务串接</th><th style="width:90px;">段 / span</th><th style="width:80px;">耗时(ms)</th><th style="width:60px;">错误</th><th>traceId(点开看链路图)</th></tr>
+			</thead>
+			<tbody id="graphs"><tr><td colspan="6" class="muted">加载中...</td></tr></tbody>
+		</table>
+	</div>
+
+	<!-- ============ 按 traceId 直达:GET /mock-oap/trace | /mock-oap/segments ============ -->
+	<div class="panel">
+		<h2>按 traceId 直达 <span class="api">GET /mock-oap/trace?traceId= | GET /mock-oap/segments?traceId=</span></h2>
+		<div class="toolbar">
+			<label>traceId <input id="tlookup" type="text" placeholder="粘贴 traceId(清单里点 traceId 也能直达)" style="width:460px"></label>
+			<button id="topen">打开链路图(segments 渲染)</button>
+			<button id="traw" class="ghost">看服务端组装树(trace JSON)</button>
+			<span id="tResult" class="muted"></span>
+		</div>
+	</div>
+
+	<!-- ============ 最近链路段:GET /mock-oap/traces ============ -->
+	<div class="panel">
+		<h2>最近链路段(原始段) <span class="api">GET /mock-oap/traces</span></h2>
+		<div class="toolbar">
+			<label>显示条数 <input id="slimit" type="number" value="30" min="1" max="200"></label>
+			<label>过滤 <input id="sfilter" type="text" placeholder="服务 / 入口操作 / traceId" style="width:240px"></label>
+			<span id="scount" class="muted"></span>
+		</div>
+		<table class="grid">
+			<thead>
+				<tr><th style="width:150px;">接收时间</th><th style="width:200px;">服务</th><th style="width:220px;">入口操作</th><th style="width:60px;">span</th><th style="width:80px;">耗时(ms)</th><th style="width:60px;">错误</th><th>traceId</th></tr>
+			</thead>
+			<tbody id="segments"><tr><td colspan="7" class="muted">加载中...</td></tr></tbody>
+		</table>
+	</div>
+
+	<!-- ============ 最近日志:GET /mock-oap/logs ============ -->
+	<div class="panel">
+		<h2>最近日志 <span class="api">GET /mock-oap/logs?limit=&amp;traceId=&amp;level=&amp;q=</span>
+			<a href="./mock-oap-logs.html" target="_blank" style="float:right;font-weight:400;font-size:12px;">打开完整日志页 →</a>
+		</h2>
+		<div class="toolbar">
+			<label>limit <input id="llimit" type="number" value="30" min="1" max="200"></label>
+			<label>级别 <input id="llevel" type="text" placeholder="INFO / WARN / ERROR" style="width:120px"></label>
+			<label>关键字 <input id="lq" type="text" placeholder="正文 / 服务 / 端点" style="width:200px"></label>
+			<label>traceId <input id="ltrace" type="text" placeholder="留空=全部" style="width:260px"></label>
+			<button id="lapply" class="ghost">查询</button>
+			<span id="lcount" class="muted"></span>
+		</div>
+		<table class="grid">
+			<thead>
+				<tr><th style="width:150px;">时间</th><th style="width:70px;">级别</th><th style="width:160px;">服务</th><th style="width:230px;">traceId</th><th>正文</th></tr>
+			</thead>
+			<tbody id="logs"><tr><td colspan="5" class="muted">加载中...</td></tr></tbody>
+		</table>
+		<p class="muted" style="font-size:12px;margin:8px 0 0;">
+			级别是从正文里尽力抽的(协议里没有 level 字段);采集器自身的日志已被拒收,不会出现在这里。
+		</p>
+	</div>
+
+	<script>
+		var state = { limit: 50, graphs: [], segments: [], logs: [], newestTraceId: '' };
+
+		function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+		function fmt(ms) {
+			if (!ms) return '-';
+			var d = new Date(Number(ms)), p = function (n) { return (n < 10 ? '0' : '') + n; };
+			return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+		}
+		function traceLink(id) {
+			return '<a href="./mock-oap-trace.html?traceId=' + encodeURIComponent(id || '') + '" target="_blank"><code>' + esc(id) + '</code></a>';
+		}
+		function intVal(sel, def, min, max) {
+			var v = parseInt($(sel).val(), 10);
+			if (isNaN(v)) v = def;
+			return Math.min(Math.max(v, min), max);
+		}
+		function matches(needle, hay) { return !needle || String(hay || '').toLowerCase().indexOf(needle) >= 0; }
+		function openTrace(id, raw) {
+			if (!id) { $('#tResult').text('先填 traceId(或从上面的清单点一条)'); return; }
+			$('#tResult').text('');
+			var base = raw ? 'mock-oap/trace?traceId=' : 'mock-oap-trace.html?traceId=';
+			window.open(base + encodeURIComponent(id), '_blank');
+		}
+
+		/* ---- GET /mock-oap/status ---- */
+		function loadStatus() {
+			$.getJSON('mock-oap/status', function (st) {
+				var rows = [
+					['enabled', st.enabled], ['监听端口', st.listenPort], ['运行状态', st.running],
+					['agent 类可见', st.agentClassesVisible], ['agent 已启动', st.agentBooted],
+					['未启用原因', st.skipReason || '-'],
+					['缓存条数 / 上限', st.bufferSize + ' / ' + st.bufferCapacity], ['累计接收', st.receivedTotal],
+					['日志缓存 / 上限', st.logBufferSize + ' / ' + st.logBufferCapacity],
+					['日志累计接收', st.logReceivedTotal], ['日志拒收自己', st.logDroppedSelfTotal]
+				];
+				$('#status').html(rows.map(function (r) {
+					return '<tr><th>' + esc(r[0]) + '</th><td><code>' + esc(r[1]) + '</code></td></tr>';
+				}).join(''));
+			});
+		}
+
+		/* ---- GET /mock-oap/graphs?limit= ---- */
+		function loadGraphs() {
+			$.getJSON('mock-oap/graphs?limit=' + state.limit, function (list) {
+				state.graphs = list || [];
+				state.newestTraceId = state.graphs.length ? state.graphs[0].traceId : '';
+				renderGraphs();
+			});
+		}
+
+		function renderGraphs() {
+			var q = ($('#gfilter').val() || '').trim().toLowerCase();
+			var shown = state.graphs.filter(function (t) {
+				return matches(q, (t.traceId || '') + ' ' + (t.services || []).join(' '));
+			});
+			$('#gcount').text('(接口按 limit=' + state.limit + ' 返回 ' + state.graphs.length + ' 条,显示 ' + shown.length + ' 条)');
+			if (!shown.length) {
+				$('#graphs').html('<tr><td colspan="6" class="muted">' + (state.graphs.length ? '没有匹配的行' : '暂无数据——用上面的「触发方式」发一条链路') + '</td></tr>');
+				return;
+			}
+			$('#graphs').html(shown.map(function (t) {
+				var svcs = (t.services || []).map(function (s) { return '<span class="svc">' + esc(s) + '</span>'; }).join('');
+				return '<tr>'
+					+ '<td>' + esc(fmt(t.lastReceivedAt)) + '</td>'
+					+ '<td>' + (svcs || '<span class="muted">-</span>') + '</td>'
+					+ '<td>' + esc(t.segmentCount) + ' / ' + esc(t.spanCount) + '</td>'
+					+ '<td>' + esc(t.durationMs) + '</td>'
+					+ '<td>' + (t.error ? '<b style="color:#b91c1c">ERROR</b>' : '-') + '</td>'
+					+ '<td>' + traceLink(t.traceId) + '</td>'
+					+ '</tr>';
+			}).join(''));
+		}
+
+		/* ---- GET /mock-oap/traces ---- */
+		function loadSegments() {
+			$.getJSON('mock-oap/traces', function (list) {
+				state.segments = list || [];
+				renderSegments();
+			});
+		}
+
+		function renderSegments() {
+			var q = ($('#sfilter').val() || '').trim().toLowerCase();
+			var limit = intVal('#slimit', 30, 1, 200);
+			var hit = state.segments.filter(function (t) {
+				return matches(q, (t.service || '') + ' ' + (t.entryOperation || '') + ' ' + (t.traceId || ''));
+			});
+			var shown = hit.slice(0, limit);
+			$('#scount').text('(接口返回 ' + state.segments.length + ' 条,匹配 ' + hit.length + ' 条,显示前 ' + shown.length + ' 条)');
+			if (!shown.length) {
+				$('#segments').html('<tr><td colspan="7" class="muted">' + (state.segments.length ? '没有匹配的段' : '暂无数据。') + '</td></tr>');
+				return;
+			}
+			$('#segments').html(shown.map(function (t) {
+				return '<tr>'
+					+ '<td>' + esc(fmt(t.receivedAt)) + '</td>'
+					+ '<td>' + esc(t.service) + (t.serviceInstance ? '<br><span class="muted">' + esc(t.serviceInstance) + '</span>' : '') + '</td>'
+					+ '<td>' + esc(t.entryOperation || '-') + '</td>'
+					+ '<td>' + esc(t.spanCount) + '</td>'
+					+ '<td>' + esc(t.durationMs) + '</td>'
+					+ '<td>' + (t.error ? '<b style="color:#b91c1c">ERROR</b>' : '-') + '</td>'
+					+ '<td>' + traceLink(t.traceId) + '</td>'
+					+ '</tr>';
+			}).join(''));
+		}
+
+		/* ---- GET /mock-oap/logs?limit=&traceId=&level=&q= ---- */
+		function loadLogs() {
+			var qs = ['limit=' + intVal('#llimit', 30, 1, 200)];
+			var level = ($('#llevel').val() || '').trim();
+			var q = ($('#lq').val() || '').trim();
+			var traceId = ($('#ltrace').val() || '').trim();
+			if (level) qs.push('level=' + encodeURIComponent(level));
+			if (q) qs.push('q=' + encodeURIComponent(q));
+			if (traceId) qs.push('traceId=' + encodeURIComponent(traceId));
+			$.getJSON('mock-oap/logs?' + qs.join('&'), function (list) {
+				state.logs = list || [];
+				renderLogs();
+			}).fail(function () {
+				$('#logs').html('<tr><td colspan="5" class="muted">日志接口调用失败</td></tr>');
+			});
+		}
+
+		function renderLogs() {
+			var list = state.logs;
+			$('#lcount').text('(返回 ' + list.length + ' 条)');
+			if (!list.length) {
+				$('#logs').html('<tr><td colspan="5" class="muted">暂无日志 —— 先发一条业务请求让 logback 的 GRPCLogClientAppender 打日志</td></tr>');
+				return;
+			}
+			$('#logs').html(list.map(function (l) {
+				var lvl = (l.level || '').toUpperCase();
+				var color = (lvl === 'ERROR' || lvl === 'FATAL') ? '#b91c1c' : (lvl === 'WARN' ? '#b45309' : '#475569');
+				return '<tr>'
+					+ '<td>' + esc(fmt(l.timestamp)) + '</td>'
+					+ '<td style="color:' + color + ';font-weight:600">' + esc(l.level || '未分级') + '</td>'
+					+ '<td>' + esc(l.service) + '</td>'
+					+ '<td>' + (l.traceId ? traceLink(l.traceId) : '<span class="muted">无</span>') + '</td>'
+					+ '<td><span title="' + esc(l.content) + '">' + esc(shorten(l.content, 220)) + '</span>'
+					+ (l.traceId ? ' <a href="./mock-oap-logs.html?traceId=' + encodeURIComponent(l.traceId) + '" target="_blank">日志页</a>' : '')
+					+ '</td>'
+					+ '</tr>';
+			}).join(''));
+		}
+
+		function shorten(s, n) {
+			s = s == null ? '' : String(s);
+			return s.length <= n ? s : s.slice(0, n) + ' …';
+		}
+
+		function loadAll() { loadStatus(); loadGraphs(); loadSegments(); loadLogs(); }
+
+		$(function () {
+			loadAll();
+			$('#refresh').on('click', loadAll);
+
+			// limit 应用(回车也行)
+			$('#gapply').on('click', function () { state.limit = intVal('#glimit', 50, 1, 200); loadGraphs(); });
+			$('#glimit').on('keydown', function (e) { if (e.key === 'Enter') $('#gapply').click(); });
+			// 过滤只看本地缓存,不重复打接口
+			$('#gfilter').on('input', renderGraphs);
+			$('#sfilter').on('input', renderSegments);
+			$('#slimit').on('change', renderSegments);
+
+			// 最近日志:查询按钮 / 回车
+			$('#lapply').on('click', loadLogs);
+			$('#llevel,#lq,#ltrace').on('keydown', function (e) { if (e.key === 'Enter') loadLogs(); });
+			$('#llimit').on('change', loadLogs);
+			$('#gnewest').on('click', function () { openTrace(state.newestTraceId, false); });
+
+			// traceId 直达
+			$('#topen').on('click', function () { openTrace($('#tlookup').val().trim(), false); });
+			$('#traw').on('click', function () { openTrace($('#tlookup').val().trim(), true); });
+			$('#tlookup').on('keydown', function (e) { if (e.key === 'Enter') $('#topen').click(); });
+
+			// 触发方式:自调链路 / 慢调用 / 错误 / 连打
+			$('#demoChain').on('click', function () { trigger('demo/chain', 1); });
+			$('#demoSlow').on('click', function () { trigger('demo/slow?delayMs=500', 1); });
+			$('#demoError').on('click', function () { trigger('demo/error', 1); });
+			$('#demo10').on('click', function () { trigger('demo/chain', 10); });
+
+			var timer = null;
+			$('#auto').on('change', function () {
+				if (this.checked) { timer = setInterval(loadAll, 5000); } else { clearInterval(timer); timer = null; }
+			});
+		});
+
+		/** 组装 steps / delayMs 查询串。 */
+		function demoParams() {
+			var steps = intVal('#hops', 3, 1, 20);
+			var delayMs = intVal('#latency', 0, 0, 5000);
+			return 'steps=' + steps + '&delayMs=' + delayMs;
+		}
+
+		function summarize(r) {
+			if (!r) return '(空响应)';
+			if (r.orderId) return '链路 ' + r.orderId + ': ' + r.steps + ' 次调用, ' + r.costMs + ' ms';
+			if (r.delayMs != null) return '慢调用 ' + r.delayMs + ' ms';
+			return JSON.stringify(r);
+		}
+
+		function trigger(path, n) {
+			n = n || 1;
+			// 已经带了查询串(如慢调用的 delayMs)就不要再追加 steps/delayMs
+			var url = path.indexOf('?') >= 0 ? path : path + '?' + demoParams();
+			var done = 0, failed = 0, last = '';
+			$('#demoResult').html('触发中... <code>' + esc(url) + '</code>');
+
+			function finish() {
+				done++;
+				if (done < n) return;
+				$('#demoResult').html(
+					(failed ? '<b style="color:#b91c1c">失败 ' + failed + '/' + n + '</b>:' : '完成 ' + n + ' 次:')
+					+ ' 最后一次 ' + esc(last)
+					+ ' <span class="muted">— 稍后自动刷新清单</span>');
+				setTimeout(loadAll, 1500);
+			}
+
+			for (var i = 0; i < n; i++) {
+				$.getJSON(url, function (r) {
+					last = summarize(r);
+					finish();
+				}).fail(function (xhr) {
+					// 「错误调用」按钮本来就期望 500,不算失败
+					if (path.indexOf('/error') >= 0 && xhr.status === 500) {
+						last = '已按预期抛出异常(HTTP 500)';
+						finish();
+						return;
+					}
+					failed++;
+					last = 'HTTP ' + xhr.status
+						+ '(调用失败 —— 检查本进程是否用 -javaagent 启动,'
+						+ '以及 mock-oap.enabled=true 是否生效)';
+					finish();
+				});
+			}
+		}
+	</script>
+</body>
+
+</html>

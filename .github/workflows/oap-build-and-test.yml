@@ -31,4 +31,8 @@ jobs:
 
       - name: Build and test OAP mock starter
         working-directory: ./oap/skywalking-oap-mock-spring-boot-starter
-        run: mvn -B test
+        run: mvn -B install
+
+      - name: Build demo app
+        working-directory: ./oap/skywalking-oap-mock-spring-boot-starter/demo
+        run: mvn -B package

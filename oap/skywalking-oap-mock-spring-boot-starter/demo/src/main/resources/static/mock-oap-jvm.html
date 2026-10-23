@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>mock-OAP JVM Metrics</title>
+	<style>
+		:root { color-scheme: light; }
+		* { box-sizing: border-box; }
+		body { margin: 0; padding: 24px; background: #f4f6fb; color: #1e293b; font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; }
+		a { color: #2563eb; text-decoration: none; }
+		a:hover { text-decoration: underline; }
+		.page { max-width: 1480px; margin: 0 auto; }
+		.header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+		h1 { margin: 0 0 6px; color: #1b2b48; font-size: 22px; }
+		.subtitle { margin: 0; color: #64748b; font-size: 13px; line-height: 1.6; }
+		.nav { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+		.nav a { padding: 7px 10px; border: 1px solid #dbe3ef; border-radius: 6px; background: #fff; }
+		.toolbar, .summary, .panel { border: 1px solid #e8edf5; border-radius: 8px; background: #fff; box-shadow: 0 2px 8px rgba(15, 23, 42, .035); }
+		.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px 14px; margin-bottom: 14px; padding: 12px 14px; color: #5f6f85; font-size: 12px; }
+		.toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+		input, select { min-height: 30px; padding: 4px 7px; border: 1px solid #dbe3ef; border-radius: 5px; color: #334155; background: #fff; }
+		input[type=number] { width: 76px; }
+		input[type=checkbox] { min-height: 0; }
+		button { padding: 7px 12px; border: 0; border-radius: 6px; color: #fff; background: #2563eb; cursor: pointer; }
+		button:hover { background: #1d4ed8; }
+		button.ghost { color: #334155; background: #eef2f7; }
+		button.ghost:hover { background: #e2e8f0; }
+		#lastUpdated { margin-left: auto; color: #94a3b8; }
+		#error { display: none; width: 100%; color: #b91c1c; }
+		.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 14px; background: #e8edf5; }
+		.summary-item { min-width: 0; padding: 13px 16px; background: #fff; }
+		.summary-label { color: #64748b; font-size: 11px; }
+		.summary-value { overflow: hidden; margin-top: 5px; color: #1e293b; font-size: 18px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+		.summary-value small { color: #64748b; font-size: 12px; font-weight: 400; }
+		.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+		.panel { min-width: 0; padding: 13px 14px 9px; }
+		.panel h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; color: #243b5a; font-size: 14px; font-weight: 600; }
+		.panel h2 small { color: #94a3b8; font-size: 10px; font-weight: 400; }
+		.chart { width: 100%; height: 250px; }
+		.chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
+		.empty { display: grid; height: 100%; place-items: center; color: #94a3b8; font-size: 13px; }
+		.legend { display: flex; flex-wrap: wrap; gap: 7px 13px; min-height: 20px; padding: 0 4px 5px; color: #64748b; font-size: 11px; }
+		.legend span { display: inline-flex; align-items: center; gap: 5px; }
+		.legend i { width: 9px; height: 9px; border-radius: 50%; }
+		.note { margin: 12px 2px 0; color: #94a3b8; font-size: 11px; line-height: 1.6; }
+		@media (max-width: 760px) {
+			body { padding: 14px; }
+			.grid { grid-template-columns: 1fr; }
+			.summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+			.chart { height: 230px; }
+			#lastUpdated { width: 100%; margin-left: 0; }
+		}
+	</style>
+</head>
+<body>
+<main class="page">
+	<header class="header">
+		<div>
+			<h1>JVM Metrics 监控大盘</h1>
+			<p class="subtitle">展示 SkyWalking Java Agent 上报并由 mock-OAP 保存在进程内的 JVM 指标。曲线按指标采样时间排序。</p>
+		</div>
+		<nav class="nav" aria-label="mock-OAP 导航">
+			<a href="./">演示导航</a>
+			<a href="./mock-oap.html">采集可观测</a>
+			<a href="./mock-oap-logs.html">日志</a>
+			<a href="/mock-oap/jvm-metrics" target="_blank">原始 JSON</a>
+		</nav>
+	</header>
+
+	<section class="toolbar">
+		<label>批次数 <input id="limit" type="number" min="1" max="2000" value="500"></label>
+		<label>时间范围
+			<select id="window">
+				<option value="5">最近 5 分钟</option>
+				<option value="30" selected>最近 30 分钟</option>
+				<option value="60">最近 1 小时</option>
+				<option value="0">全部缓存</option>
+			</select>
+		</label>
+		<label>服务 <select id="service"><option value="">全部服务</option></select></label>
+		<button id="refresh">立即刷新</button>
+		<label><input id="auto" type="checkbox" checked> 每 60 秒自动刷新</label>
+		<span id="lastUpdated">等待加载</span>
+		<div id="error"></div>
+	</section>
+
+	<section class="summary" aria-label="JVM 指标概览">
+		<div class="summary-item"><div class="summary-label">服务 / 实例</div><div class="summary-value" id="sumService">—</div></div>
+		<div class="summary-item"><div class="summary-label">指标采样点</div><div class="summary-value" id="sumSamples">—</div></div>
+		<div class="summary-item"><div class="summary-label">最新 CPU</div><div class="summary-value" id="sumCpu">—</div></div>
+		<div class="summary-item"><div class="summary-label">指标缓存</div><div class="summary-value" id="sumBuffer">—</div></div>
+	</section>
+
+	<section class="grid" id="charts">
+		<div class="panel"><h2>JVM CPU <small>%</small></h2><div class="chart" id="chart-cpu"></div><div class="legend" id="legend-cpu"></div></div>
+		<div class="panel"><h2>Heap / Non-Heap Memory <small>MB</small></h2><div class="chart" id="chart-memory"></div><div class="legend" id="legend-memory"></div></div>
+		<div class="panel"><h2>Memory Pools <small>used · MB</small></h2><div class="chart" id="chart-pools"></div><div class="legend" id="legend-pools"></div></div>
+		<div class="panel"><h2>Garbage Collection <small>累计次数 / 时间 ms</small></h2><div class="chart" id="chart-gc"></div><div class="legend" id="legend-gc"></div></div>
+		<div class="panel"><h2>JVM Threads <small>count</small></h2><div class="chart" id="chart-threads"></div><div class="legend" id="legend-threads"></div></div>
+		<div class="panel"><h2>Thread States <small>count</small></h2><div class="chart" id="chart-states"></div><div class="legend" id="legend-states"></div></div>
+		<div class="panel"><h2>Loaded Classes <small>count</small></h2><div class="chart" id="chart-classes"></div><div class="legend" id="legend-classes"></div></div>
+	</section>
+	<p class="note">内存容量与使用量由 SkyWalking 按字节上报，图中换算为 MiB。GC 曲线展示上报值（累计计数/时间）。缓存只保留最近的指标批次，容量由 <code>mock-oap.max-jvm-metrics</code> 控制。</p>
+</main>
+
+<script>
+(function () {
+	'use strict';
+	var API = 'mock-oap/jvm-metrics';
+	var STATUS_API = 'mock-oap/jvm-metrics/stats';
+	var COLORS = ['#2563eb', '#0f9d8a', '#e58b24', '#8b5cf6', '#e05252', '#0891b2', '#64748b', '#c026d3'];
+	var refreshTimer;
+	var allBatches = [];
+	var charts = [
+		{ id: 'cpu', unit: '%', series: function (p) { return seriesFor(p, [{ name: 'CPU', get: function (m) { return num(m.cpuUsagePercent); } }]); } },
+		{ id: 'memory', unit: 'MB', series: function (p) {
+			return seriesFor(p, [
+				{ name: 'Heap used', get: function (m) { return memoryValue(m, true, 'used'); } },
+				{ name: 'Heap max', get: function (m) { return memoryValue(m, true, 'max'); } },
+				{ name: 'Non-heap used', get: function (m) { return memoryValue(m, false, 'used'); } },
+				{ name: 'Non-heap max', get: function (m) { return memoryValue(m, false, 'max'); } }
+			]);
+		} },
+		{ id: 'pools', unit: 'MB', series: function (p) {
+			var names = {};
+			p.forEach(function (point) {
+				var seen = {};
+				(point.memoryPools || []).forEach(function (pool) {
+					var type = pool.type || 'Pool';
+					seen[type] = (seen[type] || 0) + 1;
+					names[type + ' #' + seen[type]] = true;
+				});
+			});
+			var keys = Object.keys(names);
+			return seriesFor(p, keys.map(function (name) { return { name: name, get: function (m, point) {
+				var list = point.memoryPools || [], match = name.match(/^(.*?) #(\d+)$/), type = match[1], target = Number(match[2]), seen = 0;
+				for (var i = 0; i < list.length; i++) {
+					if ((list[i].type || 'Pool') === type && ++seen === target) return toMiB(list[i].used);
+				}
+				return null;
+			} }; }));
+		} },
+		{ id: 'gc', unit: 'count / ms', series: function (p) {
+			var keys = {};
+			p.forEach(function (point) { (point.gc || []).forEach(function (g) { keys[g.phase || 'GC'] = true; }); });
+			var defs = [];
+			Object.keys(keys).forEach(function (phase) {
+				defs.push({ name: phase + ' count', get: function (m, point) { var g = findBy(point.gc, 'phase', phase); return g ? num(g.count) : null; } });
+				defs.push({ name: phase + ' time', get: function (m, point) { var g = findBy(point.gc, 'phase', phase); return g ? num(g.time) : null; } });
+			});
+			return seriesFor(p, defs);
+		} },
+		{ id: 'threads', unit: 'threads', series: function (p) { return seriesFor(p, [
+			{ name: 'Live', get: function (m) { return m.thread ? num(m.thread.liveCount) : null; } },
+			{ name: 'Daemon', get: function (m) { return m.thread ? num(m.thread.daemonCount) : null; } },
+			{ name: 'Peak', get: function (m) { return m.thread ? num(m.thread.peakCount) : null; } }
+		]); } },
+		{ id: 'states', unit: 'threads', series: function (p) { return seriesFor(p, [
+			{ name: 'Runnable', get: function (m) { return m.thread ? num(m.thread.runnableStateThreadCount) : null; } },
+			{ name: 'Blocked', get: function (m) { return m.thread ? num(m.thread.blockedStateThreadCount) : null; } },
+			{ name: 'Waiting', get: function (m) { return m.thread ? num(m.thread.waitingStateThreadCount) : null; } },
+			{ name: 'Timed waiting', get: function (m) { return m.thread ? num(m.thread.timedWaitingStateThreadCount) : null; } }
+		]); } },
+		{ id: 'classes', unit: 'classes', series: function (p) { return seriesFor(p, [
+			{ name: 'Loaded', get: function (m) { return m.class ? num(m.class.loadedClassCount) : null; } },
+			{ name: 'Total loaded', get: function (m) { return m.class ? num(m.class.totalLoadedClassCount) : null; } },
+			{ name: 'Total unloaded', get: function (m) { return m.class ? num(m.class.totalUnloadedClassCount) : null; } }
+		]); } }
+	];
+
+	function num(v) { return v == null || v === '' || !isFinite(Number(v)) ? null : Number(v); }
+	function toMiB(v) { var n = num(v); return n == null ? null : n / 1024 / 1024; }
+	function memoryValue(metric, heap, field) {
+		var list = metric.memory || [];
+		for (var i = 0; i < list.length; i++) if (!!list[i].isHeap === heap) return toMiB(list[i][field]);
+		return null;
+	}
+	function findBy(list, key, value) {
+		for (var i = 0; i < (list || []).length; i++) if (list[i][key] === value) return list[i];
+		return null;
+	}
+	function seriesFor(points, defs) {
+		return defs.map(function (def) {
+			return { name: def.name, values: points.map(function (point) { return { time: point.time, value: def.get(point.metric, point) }; }) };
+		}).filter(function (s) { return s.values.some(function (v) { return v.value != null; }); });
+	}
+	function flatten(records) {
+		var points = [];
+		(records || []).forEach(function (record) {
+			(record.metrics || []).forEach(function (metric) {
+				points.push({ time: Number(metric.time) || Number(record.receivedAt) || 0, service: record.service || '', instance: record.serviceInstance || '', metric: metric, memoryPools: metric.memoryPools || [], gc: metric.gc || [] });
+			});
+		});
+		points.sort(function (a, b) { return a.time - b.time; });
+		return points;
+	}
+	function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+	function timeLabel(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+	function pad(n) { return n < 10 ? '0' + n : String(n); }
+	function fmt(v) { return Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : (Math.round(v * 100) / 100).toString(); }
+	function niceMax(v) { if (!(v > 0)) return 1; var power = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), scaled = v / power; return (scaled <= 1 ? 1 : scaled <= 2 ? 2 : scaled <= 5 ? 5 : 10) * power; }
+	function renderChart(config, points) {
+		var host = document.getElementById('chart-' + config.id), legend = document.getElementById('legend-' + config.id);
+		var series = config.series(points);
+		if (!points.length || !series.length || !series.some(function (s) { return s.values.some(function (v) { return v.value != null; }); })) {
+			host.innerHTML = '<div class="empty">暂无指标数据</div>'; legend.innerHTML = ''; return;
+		}
+		var width = Math.max(300, host.clientWidth || 600), height = Math.max(200, host.clientHeight || 250);
+		var padL = 50, padR = 12, padT = 12, padB = 33, plotW = width - padL - padR, plotH = height - padT - padB;
+		var times = points.map(function (p) { return p.time; }), minT = times[0], maxT = times[times.length - 1];
+		if (maxT <= minT) maxT = minT + 1;
+		var maxV = 0;
+		series.forEach(function (s) { s.values.forEach(function (v) { if (v.value != null && v.value > maxV) maxV = v.value; }); });
+		var top = niceMax(maxV * 1.08), x = function (t) { return padL + (t - minT) / (maxT - minT) * plotW; };
+		var y = function (v) { return padT + plotH - (v / top) * plotH; };
+		var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + esc(config.id) + ' chart">';
+		for (var i = 0; i <= 4; i++) {
+			var val = top * i / 4, yy = y(val);
+			svg += '<line x1="' + padL + '" y1="' + yy + '" x2="' + (width - padR) + '" y2="' + yy + '" stroke="#e9eef5" stroke-width="1" />';
+			svg += '<text x="' + (padL - 7) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#94a3b8" font-size="10">' + esc(fmt(val)) + '</text>';
+		}
+		for (var j = 0; j < 4; j++) {
+			var ratio = j / 3, tx = minT + (maxT - minT) * ratio, xx = x(tx);
+			svg += '<text x="' + xx + '" y="' + (height - 8) + '" text-anchor="middle" fill="#94a3b8" font-size="10">' + timeLabel(tx) + '</text>';
+		}
+		series.forEach(function (s, si) {
+			var color = COLORS[si % COLORS.length], segments = [], current = [];
+			s.values.forEach(function (point) {
+				if (point.value == null) { if (current.length) segments.push(current); current = []; }
+				else current.push(point);
+			});
+			if (current.length) segments.push(current);
+			segments.forEach(function (segment) {
+				var d = segment.map(function (point, idx) { return (idx ? 'L' : 'M') + x(point.time).toFixed(1) + ',' + y(point.value).toFixed(1); }).join(' ');
+				svg += '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />';
+				segment.forEach(function (point) {
+					svg += '<circle cx="' + x(point.time).toFixed(1) + '" cy="' + y(point.value).toFixed(1) + '" r="2.4" fill="' + color + '"><title>' + esc(s.name + ': ' + fmt(point.value) + ' ' + config.unit + ' · ' + timeLabel(point.time)) + '</title></circle>';
+				});
+			});
+		});
+		svg += '</svg>';
+		host.innerHTML = svg;
+		legend.innerHTML = series.map(function (s, i) { return '<span><i style="background:' + COLORS[i % COLORS.length] + '"></i>' + esc(s.name) + '</span>'; }).join('');
+	}
+	function updateServiceOptions(points) {
+		var select = document.getElementById('service'), previous = select.value, names = {};
+		points.forEach(function (p) { if (p.service) names[p.service] = true; });
+		select.innerHTML = '<option value="">全部服务</option>' + Object.keys(names).sort().map(function (name) { return '<option value="' + esc(name) + '">' + esc(name) + '</option>'; }).join('');
+		if (names[previous]) select.value = previous;
+	}
+	function render() {
+		var points = flatten(allBatches), service = document.getElementById('service').value;
+		if (service) points = points.filter(function (p) { return p.service === service; });
+		var minutes = Number(document.getElementById('window').value), cutoff = minutes ? Date.now() - minutes * 60000 : 0;
+		if (cutoff) points = points.filter(function (p) { return p.time >= cutoff; });
+		charts.forEach(function (chart) { renderChart(chart, points); });
+		var latest = points.length ? points[points.length - 1] : null;
+		document.getElementById('sumService').innerHTML = latest ? esc(latest.service || '—') + ' <small>/ ' + esc(latest.instance || '—') + '</small>' : '—';
+		document.getElementById('sumSamples').textContent = points.length.toLocaleString();
+		var cpu = latest && num(latest.metric.cpuUsagePercent);
+		document.getElementById('sumCpu').innerHTML = cpu == null ? '—' : esc(fmt(cpu)) + ' <small>%</small>';
+	}
+	function load() {
+		var limit = Math.max(1, Math.min(2000, parseInt(document.getElementById('limit').value, 10) || 500));
+		document.getElementById('limit').value = limit;
+		document.getElementById('error').style.display = 'none';
+		Promise.all([
+			fetch(API + '?limit=' + limit, { headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) throw new Error('JVM 指标接口返回 HTTP ' + r.status); return r.json(); }),
+			fetch(STATUS_API, { headers: { 'Accept': 'application/json' } }).then(function (r) { if (!r.ok) throw new Error('缓存统计接口返回 HTTP ' + r.status); return r.json(); }).catch(function () { return null; })
+		]).then(function (results) {
+			allBatches = Array.isArray(results[0]) ? results[0] : [];
+			updateServiceOptions(flatten(allBatches));
+			var stats = results[1];
+			document.getElementById('sumBuffer').innerHTML = stats ? esc(stats.size) + ' <small>/ ' + esc(stats.capacity) + ' 批 · 累计 ' + esc(stats.receivedTotal) + '</small>' : allBatches.length + ' <small>批</small>';
+			render();
+			document.getElementById('lastUpdated').textContent = '最近刷新：' + new Date().toLocaleTimeString();
+		}).catch(function (e) {
+			document.getElementById('error').textContent = '数据加载失败：' + e.message;
+			document.getElementById('error').style.display = 'block';
+		});
+	}
+	function resetTimer() {
+		if (refreshTimer) clearInterval(refreshTimer);
+		if (document.getElementById('auto').checked) refreshTimer = setInterval(load, 60000);
+	}
+	document.getElementById('refresh').addEventListener('click', load);
+	document.getElementById('auto').addEventListener('change', resetTimer);
+	document.getElementById('service').addEventListener('change', render);
+	document.getElementById('window').addEventListener('change', render);
+	document.getElementById('limit').addEventListener('change', load);
+	window.addEventListener('resize', render);
+	load();
+	resetTimer();
+}());
+</script>
+</body>
+</html>

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+	<meta charset="UTF-8">
+	<title>mock-OAP 日志</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<style>
+		/* 设计规范见 ../../../../DESIGN.md:白底 + 唯一强调色 lavender,不引入第二种彩色 */
+		:root {
+			--canvas: #fafafa;
+			--surface-1: #ffffff;
+			--surface-2: #f0f1f4;
+			--surface-3: #e8eaee;
+			--surface-4: #eceef1;
+			--hairline: #e6e7eb;
+			--hairline-strong: #d5d7dd;
+			--hairline-tertiary: #c9ccd3;
+			--ink: #18181c;
+			--ink-muted: #3f4046;
+			--ink-subtle: #6b7280;
+			--ink-tertiary: #9ca3af;
+			--primary: #5e6ad2;
+			--primary-hover: #4a56c8;
+			--primary-focus: #5e69d1;
+			--success: #1f8a37;
+		}
+
+		* { box-sizing: border-box; }
+
+		body {
+			margin: 0;
+			background: var(--canvas);
+			color: var(--ink);
+			font-family: 'Inter', 'SF Pro Display', -apple-system, system-ui, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif;
+			font-size: 14px;
+			line-height: 1.5;
+			letter-spacing: -0.05px;
+		}
+
+		.topbar {
+			height: 56px;
+			display: flex;
+			align-items: center;
+			gap: 24px;
+			padding: 0 32px;
+			background: var(--canvas);
+			border-bottom: 1px solid var(--hairline);
+			position: sticky;
+			top: 0;
+			z-index: 5;
+		}
+
+		.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -0.4px; }
+		.brand i { width: 14px; height: 14px; border-radius: 4px; background: var(--primary); display: inline-block; }
+		.topbar nav a { color: var(--ink-subtle); text-decoration: none; margin-right: 16px; }
+		.topbar nav a:hover { color: var(--ink); }
+		.topbar .spacer { margin-left: auto; }
+
+		main { max-width: 1280px; margin: 0 auto; padding: 32px; }
+
+		.hero h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.6px; margin: 0 0 8px; }
+		.hero p { color: var(--ink-subtle); margin: 0 0 8px; max-width: 900px; }
+		.eyebrow { font-size: 13px; font-weight: 500; letter-spacing: 0.4px; color: var(--primary); text-transform: uppercase; }
+
+		.panel {
+			background: var(--surface-1);
+			border: 1px solid var(--hairline);
+			border-radius: 12px;
+			padding: 24px;
+			margin-top: 24px;
+		}
+
+		.panel h2 { font-size: 16px; font-weight: 500; letter-spacing: -0.4px; margin: 0 0 16px; display: flex; align-items: center; gap: 10px; }
+		.api { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--ink-tertiary); font-weight: 400; }
+
+		.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+		.tile { background: var(--surface-1); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px; }
+		.tile .k { color: var(--ink-subtle); font-size: 12px; }
+		.tile .v { font-size: 22px; font-weight: 500; letter-spacing: -0.4px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+		.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+		.toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font-size: 13px; }
+		input[type=text], input[type=number], select {
+			padding: 8px 12px; border: 1px solid var(--hairline-strong); border-radius: 8px;
+			background: var(--surface-1); color: var(--ink); font-size: 13px; font-family: inherit;
+		}
+		input[type=text]:focus, input[type=number]:focus, select:focus { outline: 2px solid var(--primary-focus); outline-offset: 1px; }
+		button {
+			padding: 8px 14px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+			font-size: 14px; font-weight: 500; font-family: inherit;
+		}
+		.btn-primary { background: var(--primary); color: #fff; }
+		.btn-primary:hover { background: var(--primary-hover); }
+		.btn-secondary { background: var(--surface-1); color: var(--ink); border-color: var(--hairline); }
+		.btn-secondary:hover { background: var(--surface-2); border-color: var(--hairline-strong); }
+		a.link { color: var(--primary-hover); text-decoration: none; }
+		a.link:hover { text-decoration: underline; }
+
+		table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+		table.grid thead th {
+			text-align: left; font-weight: 500; color: var(--ink-subtle); background: var(--surface-2);
+			padding: 10px 12px; border-bottom: 1px solid var(--hairline-strong); white-space: nowrap;
+		}
+		table.grid tbody td { padding: 10px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+		table.grid tbody tr.row { cursor: pointer; }
+		table.grid tbody tr.row:hover td { background: var(--surface-2); }
+		table.grid tbody tr.detail td { background: var(--surface-2); }
+		.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+		.msg { white-space: pre-wrap; word-break: break-word; }
+		.muted { color: var(--ink-subtle); }
+		.tiny { font-size: 12px; color: var(--ink-tertiary); }
+
+		.badge {
+			display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px;
+			background: var(--surface-2); color: var(--ink-muted); white-space: nowrap;
+		}
+		.badge.error { background: var(--ink); color: #fff; }
+		.badge.warn { background: var(--surface-3); color: var(--ink); }
+		.badge.info { background: var(--surface-2); color: var(--ink-muted); }
+		.badge.trace, .badge.none { background: var(--canvas); color: var(--ink-tertiary); border: 1px solid var(--hairline); }
+
+		.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; }
+		.kv .k { color: var(--ink-subtle); font-size: 12px; }
+		.kv .v { word-break: break-word; }
+		.empty { color: var(--ink-subtle); padding: 16px 0; }
+		.tagkey { color: var(--ink-subtle); }
+	</style>
+</head>
+
+<body>
+	<div class="topbar">
+		<span class="brand"><i></i>mock-OAP</span>
+		<nav>
+			<a href="./">演示导航</a>
+			<a href="./mock-oap.html">采集可观测</a>
+			<a href="./mock-oap-logs.html">日志</a>
+			<a href="./mock-oap-jvm.html">JVM 监控</a>
+		</nav>
+		<span class="spacer"></span>
+		<span class="tiny" id="listenInfo"></span>
+	</div>
+
+	<main>
+		<div class="hero">
+			<div class="eyebrow">进程内采集 · 日志</div>
+			<h1>mock-OAP 接收到的日志</h1>
+			<p>
+				本进程内嵌的 mock-OAP 实现了 SkyWalking 原生 <code class="mono">LogReportService</code>,
+				所以应用 <code class="mono">logback.xml</code> 里那个
+				<code class="mono">GRPCLogClientAppender</code> 不再报 <code class="mono">UNIMPLEMENTED</code>,
+				日志被收进本地环形缓冲。<strong>采集器自身的日志会被拒收</strong>,避免「收日志 → 打日志 → 再被采集」无限放大。
+			</p>
+			<p class="tiny">
+				级别说明:SkyWalking 的 <code class="mono">LogData</code> 没有 level 字段,这里的级别优先取 tags 里的
+				<code class="mono">level</code>,否则从正文里找独立成词的级别关键字;都取不到就显示「未分级」。
+			</p>
+		</div>
+
+		<div class="panel">
+			<h2>缓冲概览 <span class="api">GET /mock-oap/logs/stats</span></h2>
+			<div class="tiles" id="tiles"></div>
+		</div>
+
+		<div class="panel">
+			<h2>查询 <span class="api">GET /mock-oap/logs?limit=&amp;traceId=&amp;level=&amp;q=</span></h2>
+			<div class="toolbar">
+				<label>limit <input type="number" id="fLimit" value="100" min="1" max="2000" step="50"></label>
+				<label>traceId <input type="text" id="fTrace" placeholder="精确匹配,留空不过滤" style="width:300px"></label>
+				<label>level
+					<select id="fLevel">
+						<option value="">全部</option>
+						<option value="ERROR">ERROR</option>
+						<option value="WARN">WARN</option>
+						<option value="INFO">INFO</option>
+						<option value="DEBUG">DEBUG</option>
+						<option value="TRACE">TRACE</option>
+						<option value="FATAL">FATAL</option>
+					</select>
+				</label>
+				<label>关键字 <input type="text" id="fQ" placeholder="正文 / 服务名 / 端点" style="width:220px"></label>
+				<button class="btn-primary" id="apply">应用</button>
+				<button class="btn-secondary" id="reset">重置</button>
+				<button class="btn-secondary" id="openJson">打开原始 JSON</button>
+				<label style="margin-left:auto"><input type="checkbox" id="auto"> 每 5 秒刷新</label>
+			</div>
+			<p class="tiny" id="queryInfo" style="margin:12px 0 0"></p>
+		</div>
+
+		<div class="panel">
+			<h2>日志 <span class="api">GET /mock-oap/logs</span> <span class="muted tiny" id="rowCount"></span></h2>
+			<table class="grid">
+				<thead>
+					<tr>
+						<th style="width:170px;">时间</th>
+						<th style="width:80px;">级别</th>
+						<th style="width:160px;">服务 / 实例</th>
+						<th style="width:300px;">traceId</th>
+						<th>正文(点行展开详情)</th>
+					</tr>
+				</thead>
+				<tbody id="rows"></tbody>
+			</table>
+			<div class="empty" id="empty" style="display:none"></div>
+		</div>
+	</main>
+
+	<script>
+		(function () {
+			var API = '../mock-oap/logs';
+			var STATS = '../mock-oap/logs/stats';
+			var STATUS = '../mock-oap/status';
+
+			var state = { logs: [], expanded: {}, seq: 0 };
+
+			function $(id) { return document.getElementById(id); }
+
+			function esc(v) {
+				return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+					return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+				});
+			}
+
+			function fmtTime(ms) {
+				if (!ms) return '-';
+				var d = new Date(Number(ms));
+				var p = function (n) { return (n < 10 ? '0' : '') + n; };
+				return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+					p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' +
+					('00' + d.getMilliseconds()).slice(-3);
+			}
+
+			function levelClass(level) {
+				var l = (level || '').toUpperCase();
+				if (l === 'ERROR' || l === 'FATAL') return 'error';
+				if (l === 'WARN') return 'warn';
+				if (l === 'INFO') return 'info';
+				if (l === 'DEBUG' || l === 'TRACE') return 'trace';
+				return 'none';
+			}
+
+			function intVal(id, def, min, max) {
+				var v = parseInt($(id).value, 10);
+				if (isNaN(v)) v = def;
+				return Math.min(Math.max(v, min), max);
+			}
+
+			/* ---- 缓冲概览 ---- */
+			function loadStats() {
+				fetch(STATS).then(function (r) {
+					if (!r.ok) throw new Error('HTTP ' + r.status);
+					return r.json();
+				}).then(function (s) {
+					var tiles = [
+						['缓存条数 / 上限', s.size + ' / ' + s.capacity],
+						['累计接收(不含拒收)', s.receivedTotal],
+						['拒收自己(防放大)', s.droppedSelfTotal]
+					];
+					$('tiles').innerHTML = tiles.map(function (t) {
+						return '<div class="tile"><div class="k">' + esc(t[0]) + '</div><div class="v">' + esc(t[1]) + '</div></div>';
+					}).join('') + '<div class="tile"><div class="k">采集开关 / 端口</div><div class="v" id="tilePort">-</div></div>';
+				}).catch(function (err) {
+					$('tiles').innerHTML = '<div class="tile"><div class="k">概览加载失败</div><div class="v">' + esc(err) + '</div></div>';
+				});
+				fetch(STATUS).then(function (r) { return r.ok ? r.json() : null; }).then(function (st) {
+					if (!st) return;
+					var el = $('tilePort');
+					if (el) el.textContent = (st.enabled ? 'on' : 'off') + ' / ' + st.listenPort;
+					$('listenInfo').textContent = 'running=' + st.running + ' · agentBooted=' + st.agentBooted;
+				}).catch(function () { });
+			}
+
+			/* ---- 日志查询 ---- */
+			function buildQuery() {
+				var qs = [];
+				var traceId = ($('fTrace').value || '').trim();
+				var level = $('fLevel').value;
+				var q = ($('fQ').value || '').trim();
+				qs.push('limit=' + intVal('fLimit', 100, 1, 2000));
+				if (traceId) qs.push('traceId=' + encodeURIComponent(traceId));
+				if (level) qs.push('level=' + encodeURIComponent(level));
+				if (q) qs.push('q=' + encodeURIComponent(q));
+				return qs.join('&');
+			}
+
+			function loadLogs() {
+				var url = API + '?' + buildQuery();
+				$('queryInfo').innerHTML = '请求:<code class="mono">' + esc(url) + '</code>';
+				$('rowCount').textContent = '加载中…';
+				fetch(url).then(function (r) {
+					if (!r.ok) throw new Error('HTTP ' + r.status);
+					return r.json();
+				}).then(function (list) {
+					state.logs = Array.isArray(list) ? list : [];
+					renderRows();
+				}).catch(function (err) {
+					state.logs = [];
+					$('rowCount').textContent = '';
+					$('rows').innerHTML = '';
+					$('empty').style.display = 'block';
+					$('empty').innerHTML = '日志接口调用失败:' + esc(err);
+				});
+			}
+
+			function renderRows() {
+				var list = state.logs;
+				$('rowCount').textContent = '(本次返回 ' + list.length + ' 条)';
+				if (!list.length) {
+					$('rows').innerHTML = '';
+					$('empty').style.display = 'block';
+					$('empty').innerHTML = '没有匹配的日志。若刚启动:先触发一条业务请求,让 logback 经 GRPCLogClientAppender 打日志;' +
+						'注意采集器自己的日志会被拒收(见「拒收自己」计数)。';
+					return;
+				}
+				$('empty').style.display = 'none';
+				$('rows').innerHTML = list.map(function (l, i) {
+					var open = !!state.expanded[i];
+					var rows = '<tr class="row" data-i="' + i + '">' +
+						'<td class="mono">' + esc(fmtTime(l.timestamp)) + '</td>' +
+						'<td><span class="badge ' + levelClass(l.level) + '">' + esc(l.level || '未分级') + '</span></td>' +
+						'<td>' + esc(l.service || '-') +
+						(l.serviceInstance ? '<div class="tiny">' + esc(l.serviceInstance) + '</div>' : '') + '</td>' +
+						'<td class="mono">' + (l.traceId
+							? '<a class="link" href="./mock-oap-trace.html?traceId=' + encodeURIComponent(l.traceId) + '" target="_blank">' + esc(l.traceId) + '</a>'
+							: '<span class="muted">无(不在链路上下文中)</span>') +
+						(l.traceSegmentId ? '<div class="tiny">seg ' + esc(l.traceSegmentId) + ' · span ' + esc(l.spanId) + '</div>' : '') +
+						'</td>' +
+						'<td><div class="msg">' + esc(shorten(l.content, 300)) + '</div></td>' +
+						'</tr>';
+					if (open) {
+						rows += '<tr class="detail"><td colspan="5">' + detailHtml(l) + '</td></tr>';
+					}
+					return rows;
+				}).join('');
+			}
+
+			function shorten(s, n) {
+				s = s == null ? '' : String(s);
+				return s.length <= n ? s : s.slice(0, n) + ' …';
+			}
+
+			function detailHtml(l) {
+				var kv = [
+					['接收时间', fmtTime(l.receivedAt)],
+					['上报时间', fmtTime(l.timestamp)],
+					['服务实例', l.serviceInstance || '-'],
+					['端点(endpoint)', l.endpoint || '-'],
+					['layer', l.layer || '-'],
+					['正文类型', l.contentType || '-'],
+					['traceId', l.traceId || '-'],
+					['traceSegmentId', l.traceSegmentId || '-'],
+					['spanId', l.traceSegmentId ? String(l.spanId) : '-']
+				];
+				var tags = l.tags || {};
+				var tagKeys = Object.keys(tags);
+				return '<div class="kv">' + kv.map(function (r) {
+					return '<div class="k">' + esc(r[0]) + '</div><div class="v mono">' + esc(r[1]) + '</div>';
+				}).join('') + '</div>' +
+					(tagKeys.length
+						? '<div style="margin-top:12px"><div class="k">tags</div><table class="grid" style="margin-top:6px"><tbody>' +
+						tagKeys.map(function (k) {
+							return '<tr><td class="tagkey mono" style="width:220px">' + esc(k) + '</td><td class="mono">' + esc(tags[k]) + '</td></tr>';
+						}).join('') + '</tbody></table></div>'
+						: '<div class="tiny" style="margin-top:12px">无 tags</div>') +
+					'<div style="margin-top:12px"><div class="k">正文</div><pre class="mono msg" style="margin:6px 0 0;white-space:pre-wrap;word-break:break-word">' + esc(l.content) + '</pre></div>';
+			}
+
+			/* ---- 交互 ---- */
+			$('rows').addEventListener('click', function (e) {
+				var tr = e.target.closest ? e.target.closest('tr.row') : null;
+				if (!tr) return;
+				// 点到 traceId 链接就让它跳转
+				if (e.target.closest && e.target.closest('a')) return;
+				var i = tr.getAttribute('data-i');
+				state.expanded[i] = !state.expanded[i];
+				renderRows();
+			});
+
+			$('apply').addEventListener('click', loadLogs);
+			$('reset').addEventListener('click', function () {
+				$('fLimit').value = 100;
+				$('fTrace').value = '';
+				$('fLevel').value = '';
+				$('fQ').value = '';
+				state.expanded = {};
+				loadLogs();
+			});
+			$('openJson').addEventListener('click', function () {
+				window.open(API + '?' + buildQuery(), '_blank');
+			});
+			['fLimit', 'fTrace', 'fLevel', 'fQ'].forEach(function (id) {
+				$(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') loadLogs(); });
+			});
+
+			var timer = null;
+			$('auto').addEventListener('change', function () {
+				if (this.checked) {
+					timer = setInterval(function () { loadStats(); loadLogs(); }, 5000);
+				} else {
+					clearInterval(timer);
+					timer = null;
+				}
+			});
+
+			// 支持从其它页面带参数直达:?traceId=xxx&level=xxx
+			(function prefill() {
+				var p = new URLSearchParams(window.location.search);
+				if (p.get('traceId')) $('fTrace').value = p.get('traceId');
+				if (p.get('level')) $('fLevel').value = p.get('level');
+				if (p.get('q')) $('fQ').value = p.get('q');
+				if (p.get('limit')) $('fLimit').value = p.get('limit');
+			})();
+
+			loadStats();
+			loadLogs();
+		})();
+	</script>
+</body>
+
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+	<meta charset="UTF-8">
+	<title>mock-OAP 演示导航</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<style>
+		body { font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif; margin: 0; padding: 28px 24px 40px; background: #f4f6fb; color: #222; }
+		.page { max-width: 980px; margin: 0 auto; }
+		h1 { font-size: 22px; margin: 0 0 6px; color: #1b2b48; }
+		.tip { color: #5f6f85; font-size: 13px; margin: 0 0 18px; line-height: 1.7; }
+		.status { background: #fff; border: 1px solid #e8edf5; border-radius: 8px; padding: 12px 16px; margin-bottom: 22px; font-size: 12px; color: #5f6f85; display: flex; flex-wrap: wrap; gap: 6px 22px; }
+		.status b { color: #1e293b; font-weight: 600; }
+		.status .ok { color: #047857; }
+		.status .bad { color: #b91c1c; }
+		h2 { font-size: 15px; color: #243b5a; margin: 0 0 12px; }
+		.panel { background: #fff; border: 1px solid #e8edf5; border-radius: 8px; padding: 16px; margin-bottom: 22px; }
+		.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+		button { border: 0; background: #2563eb; color: #fff; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+		button.ghost { background: #eef2f7; color: #334155; }
+		button:disabled { opacity: .55; cursor: default; }
+		.muted { color: #94a3b8; font-size: 12px; }
+		#result { margin-top: 10px; font-size: 12px; color: #475569; min-height: 18px; }
+		.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+		a.card { display: block; background: #fff; border: 1px solid #e8edf5; border-radius: 8px; padding: 14px 16px; text-decoration: none; color: #1e293b; transition: border-color .15s, box-shadow .15s; }
+		a.card:hover { border-color: #bfd3f6; box-shadow: 0 2px 10px rgba(37, 99, 235, .10); }
+		.kicker { display: inline-block; padding: 1px 8px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 11px; margin-bottom: 9px; }
+		.card h3 { margin: 0 0 5px; font-size: 14px; color: #1b2b48; }
+		.card p { margin: 0; font-size: 12px; line-height: 1.6; color: #64748b; }
+		code { background: #f1f5f9; padding: 1px 4px; border-radius: 3px; color: #0d6efd; }
+		.foot { margin-top: 18px; font-size: 12px; color: #94a3b8; line-height: 1.7; }
+		a { color: #2563eb; }
+	</style>
+</head>
+
+<body>
+<div class="page">
+	<h1>mock-OAP 演示导航</h1>
+	<p class="tip">
+		本进程同时是<strong>业务应用</strong>和 <strong>mock-OAP 接收端</strong>。下面的按钮会制造演示流量,
+		页面入口按用途分组 —— 也可以从页面顶部互相跳转。
+	</p>
+
+	<div class="status" id="status">
+		<span class="muted">读取采集状态…</span>
+	</div>
+
+	<div class="panel">
+		<h2>第一步:生成演示流量</h2>
+		<div class="toolbar">
+			<button data-url="/demo/chain?steps=3" data-label="链路">生成链路(3 跳)</button>
+			<button class="ghost" data-url="/demo/slow?delayMs=500" data-label="慢调用">慢调用(500ms)</button>
+			<button class="ghost" data-url="/demo/error" data-label="错误调用">错误调用</button>
+		</div>
+		<div id="result" class="muted">生成后打开「采集总览」,点链路清单里的 traceId 看时序图。</div>
+	</div>
+
+	<div>
+		<h2>第二步:打开页面</h2>
+		<div class="cards">
+			<a class="card" href="/mock-oap.html">
+				<span class="kicker">总览</span>
+				<h3>采集可观测</h3>
+				<p>采集状态、链路清单、最近日志。点 traceId 进入链路图。</p>
+			</a>
+			<a class="card" href="/mock-oap-logs.html">
+				<span class="kicker">日志</span>
+				<h3>日志检索</h3>
+				<p>按 traceId、级别、关键字查日志,支持跳到对应链路。</p>
+			</a>
+			<a class="card" href="/mock-oap-jvm.html">
+				<span class="kicker">指标</span>
+				<h3>JVM 指标</h3>
+				<p>Agent 上报的堆内存、GC、线程等曲线。</p>
+			</a>
+			<a class="card" href="/mock-oap.html">
+				<span class="kicker">链路</span>
+				<h3>链路时序图</h3>
+				<p>单条 trace 的时序 / 树 / 表格视图,从总览里的 traceId 进入。</p>
+			</a>
+		</div>
+	</div>
+
+	<p class="foot">
+		数据保存在本进程内存中,重启即清空。接口清单见 <a href="/mock-oap.html">采集总览</a> 各面板标题,
+		接入方式见 <code>demo/README.md</code> 与 <code>../docs/usage.md</code>。
+	</p>
+</div>
+
+<script>
+	/* ---------- 采集状态 ---------- */
+	function loadStatus() {
+		var el = document.getElementById('status');
+		fetch('/mock-oap/status', { headers: { 'Accept': 'application/json' } })
+			.then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+			.then(function (st) {
+				var run = st.running
+					? '<span class="ok">运行中</span>'
+					: '<span class="bad">未运行</span>' + (st.skipReason ? '(' + st.skipReason + ')' : '');
+				el.innerHTML =
+					'<span>采集器:<b>' + run + '</b></span>' +
+					'<span>端口:<b>' + st.configuredPort + '</b></span>' +
+					'<span>agent:<b>' + (st.agentBooted ? '已启动' : '未启动') + '</b></span>' +
+					'<span>链路缓存:<b>' + st.bufferSize + ' / ' + st.bufferCapacity + '</b></span>' +
+					'<span>日志缓存:<b>' + st.logBufferSize + ' / ' + st.logBufferCapacity + '</b></span>';
+			})
+			.catch(function (e) {
+				el.innerHTML = '<span class="bad">读取状态失败:' + e.message + '</span>';
+			});
+	}
+
+	/* ---------- 演示流量按钮 ---------- */
+	function wireButtons() {
+		var buttons = document.querySelectorAll('button[data-url]');
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].addEventListener('click', function () {
+				var btn = this;
+				var url = btn.getAttribute('data-url');
+				var label = btn.getAttribute('data-label');
+				setAllDisabled(true);
+				document.getElementById('result').textContent = '调用 ' + url + ' …';
+
+				fetch(url, { headers: { 'Accept': 'application/json' } })
+					.then(function (r) {
+						return r.text().then(function (body) {
+							return { ok: r.ok, status: r.status, body: body };
+						});
+					})
+					.then(function (res) {
+						if (!res.ok) {
+							// 错误调用按钮本来就期望 500
+							if (url.indexOf('/demo/error') >= 0 && res.status === 500) {
+								document.getElementById('result').textContent = '已按预期抛出异常(HTTP 500),去「采集总览」看 ERROR 链路。';
+								return;
+							}
+							throw new Error('HTTP ' + res.status);
+						}
+						var data = JSON.parse(res.body);
+						var text;
+						if (data.orderId) {
+							text = '链路 ' + data.orderId + ':' + data.steps + ' 次调用,' + data.costMs + ' ms。';
+						} else if (data.delayMs != null) {
+							text = '慢调用 ' + data.delayMs + ' ms。';
+						} else {
+							text = '完成:' + res.body;
+						}
+						document.getElementById('result').textContent = text + ' 稍后打开「采集总览」查看(点 traceId)。';
+					})
+					.catch(function (e) {
+						document.getElementById('result').textContent =
+							label + ' 调用失败:' + e.message + '。检查本进程是否用 -javaagent 启动。';
+					})
+					.then(function () { setAllDisabled(false); });
+			});
+		}
+	}
+
+	function setAllDisabled(disabled) {
+		var buttons = document.querySelectorAll('button[data-url]');
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].disabled = disabled;
+		}
+	}
+
+	loadStatus();
+	wireButtons();
+</script>
+</body>
+
+</html>

@@ -1,0 +1,1957 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>链路时序图 — mock-OAP 观测</title>
+    <style>
+        /*
+         * 皮肤遵循 DESIGN.md(Linear 浅色变体,与 inner/page/font-observability.html 同源):
+         * 画布 #fafafa + 纯白卡片 #ffffff + hairline 描边,薰衣草紫 #5e6ad2 只用于
+         * 品牌标、主按钮、焦点环、链接强调;不引入第二种彩色(服务色用 lavender 梯 + 灰阶)。
+         */
+        :root {
+            --canvas: #fafafa;
+            --surface-1: #ffffff;
+            --surface-2: #f0f1f4;
+            --surface-3: #e8eaee;
+            --surface-4: #eceef1;
+            --hairline: #e6e7eb;
+            --hairline-strong: #d5d7dd;
+            --hairline-tertiary: #c9ccd3;
+            --ink: #18181c;
+            --ink-muted: #3f4046;
+            --ink-subtle: #6b7280;
+            --ink-tertiary: #9ca3af;
+            --primary: #5e6ad2;
+            --primary-hover: #4a56c8;
+            --primary-focus: #5e69d1;
+            --on-primary: #ffffff;
+            --success: #1f8a37;
+            --inverse-canvas: #18181c;
+            --inverse-ink: #ffffff;
+
+            --radius-xs: 4px;
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --radius-pill: 9999px;
+
+            --font-display: Inter, -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, Roboto, sans-serif;
+            --font-text: Inter, -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, Roboto, sans-serif;
+            --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            background: var(--canvas);
+            color: var(--ink);
+            font-family: var(--font-text);
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        a {
+            color: var(--primary-hover);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .spacer {
+            flex: 1 1 auto;
+        }
+
+        /* ===== top nav ===== */
+        .top-nav {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            height: 56px;
+            padding: 0 24px;
+            background: var(--canvas);
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .brand-mark {
+            width: 20px;
+            height: 20px;
+            border-radius: var(--radius-sm);
+            background: var(--primary);
+            color: var(--on-primary);
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+        }
+
+        .wordmark {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+            white-space: nowrap;
+        }
+
+        .crumb {
+            color: var(--ink-subtle);
+            font-size: 14px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: var(--font-mono);
+            font-size: 13px;
+        }
+
+        /* ===== buttons / inputs ===== */
+        .btn {
+            font-family: var(--font-text);
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.2;
+            border-radius: var(--radius-md);
+            padding: 6px 12px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: background 120ms ease, border-color 120ms ease;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: var(--on-primary);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--surface-1);
+            color: var(--ink);
+            border-color: var(--hairline);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-2);
+            border-color: var(--hairline-strong);
+        }
+
+        .text-input {
+            background: var(--surface-1);
+            color: var(--ink);
+            font-family: var(--font-text);
+            font-size: 13px;
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-md);
+            padding: 6px 12px;
+            min-width: 220px;
+            outline: none;
+        }
+
+        .text-input:focus {
+            border-color: var(--primary-focus);
+            box-shadow: 0 0 0 2px rgba(94, 105, 209, 0.35);
+        }
+
+        /* ===== pill tabs(对齐 DESIGN.md pricing-tab 的 default / selected)===== */
+        .pill-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            flex: 0 0 auto;
+        }
+
+        .pill {
+            font-family: var(--font-text);
+            font-size: 13px;
+            font-weight: 500;
+            line-height: 1.2;
+            background: var(--canvas);
+            color: var(--ink-subtle);
+            border: 0;
+            border-radius: var(--radius-pill);
+            padding: 6px 13px;
+            cursor: pointer;
+            transition: background 120ms ease, color 120ms ease;
+        }
+
+        .pill:hover {
+            background: var(--surface-2);
+            color: var(--ink-muted);
+        }
+
+        .pill.active {
+            background: var(--surface-2);
+            color: var(--ink);
+        }
+
+        /* ===== sub bar ===== */
+        .sub-bar {
+            flex: 0 0 auto;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px 12px;
+            padding: 8px 24px;
+            background: var(--canvas);
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 10px;
+            min-width: 0;
+        }
+
+        .legend-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--ink-muted);
+            white-space: nowrap;
+        }
+
+        .legend-chip i {
+            width: 9px;
+            height: 9px;
+            border-radius: var(--radius-xs);
+            display: inline-block;
+            box-shadow: inset 0 0 0 1px rgba(24, 24, 28, 0.12);
+        }
+
+        /* ===== stat cards ===== */
+        .stat-grid {
+            flex: 0 0 auto;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            padding: 12px 24px 0;
+        }
+
+        .stat-card {
+            background: var(--surface-1);
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-lg);
+            padding: 12px 14px;
+            transition: background 120ms ease, border-color 120ms ease;
+        }
+
+        .stat-card:hover {
+            background: var(--surface-2);
+            border-color: var(--hairline-strong);
+        }
+
+        .stat-card .label {
+            color: var(--ink-subtle);
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            margin-bottom: 6px;
+            white-space: nowrap;
+        }
+
+        .stat-card .value {
+            font-family: var(--font-display);
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.4px;
+            line-height: 1.2;
+            word-break: break-all;
+        }
+
+        .stat-card .value.mono {
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: 400;
+            letter-spacing: 0;
+            color: var(--ink-muted);
+        }
+
+        /* ===== layout ===== */
+        .main {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .view {
+            display: none;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            padding: 12px 24px 0;
+        }
+
+        .view.active {
+            display: flex;
+        }
+
+        .panel {
+            flex: 1 1 auto;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            background: var(--surface-1);
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .panel-head {
+            flex: 0 0 auto;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .panel-head h2 {
+            font-family: var(--font-display);
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+            margin: 0;
+        }
+
+        .scroll {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: auto;
+        }
+
+        .empty {
+            color: var(--ink-subtle);
+            font-size: 14px;
+            padding: 24px;
+            margin: 0;
+        }
+
+        .hint-box {
+            margin: 24px;
+            background: var(--surface-2);
+            border: 1px solid var(--hairline-strong);
+            border-radius: var(--radius-md);
+            color: var(--ink-muted);
+            font-size: 13px;
+            padding: 10px 14px;
+        }
+
+        .hint-box.error {
+            background: #fef2f2;
+            border-color: #fca5a5;
+            color: #991b1b;
+        }
+
+        .mono {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--ink);
+        }
+
+        /* ===== badges / status ===== */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.4;
+            background: var(--surface-2);
+            color: var(--ink-muted);
+            border: 1px solid var(--hairline);
+            white-space: nowrap;
+        }
+
+        .badge.ok {
+            color: var(--success);
+            border-color: rgba(31, 138, 55, 0.4);
+            background: rgba(31, 138, 55, 0.08);
+        }
+
+        .badge.err {
+            color: var(--inverse-ink);
+            background: var(--inverse-canvas);
+            border-color: var(--inverse-canvas);
+        }
+
+        /* ===== waterfall ===== */
+        .wf-ruler,
+        .wf-row {
+            display: flex;
+            align-items: stretch;
+        }
+
+        .wf-ruler {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            height: 32px;
+            background: var(--surface-2);
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .wf-gutter {
+            flex: 0 0 250px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 10px;
+            min-width: 0;
+            background: var(--surface-1);
+            border-right: 1px solid var(--hairline);
+        }
+
+        .wf-ruler .wf-gutter,
+        .wf-ruler .wf-dur {
+            background: var(--surface-2);
+            color: var(--ink-subtle);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            letter-spacing: 0.4px;
+        }
+
+        .wf-track {
+            position: relative;
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .wf-ruler .wf-track {
+            border-right: 1px solid var(--hairline);
+        }
+
+        .wf-dur {
+            flex: 0 0 78px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 0 10px;
+            background: var(--surface-1);
+            color: var(--ink-muted);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .wf-row {
+            position: relative;
+            min-height: 26px;
+            border-bottom: 1px solid var(--hairline);
+            cursor: pointer;
+            transition: background 120ms ease;
+        }
+
+        .wf-row:last-child {
+            border-bottom: 0;
+        }
+
+        .wf-row:hover {
+            background: var(--surface-2);
+        }
+
+        .wf-row:hover .wf-gutter,
+        .wf-row:hover .wf-dur {
+            background: var(--surface-2);
+        }
+
+        .wf-row.selected {
+            background: var(--surface-2);
+        }
+
+        .wf-row.selected .wf-gutter,
+        .wf-row.selected .wf-dur {
+            background: var(--surface-2);
+        }
+
+        .wf-row.selected .wf-gutter {
+            box-shadow: inset 2px 0 0 var(--primary);
+        }
+
+        .strip {
+            flex: 0 0 3px;
+            width: 3px;
+            align-self: stretch;
+            margin: 4px 0;
+            border-radius: var(--radius-pill);
+        }
+
+        .ico {
+            flex: 0 0 20px;
+            text-align: center;
+            font-size: 11px;
+            line-height: 1;
+            font-family: var(--font-mono);
+            color: var(--ink-subtle);
+        }
+
+        .ico.error {
+            color: var(--ink);
+            font-weight: 600;
+        }
+
+        .caret {
+            flex: 0 0 12px;
+            text-align: center;
+            color: var(--ink-tertiary);
+            font-size: 11px;
+            user-select: none;
+        }
+
+        .caret.leaf {
+            visibility: hidden;
+        }
+
+        .gname {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--ink);
+            font-size: 13px;
+        }
+
+        .gl {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: var(--hairline);
+            pointer-events: none;
+        }
+
+        .tick {
+            position: absolute;
+            top: 50%;
+            color: var(--ink-subtle);
+            font-size: 11px;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+        }
+
+        .bar {
+            position: absolute;
+            top: 5px;
+            height: 16px;
+            border-radius: var(--radius-xs);
+            min-width: 2px;
+            cursor: pointer;
+            overflow: hidden;
+            box-shadow: inset 0 0 0 1px rgba(24, 24, 28, 0.12);
+        }
+
+        .bar:hover {
+            box-shadow: inset 0 0 0 1px rgba(24, 24, 28, 0.2), 0 0 0 2px rgba(94, 105, 209, 0.25);
+        }
+
+        .bar.err {
+            box-shadow: inset 0 0 0 2px var(--ink);
+        }
+
+        .bar .lbl {
+            display: block;
+            padding: 0 6px;
+            line-height: 16px;
+            font-size: 11px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
+        }
+
+        .lbl.out {
+            position: absolute;
+            top: 5px;
+            line-height: 16px;
+            font-size: 11px;
+            color: var(--ink);
+            white-space: nowrap;
+            pointer-events: none;
+            padding-left: 6px;
+        }
+
+        .lbl .arrow {
+            opacity: 0.62;
+            padding: 0 1px;
+        }
+
+        /* ===== tree view ===== */
+        .tree-head,
+        .tree-row {
+            display: grid;
+            grid-template-columns: minmax(320px, 38%) 1fr;
+        }
+
+        .tree-head {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--surface-2);
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .th-left,
+        .th-right {
+            padding: 8px 12px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            letter-spacing: 0.4px;
+            color: var(--ink-subtle);
+        }
+
+        .th-left {
+            border-right: 1px solid var(--hairline);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .th-right {
+            position: relative;
+            height: 34px;
+        }
+
+        .axis-label {
+            position: absolute;
+            top: 50%;
+            color: var(--ink-subtle);
+            font-size: 11px;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+        }
+
+        .tree-row {
+            border-bottom: 1px solid var(--hairline);
+            cursor: pointer;
+            transition: background 120ms ease;
+        }
+
+        .tree-row:hover {
+            background: var(--surface-2);
+        }
+
+        .tree-row.selected {
+            background: var(--surface-2);
+            box-shadow: inset 2px 0 0 var(--primary);
+        }
+
+        .tr-left {
+            padding: 6px 12px;
+            border-right: 1px solid var(--hairline);
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .tr-right {
+            position: relative;
+            min-height: 34px;
+        }
+
+        .dot {
+            flex: 0 0 9px;
+            width: 9px;
+            height: 9px;
+            border-radius: var(--radius-pill);
+            margin-top: 6px;
+            box-shadow: inset 0 0 0 1px rgba(24, 24, 28, 0.12);
+        }
+
+        .op-wrap {
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .op-name {
+            color: var(--ink);
+            line-height: 1.35;
+            word-break: break-all;
+        }
+
+        .op-sub {
+            color: var(--ink-subtle);
+            font-size: 12px;
+            line-height: 1.3;
+            margin-top: 2px;
+            word-break: break-all;
+        }
+
+        .tr-right .bar {
+            top: 50%;
+            transform: translateY(-50%);
+            height: 14px;
+        }
+
+        .tr-right .bar .lbl {
+            display: none;
+        }
+
+        /* ===== table view ===== */
+        .table-scroll {
+            overflow: auto;
+        }
+
+        table.span-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        table.span-table thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--surface-2);
+            color: var(--ink-subtle);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0.4px;
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--hairline);
+            white-space: nowrap;
+        }
+
+        table.span-table tbody td {
+            padding: 9px 14px;
+            border-bottom: 1px solid var(--hairline);
+            color: var(--ink-muted);
+            vertical-align: top;
+        }
+
+        table.span-table tbody tr {
+            cursor: pointer;
+        }
+
+        table.span-table tbody tr:hover td {
+            background: var(--surface-2);
+        }
+
+        table.span-table tbody tr.selected td {
+            background: var(--surface-2);
+        }
+
+        table.span-table tbody tr.selected td:first-child {
+            box-shadow: inset 2px 0 0 var(--primary);
+        }
+
+        table.span-table .op-name {
+            display: inline;
+        }
+
+        table.span-table td.mono {
+            white-space: nowrap;
+        }
+
+        /* ===== list view ===== */
+        .list-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--hairline);
+            cursor: pointer;
+            transition: background 120ms ease;
+        }
+
+        .list-item:hover,
+        .list-item.selected {
+            background: var(--surface-2);
+        }
+
+        .list-item.selected {
+            box-shadow: inset 2px 0 0 var(--primary);
+        }
+
+        .li-idx {
+            flex: 0 0 36px;
+            text-align: right;
+            color: var(--ink-tertiary);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .li-main {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .li-name {
+            color: var(--ink);
+            word-break: break-all;
+        }
+
+        .li-sub {
+            color: var(--ink-subtle);
+            font-size: 12px;
+            margin-top: 1px;
+            word-break: break-all;
+        }
+
+        .li-track {
+            flex: 0 0 36%;
+            position: relative;
+            height: 18px;
+        }
+
+        .li-track .bar {
+            top: 1px;
+            height: 16px;
+        }
+
+        .li-dur {
+            flex: 0 0 84px;
+            text-align: right;
+            color: var(--ink-muted);
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ===== span detail ===== */
+        .span-detail {
+            flex: 0 0 auto;
+            max-height: 48vh;
+            display: flex;
+            flex-direction: column;
+            margin: 12px 24px 16px;
+            background: var(--surface-1);
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+        }
+
+        .sd-title {
+            flex: 1 1 auto;
+            min-width: 0;
+            font-family: var(--font-display);
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+            color: var(--ink);
+            word-break: break-all;
+        }
+
+        .sd-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 6px 20px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--hairline);
+        }
+
+        .sd-kv {
+            display: flex;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .sd-kv .k {
+            flex: 0 0 92px;
+            color: var(--ink-subtle);
+            font-size: 12px;
+        }
+
+        .sd-kv .v {
+            color: var(--ink);
+            word-break: break-all;
+        }
+
+        .sd-kv .v.mono {
+            font-size: 12px;
+        }
+
+        .sd-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            padding: 14px 16px;
+            overflow: auto;
+        }
+
+        table.kv-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        table.kv-table thead th {
+            background: var(--surface-2);
+            color: var(--ink-subtle);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0.4px;
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--hairline);
+            white-space: nowrap;
+        }
+
+        table.kv-table td {
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--hairline);
+            vertical-align: top;
+            color: var(--ink-muted);
+            word-break: break-all;
+        }
+
+        table.kv-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        table.kv-table td.k {
+            width: 220px;
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--ink-muted);
+        }
+
+        table.kv-table b {
+            color: var(--primary-hover);
+            font-weight: 600;
+        }
+
+        pre.raw-json {
+            background: var(--canvas);
+            border: 1px solid var(--hairline);
+            border-radius: var(--radius-md);
+            color: var(--ink-muted);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            line-height: 1.5;
+            padding: 14px;
+            max-height: 420px;
+            overflow: auto;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* ===== floating ===== */
+        #barTip {
+            position: fixed;
+            z-index: 200;
+            display: none;
+            max-width: 460px;
+            background: var(--surface-1);
+            border: 1px solid var(--hairline-strong);
+            color: var(--ink);
+            font-size: 12px;
+            line-height: 1.55;
+            padding: 8px 10px;
+            border-radius: var(--radius-md);
+            pointer-events: none;
+            word-break: break-all;
+            box-shadow: 0 6px 20px rgba(24, 24, 28, 0.12);
+        }
+
+        #barTip b {
+            font-weight: 600;
+        }
+
+        #barTip .t-sub {
+            color: var(--ink-subtle);
+        }
+
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 32px;
+            transform: translateX(-50%) translateY(16px);
+            z-index: 300;
+            background: var(--inverse-canvas);
+            color: var(--inverse-ink);
+            font-size: 13px;
+            padding: 8px 16px;
+            border-radius: var(--radius-md);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 160ms ease, transform 160ms ease;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        @media (max-width: 1024px) {
+            .stat-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 768px) {
+
+            .top-nav,
+            .sub-bar {
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+
+            .view {
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+
+            .stat-grid {
+                grid-template-columns: 1fr;
+                padding-left: 16px;
+                padding-right: 16px;
+            }
+
+            .span-detail {
+                margin-left: 16px;
+                margin-right: 16px;
+            }
+
+            .wf-gutter {
+                flex-basis: 168px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="top-nav">
+        <span class="brand-mark">MO</span>
+        <span class="wordmark">mock-OAP 链路时序图</span>
+        <span class="crumb" id="traceIdText">—</span>
+        <span class="spacer"></span>
+        <a class="btn btn-secondary" href="./">演示导航</a>
+        <a class="btn btn-secondary" href="./mock-oap.html">← 链路列表</a>
+        <button class="btn btn-secondary" id="copyTraceBtn">复制 TraceID</button>
+        <button class="btn btn-secondary" id="linkBtn">复制链接</button>
+        <button class="btn btn-primary" id="reloadBtn">刷新</button>
+    </nav>
+
+    <div class="sub-bar">
+        <div class="pill-group" id="viewSwitch">
+            <button class="pill active" data-view="waterfall">时序图</button>
+            <button class="pill" data-view="tree">树结构</button>
+            <button class="pill" data-view="table">表格</button>
+            <button class="pill" data-view="list">列表</button>
+        </div>
+        <div class="pill-group" id="axisSwitch">
+            <button class="pill active" data-axis="clock">绝对时间</button>
+            <button class="pill" data-axis="rel">相对</button>
+        </div>
+        <span class="spacer"></span>
+        <div class="legend" id="legend"></div>
+        <input id="filterInput" class="text-input" type="text" placeholder="过滤 操作 / 服务 / peer">
+    </div>
+
+    <section class="stat-grid">
+        <div class="stat-card">
+            <div class="label">开始时间</div>
+            <div class="value mono" id="statStart">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">耗时</div>
+            <div class="value" id="statDur">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">SPAN</div>
+            <div class="value" id="statSpans">—</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">服务</div>
+            <div class="value" id="statServices">—</div>
+        </div>
+    </section>
+
+    <div class="main" id="main">
+        <div class="view active" id="view-waterfall"></div>
+        <div class="view" id="view-tree"></div>
+        <div class="view" id="view-table"></div>
+        <div class="view" id="view-list"></div>
+        <div class="span-detail" id="spanDetail" style="display:none"></div>
+    </div>
+
+    <div id="barTip"></div>
+    <div id="toast"></div>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var T0 = 0;
+            var TOTAL = 1;
+
+            /*
+             * 服务配色:D E S I G N.md 只允许一个彩色(lavender),其余走灰阶。
+             * 因此这里用「lavender 梯度 + 品牌灰」而不是彩虹色,保证多服务可区分又不引入第二种强调色。
+             */
+            var SERVICE_RAMP = [
+                '#5e6ad2', // primary
+                '#7a7fad', // brand-secure(薰衣草灰)
+                '#3f4046', // ink-muted
+                '#949ae4', // lavender 60%
+                '#6b7280', // ink-subtle
+                '#b4b8ee', // lavender 40%
+                '#9ca3af', // ink-tertiary
+                '#d8dbf9'  // lavender 20%
+            ];
+            var serviceColor = {};
+
+            var state = {
+                traceId: '',
+                roots: [],
+                nodes: [],
+                byKey: {},
+                services: [],
+                selected: null,
+                view: 'waterfall',
+                axis: 'clock',
+                collapsed: {},
+                filter: '',
+                detailTab: 'tags',
+                traceLogs: null,
+                traceLogsLoaded: false,
+                traceLogsLoading: false,
+                traceLogsError: ''
+            };
+
+            function $(id) { return document.getElementById(id); }
+
+            function esc(v) {
+                return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+                    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+                });
+            }
+
+            function num(v, d) {
+                var n = Number(v);
+                return isNaN(n) ? (d || 0) : n;
+            }
+
+            function pad(n, w) {
+                n = String(n);
+                while (n.length < (w || 2)) n = '0' + n;
+                return n;
+            }
+
+            function round3(v) { return Math.round(v * 1000) / 1000; }
+
+            function fmtTime(ms) {
+                if (!ms) return '';
+                var d = new Date(ms);
+                if (isNaN(d.getTime())) return String(ms);
+                return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+                    pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + pad(d.getMilliseconds(), 3);
+            }
+
+            function fmtClock(ms) {
+                var d = new Date(ms);
+                if (isNaN(d.getTime())) return '';
+                return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + pad(d.getMilliseconds(), 3);
+            }
+
+            function fmtDur(ms) {
+                ms = Number(ms) || 0;
+                if (ms < 1000) return (Math.round(ms * 100) / 100) + ' ms';
+                return (ms / 1000).toFixed(2) + ' s';
+            }
+
+            function colorOf(service) {
+                var key = String(service || '(unknown)');
+                if (!serviceColor[key]) {
+                    serviceColor[key] = SERVICE_RAMP[Object.keys(serviceColor).length % SERVICE_RAMP.length];
+                }
+                return serviceColor[key];
+            }
+
+            /** 条内文字用黑还是白,取决于该颜色的亮度(浅 lavender 上用墨色)。 */
+            function labelColorOn(hex) {
+                var h = String(hex).replace('#', '');
+                if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+                var r = parseInt(h.substring(0, 2), 16) / 255;
+                var g = parseInt(h.substring(2, 4), 16) / 255;
+                var b = parseInt(h.substring(4, 6), 16) / 255;
+                var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                return lum > 0.6 ? '#18181c' : '#ffffff';
+            }
+
+            function getQueryParam(name) {
+                return new URLSearchParams(window.location.search).get(name);
+            }
+
+            function normalizeTagList(tagList) {
+                if (!Array.isArray(tagList)) return [];
+                return tagList.map(function (t) {
+                    if (!t || typeof t !== 'object') return { key: '', value: '' };
+                    return {
+                        key: t.key != null ? String(t.key) : (t['tag-key'] != null ? String(t['tag-key']) : ''),
+                        value: t.value != null ? String(t.value) : (t['tag-value'] != null ? String(t['tag-value']) : '')
+                    };
+                });
+            }
+
+            function spanStart(n) { return num(n.span.startTime, 0); }
+            function spanEnd(n) { return num(n.span.endTime, spanStart(n)); }
+            function spanDur(n) { return Math.max(0, spanEnd(n) - spanStart(n)); }
+
+            function nodeKind(n) {
+                if (n.virtual) return 'virtual';
+                if (n.span.isError) return 'error';
+                var t = String(n.span.spanType || '').toLowerCase();
+                if (t === 'entry') return 'entry';
+                if (t === 'exit') return 'exit';
+                return 'local';
+            }
+
+            function iconGlyph(kind) {
+                if (kind === 'entry') return '&#8594;|';
+                if (kind === 'exit') return '|&#8592;';
+                if (kind === 'error') return '&#10006;';
+                return '&#9678;';
+            }
+
+            function sortCmp(a, b) {
+                return spanStart(a) - spanStart(b) || spanEnd(a) - spanEnd(b);
+            }
+
+            function buildTree(segments) {
+                var nodes = [];
+                var byKey = {};
+                var bySegSpan = {};
+                var segMaps = {};
+
+                segments.forEach(function (seg, si) {
+                    var segId = seg.recordId || seg.traceSegmentId || ('segment-' + si);
+                    var map = {};
+                    (seg.spans || []).forEach(function (raw) {
+                        var span = Object.assign({}, raw);
+                        span.tagList = normalizeTagList(span.tagList);
+                        var key = segId + '::' + span.spanId + '::' + nodes.length;
+                        var node = {
+                            key: key,
+                            span: span,
+                            segId: segId,
+                            segIdx: si,
+                            service: seg.service,
+                            instance: seg.serviceInstance,
+                            children: [],
+                            parent: null,
+                            depth: 0,
+                            virtual: false
+                        };
+                        map[String(span.spanId)] = node;
+                        bySegSpan[segId + '#' + span.spanId] = node;
+                        nodes.push(node);
+                        byKey[key] = node;
+                    });
+                    segMaps[segId] = map;
+                });
+
+                var roots = [];
+                nodes.forEach(function (node) {
+                    var span = node.span;
+                    var pid = span.parentSpanId;
+                    var parent = null;
+
+                    if (pid != null && String(pid) !== '-1') {
+                        var m = segMaps[node.segId];
+                        var p = m ? m[String(pid)] : null;
+                        if (p && p !== node) parent = p;
+                    }
+
+                    // 跨进程:本段没有父 span 时,顺着 refs 挂到别的段上(多语言链路靠这个成树)
+                    if (!parent && Array.isArray(span.refs)) {
+                        for (var i = 0; i < span.refs.length; i++) {
+                            var ref = span.refs[i] || {};
+                            var rk = ref.parentTraceSegmentId + '#' + ref.parentSpanId;
+                            if (bySegSpan[rk]) { parent = bySegSpan[rk]; break; }
+                        }
+                    }
+
+                    if (parent) {
+                        parent.children.push(node);
+                        node.parent = parent;
+                    } else {
+                        roots.push(node);
+                    }
+                });
+
+                function sortRec(n) {
+                    n.children.sort(sortCmp);
+                    n.children.forEach(sortRec);
+                }
+                roots.sort(sortCmp);
+                roots.forEach(sortRec);
+
+                function setDepth(n, d) {
+                    n.depth = d;
+                    n.children.forEach(function (c) { setDepth(c, d + 1); });
+                }
+                roots.forEach(function (r) { setDepth(r, 0); });
+
+                return { roots: roots, nodes: nodes, byKey: byKey };
+            }
+
+            function computeRange(nodes) {
+                var min = Infinity;
+                var max = -Infinity;
+                nodes.forEach(function (n) {
+                    var s = spanStart(n);
+                    var e = spanEnd(n);
+                    if (s < min) min = s;
+                    if (e > max) max = e;
+                });
+                if (!nodes.length || min === Infinity) { T0 = 0; TOTAL = 1; return; }
+                T0 = min;
+                TOTAL = (max - min) || 1;
+            }
+
+            function computeRows() {
+                var q = state.filter.trim().toLowerCase();
+                var rows = [];
+
+                function matches(n) {
+                    var hay = (n.span.operationName || '') + ' ' + (n.span.componentName || '') + ' ' +
+                        (n.service || '') + ' ' + (n.span.peer || '');
+                    return hay.toLowerCase().indexOf(q) >= 0;
+                }
+
+                function subMatches(n) {
+                    if (matches(n)) return true;
+                    for (var i = 0; i < n.children.length; i++) {
+                        if (subMatches(n.children[i])) return true;
+                    }
+                    return false;
+                }
+
+                function walk(n) {
+                    if (q && !subMatches(n)) return;
+                    rows.push(n);
+                    var expanded = q ? true : !state.collapsed[n.key];
+                    if (expanded && n.children.length) n.children.forEach(walk);
+                }
+
+                state.roots.forEach(walk);
+                return rows;
+            }
+
+            function barGeom(n) {
+                var left = (spanStart(n) - T0) / TOTAL * 100;
+                var width = spanDur(n) / TOTAL * 100;
+                if (left < 0) left = 0;
+                if (left > 100) left = 100;
+                if (left + width > 100) width = 100 - left;
+                return { left: left, width: Math.max(width, 0.5) };
+            }
+
+            function tickPercents() {
+                var out = [];
+                for (var i = 0; i <= 5; i++) out.push(i * 20);
+                return out;
+            }
+
+            function tickLabel(p) {
+                if (state.axis === 'rel') return '+' + (Math.round(TOTAL * p / 100 * 10) / 10) + 'ms';
+                return fmtClock(T0 + TOTAL * p / 100);
+            }
+
+            function gridHtml() {
+                var out = '';
+                tickPercents().forEach(function (p) {
+                    if (p > 0 && p < 100) out += '<i class="gl" style="left:' + p + '%"></i>';
+                });
+                return out;
+            }
+
+            function rulerHtml() {
+                var ticks = tickPercents();
+                var html = '<div class="wf-ruler"><div class="wf-gutter">操作 / 服务</div><div class="wf-track">';
+                ticks.forEach(function (p, i) {
+                    var tf = i === 0 ? 'translate(0,-50%)'
+                        : (i === ticks.length - 1 ? 'translate(-100%,-50%)' : 'translate(-50%,-50%)');
+                    html += '<span class="tick" style="left:' + p + '%;transform:' + tf + '">' + esc(tickLabel(p)) + '</span>';
+                });
+                html += '</div><div class="wf-dur">耗时</div></div>';
+                return html;
+            }
+
+            function wfRowHtml(n) {
+                var kind = nodeKind(n);
+                var svc = n.service || '(unknown)';
+                var color = colorOf(svc);
+                var g = barGeom(n);
+                var s = n.span;
+                var peer = s.peer ? String(s.peer) : '';
+                var lbl = esc(s.operationName || '(unnamed)') +
+                    (peer ? ' <span class="arrow">&#8594;</span> ' + esc(peer) : '');
+                var hasChild = n.children.length > 0;
+                var collapsed = !!state.collapsed[n.key];
+                var caret = hasChild ? (collapsed ? '\u25B8' : '\u25BE') : '';
+                var inside = g.width >= 16;
+                var lblColor = labelColorOn(color);
+
+                var bar = '<div class="bar' + (s.isError ? ' err' : '') + '" data-key="' + esc(n.key) +
+                    '" style="left:' + round3(g.left) + '%;width:' + round3(g.width) + '%;background:' + color + '">' +
+                    (inside ? '<span class="lbl" style="color:' + lblColor + '">' + lbl + '</span>' : '') +
+                    '</div>' +
+                    (inside ? '' : '<span class="lbl out" style="left:' + round3(g.left + g.width) + '%">' + lbl + '</span>');
+
+                return '<div class="wf-row' + (state.selected === n.key ? ' selected' : '') + '" data-key="' + esc(n.key) + '">' +
+                    '<div class="wf-gutter">' +
+                    '<span class="strip" style="background:' + color + '"></span>' +
+                    '<span class="ico ' + kind + '">' + iconGlyph(kind) + '</span>' +
+                    '<span class="caret' + (hasChild ? '' : ' leaf') + '">' + caret + '</span>' +
+                    '<span class="gname" style="padding-left:' + (n.depth * 12) + 'px" title="' + esc(svc) + '">' + esc(svc) + '</span>' +
+                    '</div>' +
+                    '<div class="wf-track">' + gridHtml() + bar + '</div>' +
+                    '<div class="wf-dur">' + fmtDur(spanDur(n)) + '</div>' +
+                    '</div>';
+            }
+
+            function renderWaterfall() {
+                var rows = computeRows();
+                var html = '<div class="panel"><div class="scroll">' + rulerHtml() + '<div class="wf-body">';
+                html += rows.map(wfRowHtml).join('');
+                html += '</div></div></div>';
+                $('view-waterfall').innerHTML = html;
+            }
+
+            function axisTicks() {
+                return tickPercents().map(function (p) {
+                    var tf = p === 0 ? 'translate(0,-50%)' : (p === 100 ? 'translate(-100%,-50%)' : 'translate(-50%,-50%)');
+                    return '<span class="axis-label" style="left:' + p + '%;transform:' + tf + '">' + esc(tickLabel(p)) + '</span>';
+                }).join('');
+            }
+
+            function treeRowHtml(n) {
+                var kind = nodeKind(n);
+                var sub = [n.service, n.span.componentName, n.span.spanType].filter(Boolean).join(' · ');
+                var hasChild = n.children.length > 0;
+                var collapsed = !!state.collapsed[n.key];
+                var caret = hasChild ? (collapsed ? '\u25B8' : '\u25BE') : '';
+                var g = barGeom(n);
+                var left = '<div class="tr-left" style="padding-left:' + (n.depth * 16 + 12) + 'px">' +
+                    '<span class="caret' + (hasChild ? '' : ' leaf') + '">' + caret + '</span>' +
+                    '<span class="dot" style="background:' + colorOf(n.service) + '"></span>' +
+                    '<div class="op-wrap"><div class="op-name">' + esc(n.span.operationName || '') + '</div>' +
+                    (sub ? '<div class="op-sub">' + esc(sub) + '</div>' : '') + '</div></div>';
+                var right = '<div class="tr-right">' + gridHtml() +
+                    '<div class="bar' + (n.span.isError ? ' err' : '') + '" data-key="' + esc(n.key) + '" style="left:' + round3(g.left) +
+                    '%;width:' + round3(g.width) + '%;background:' + colorOf(n.service) + '"></div></div>';
+                return '<div class="tree-row' + (state.selected === n.key ? ' selected' : '') + '" data-key="' + esc(n.key) + '">' + left + right + '</div>';
+            }
+
+            function renderTree() {
+                var rows = computeRows();
+                var html = '<div class="panel"><div class="scroll"><div class="tree-head">' +
+                    '<div class="th-left">操作 / 层级</div>' +
+                    '<div class="th-right">' + axisTicks() + '</div>' +
+                    '</div><div class="tree-body">';
+                html += rows.map(treeRowHtml).join('');
+                html += '</div></div></div>';
+                $('view-tree').innerHTML = html;
+            }
+
+            function renderTable() {
+                var rows = computeRows();
+                var html = '<div class="panel"><div class="table-scroll"><table class="span-table"><thead><tr>' +
+                    '<th style="width:52px">#</th>' +
+                    '<th>Span</th>' +
+                    '<th style="width:140px">服务</th>' +
+                    '<th style="width:120px">组件</th>' +
+                    '<th style="width:88px">类型</th>' +
+                    '<th style="width:190px">开始时间</th>' +
+                    '<th style="width:84px">耗时</th>' +
+                    '<th style="width:130px">SpanId / ParentId</th>' +
+                    '<th style="width:80px">状态</th>' +
+                    '</tr></thead><tbody>';
+                rows.forEach(function (n, i) {
+                    var kind = nodeKind(n);
+                    var hasChild = n.children.length > 0;
+                    var collapsed = !!state.collapsed[n.key];
+                    var caret = hasChild ? (collapsed ? '\u25B8' : '\u25BE') : '';
+                    html += '<tr class="' + (state.selected === n.key ? 'selected' : '') + '" data-key="' + esc(n.key) + '">' +
+                        '<td class="mono" style="color:var(--ink-tertiary)">' + (i + 1) + '</td>' +
+                        '<td><span class="caret' + (hasChild ? '' : ' leaf') + '">' + caret + '</span>' +
+                        '<span style="display:inline-block;width:' + (n.depth * 16) + 'px"></span>' +
+                        '<span class="op-name">' + esc(n.span.operationName || '') + '</span>' +
+                        (n.span.peer ? '<span class="op-sub"> \u2192 ' + esc(n.span.peer) + '</span>' : '') +
+                        '</td>' +
+                        '<td><span class="strip" style="display:inline-block;height:9px;width:9px;border-radius:2px;background:' +
+                        colorOf(n.service) + '"></span> ' + esc(n.service || '') + '</td>' +
+                        '<td>' + esc(n.span.componentName || '') + '</td>' +
+                        '<td><span class="badge">' + esc(n.span.spanType || 'Local') + '</span></td>' +
+                        '<td class="mono">' + esc(fmtTime(spanStart(n))) + '</td>' +
+                        '<td class="mono">' + fmtDur(spanDur(n)) + '</td>' +
+                        '<td class="mono">' + esc(String(n.span.spanId)) + ' / ' + esc(String(n.span.parentSpanId != null ? n.span.parentSpanId : '-')) + '</td>' +
+                        '<td>' + (n.span.isError ? '<span class="badge err">ERR</span>' : '<span class="badge ok">OK</span>') + '</td>' +
+                        '</tr>';
+                });
+                html += '</tbody></table></div></div>';
+                $('view-table').innerHTML = html;
+            }
+
+            function renderList() {
+                var rows = computeRows();
+                var html = '<div class="panel"><div class="scroll">';
+                rows.forEach(function (n, i) {
+                    var kind = nodeKind(n);
+                    var sub = [n.span.componentName, n.service, n.span.spanType].filter(Boolean).join(' · ');
+                    var g = barGeom(n);
+                    html += '<div class="list-item' + (state.selected === n.key ? ' selected' : '') + '" data-key="' + esc(n.key) + '">' +
+                        '<div class="li-idx">' + (i + 1) + '</div>' +
+                        '<div class="li-main" style="padding-left:' + (n.depth * 14) + 'px">' +
+                        '<div class="li-name">' + esc(n.span.operationName || '') + '</div>' +
+                        (sub ? '<div class="li-sub">' + esc(sub) + '</div>' : '') +
+                        '</div>' +
+                        '<div class="li-track"><div class="bar' + (n.span.isError ? ' err' : '') + '" data-key="' + esc(n.key) + '" style="left:' + round3(g.left) +
+                        '%;width:' + round3(g.width) + '%;background:' + colorOf(n.service) + '"></div></div>' +
+                        '<div class="li-dur">' + fmtDur(spanDur(n)) + '</div>' +
+                        '</div>';
+                });
+                html += '</div></div>';
+                $('view-list').innerHTML = html;
+            }
+
+            function renderView() {
+                if (state.view === 'waterfall') renderWaterfall();
+                else if (state.view === 'tree') renderTree();
+                else if (state.view === 'table') renderTable();
+                else renderList();
+            }
+
+            function renderMeta() {
+                $('statStart').textContent = T0 ? fmtTime(T0) : '—';
+                $('statDur').textContent = fmtDur(TOTAL);
+                $('statSpans').textContent = state.nodes.length;
+                $('statServices').textContent = state.services.length;
+                $('legend').innerHTML = state.services.map(function (s) {
+                    return '<span class="legend-chip"><i style="background:' + colorOf(s) + '"></i>' + esc(s) + '</span>';
+                }).join('');
+            }
+
+            function tabBtn(tab, label, current) {
+                return '<button class="pill' + (tab === current ? ' active' : '') + '" data-tab="' + tab + '">' + esc(label) + '</button>';
+            }
+
+            /** 日志列表渲染(链路级兜底与 span 级共用):时间 / 级别 / 正文。 */
+            function logsTable(list) {
+                return '<table class="kv-table"><thead><tr><th style="width:170px">时间</th>' +
+                    '<th style="width:70px">级别</th><th>正文</th></tr></thead><tbody>' +
+                    list.map(function (l) {
+                        if (l == null || typeof l !== 'object') {
+                            return '<tr><td colspan="3" class="mono" style="white-space:pre-wrap;word-break:break-word">' + esc(l) + '</td></tr>';
+                        }
+                        var content = l.content != null ? l.content : JSON.stringify(l);
+                        var meta = [];
+                        if (l.service) meta.push(l.service + (l.serviceInstance ? ' / ' + l.serviceInstance : ''));
+                        if (l.endpoint) meta.push(l.endpoint);
+                        return '<tr><td class="mono">' + esc(fmtTime(l.timestamp)) + '</td>' +
+                            '<td>' + esc(l.level || '未分级') + '</td>' +
+                            '<td><div class="mono" style="white-space:pre-wrap;word-break:break-word">' + esc(content) + '</div>' +
+                            (meta.length ? '<div style="color:var(--ink-subtle);font-size:12px">' + esc(meta.join(' · ')) + '</div>' : '') +
+                            '</td></tr>';
+                    }).join('') + '</tbody></table>';
+            }
+
+            function renderDetail() {
+                var el = $('spanDetail');
+                var n = state.selected ? state.byKey[state.selected] : null;
+                if (!n) {
+                    el.style.display = 'none';
+                    el.innerHTML = '';
+                    return;
+                }
+                var s = n.span;
+                var meta = [
+                    ['开始时间', fmtTime(spanStart(n)), true],
+                    ['结束时间', fmtTime(spanEnd(n)), true],
+                    ['耗时', fmtDur(spanDur(n)), false],
+                    ['Span类型', s.spanType || '', false],
+                    ['Span层级', s.spanLayer || '', false],
+                    ['组件', s.componentName || '', false],
+                    ['服务', n.service || '', false],
+                    ['服务实例', n.instance || '', false],
+                    ['peer', s.peer || '', true],
+                    ['SpanId', s.spanId, true],
+                    ['ParentSpanId', s.parentSpanId, true],
+                    ['TraceSegmentId', n.segId || '', true],
+                    ['状态', s.isError ? '异常' : '正常', false]
+                ];
+                var metaHtml = meta.map(function (m) {
+                    return '<div class="sd-kv"><span class="k">' + esc(m[0]) + '</span><span class="v' + (m[2] ? ' mono' : '') + '">' +
+                        esc(m[1] == null ? '' : m[1]) + '</span></div>';
+                }).join('');
+
+                var tagList = Array.isArray(s.tagList) ? s.tagList : [];
+                var refs = Array.isArray(s.refs) ? s.refs : [];
+                var logs = Array.isArray(s.logsList) ? s.logsList : [];
+
+                var tab = state.detailTab || 'tags';
+                var body = '';
+                if (tab === 'tags') {
+                    body = tagList.length
+                        ? '<table class="kv-table"><thead><tr><th style="width:220px">Tag Key</th><th>Value</th></tr></thead><tbody>' +
+                        tagList.map(function (t) {
+                            return '<tr><td class="k">' + esc(t.key) + '</td><td>' + esc(t.value) + '</td></tr>';
+                        }).join('') + '</tbody></table>'
+                        : '<p class="empty">无 Tag 数据</p>';
+                } else if (tab === 'refs') {
+                    body = refs.length
+                        ? '<table class="kv-table"><thead><tr><th style="width:220px">Ref</th><th>跨进程引用</th></tr></thead><tbody>' +
+                        refs.map(function (r) {
+                            return '<tr><td class="k">' + esc(r.refType || 'CrossProcess') + '</td><td>' +
+                                '父服务 <b>' + esc(r.parentService || '-') + '</b> · 父端点 ' + esc(r.parentEndpoint || '-') +
+                                '<br>父段 ' + esc(r.parentTraceSegmentId || '-') + ' · 父 SpanId ' + esc(String(r.parentSpanId)) +
+                                '<br>peer ' + esc(r.networkAddressUsedAtPeer || '-') +
+                                '</td></tr>';
+                        }).join('') + '</tbody></table>'
+                        : '<p class="empty">无跨进程引用(本段是链路起点,或上游没传 sw8)</p>';
+                } else if (tab === 'logs') {
+                    // span 自带的 logsList(按 traceSegmentId + spanId 匹配到的日志)优先;
+                    // 没有再按 traceId 拉本进程收到的应用日志兜底
+                    if (logs.length) {
+                        body = logsTable(logs) +
+                            '<p class="empty" style="margin-top:8px">只显示当前 span 的日志;' +
+                            '<a href="./mock-oap-logs.html?traceId=' + encodeURIComponent(state.traceId) + '" target="_blank">' +
+                            '去日志页看该链路全部日志 →</a></p>';
+                    } else if (state.traceLogsError) {
+                        body = '<p class="empty">' + esc(state.traceLogsError) + '</p>';
+                    } else if (!state.traceLogsLoaded) {
+                        body = '<p class="empty">加载该 traceId 的应用日志…</p>';
+                        loadTraceLogs();
+                    } else if (!state.traceLogs.length) {
+                        body = '<p class="empty">该 traceId 没有应用日志。日志来自 logback 的 GRPCLogClientAppender' +
+                            '(需本进程挂了 SkyWalking agent 且上报到进程内 mock-OAP),且只有<b>带链路上下文</b>打出的日志才会带上 traceId。' +
+                            '也可去 <a href="./mock-oap-logs.html" target="_blank">日志页</a> 看全量。</p>';
+                    } else {
+                        body = '<p class="empty" style="margin:0 0 8px">当前 span 没有日志,以下是该 traceId 下的全部应用日志:</p>' +
+                            logsTable(state.traceLogs);
+                    }
+                } else {
+                    var json;
+                    try {
+                        json = JSON.stringify(s, null, 2);
+                    } catch (e) {
+                        json = String(s);
+                    }
+                    body = '<button class="btn btn-secondary" id="copyRawBtn" style="margin-bottom:12px">复制原始 JSON</button>' +
+                        '<pre class="raw-json" style="display:block">' + esc(json) + '</pre>';
+                }
+
+                el.innerHTML = '<div class="panel-head">' +
+                    '<span class="strip" style="display:inline-block;height:12px;width:12px;border-radius:3px;background:' +
+                    colorOf(n.service) + '"></span>' +
+                    '<div class="sd-title">' + esc(s.operationName || '') +
+                    (s.peer ? ' <span style="color:var(--ink-subtle);font-weight:400">\u2192 ' + esc(s.peer) + '</span>' : '') + '</div>' +
+                    '<div class="pill-group">' +
+                    tabBtn('tags', '标签 ' + tagList.length, tab) +
+                    tabBtn('refs', '跨进程引用 ' + refs.length, tab) +
+                    tabBtn('logs', '日志 ' + (logs.length || (state.traceLogsLoaded ? state.traceLogs.length : 0)), tab) +
+                    tabBtn('raw', '原始数据', tab) +
+                    '</div>' +
+                    '<button class="btn btn-secondary" id="sdClose">关闭</button>' +
+                    '</div>' +
+                    '<div class="sd-meta">' + metaHtml + '</div>' +
+                    '<div class="sd-body">' + body + '</div>';
+                el.style.display = 'flex';
+            }
+
+            function renderAll() {
+                renderMeta();
+                renderView();
+                renderDetail();
+            }
+
+            function setView(view) {
+                state.view = view;
+                ['waterfall', 'tree', 'table', 'list'].forEach(function (v) {
+                    $('view-' + v).classList.toggle('active', v === view);
+                });
+                var btns = $('viewSwitch').getElementsByTagName('button');
+                for (var i = 0; i < btns.length; i++) {
+                    btns[i].classList.toggle('active', btns[i].getAttribute('data-view') === view);
+                }
+            }
+
+            function setAxis(axis) {
+                state.axis = axis;
+                var btns = $('axisSwitch').getElementsByTagName('button');
+                for (var i = 0; i < btns.length; i++) {
+                    btns[i].classList.toggle('active', btns[i].getAttribute('data-axis') === axis);
+                }
+            }
+
+            function select(key) {
+                state.selected = key;
+                var rows = document.querySelectorAll('[data-key]');
+                for (var i = 0; i < rows.length; i++) {
+                    if (rows[i].classList.contains('bar')) continue;
+                    rows[i].classList.toggle('selected', rows[i].getAttribute('data-key') === key);
+                }
+                renderDetail();
+            }
+
+            function clearSelection() {
+                state.selected = null;
+                var rows = document.querySelectorAll('[data-key].selected');
+                for (var i = 0; i < rows.length; i++) rows[i].classList.remove('selected');
+                renderDetail();
+            }
+
+            function toggle(key) {
+                if (state.collapsed[key]) delete state.collapsed[key];
+                else state.collapsed[key] = true;
+                renderView();
+            }
+
+            function copyText(text) {
+                function done() { toast('已复制'); }
+                function fallback() {
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+                    document.body.removeChild(ta);
+                }
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(done, fallback);
+                } else {
+                    fallback();
+                }
+            }
+
+            var toastTimer = null;
+            function toast(msg) {
+                var el = $('toast');
+                el.textContent = msg;
+                el.classList.add('show');
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(function () { el.classList.remove('show'); }, 1400);
+            }
+
+            function showState(msg, isError) {
+                ['view-waterfall', 'view-tree', 'view-table', 'view-list'].forEach(function (id) { $(id).innerHTML = ''; });
+                $('view-waterfall').innerHTML = '<div class="panel"><div class="hint-box' + (isError ? ' error' : '') + '">' +
+                    esc(msg) + '</div></div>';
+                setView('waterfall');
+                $('spanDetail').style.display = 'none';
+                $('statStart').textContent = '—';
+                $('statDur').textContent = '—';
+                $('statSpans').textContent = '—';
+                $('statServices').textContent = '—';
+                $('legend').innerHTML = '';
+            }
+
+            function normalizeResponse(data) {
+                if (Array.isArray(data)) return data.filter(function (s) { return s && Array.isArray(s.spans); });
+                if (data && Array.isArray(data.segments)) return data.segments;
+                if (data && data.data && typeof data.data === 'object') {
+                    var out = [];
+                    Object.keys(data.data).forEach(function (k) {
+                        if (data.data[k] && Array.isArray(data.data[k].spans)) out = out.concat(data.data[k].spans);
+                    });
+                    return out;
+                }
+                return [];
+            }
+
+            function onViewClick(e) {
+                var caret = e.target.closest ? e.target.closest('.caret') : null;
+                if (caret && caret.textContent.trim() !== '') {
+                    var caretRow = caret.closest('[data-key]');
+                    if (caretRow) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggle(caretRow.getAttribute('data-key'));
+                        return;
+                    }
+                }
+                var row = e.target.closest ? e.target.closest('.wf-row[data-key], .tree-row[data-key], .list-item[data-key], tr[data-key]') : null;
+                if (row) select(row.getAttribute('data-key'));
+            }
+
+            function onTipMove(e) {
+                var tip = $('barTip');
+                var bar = e.target.closest ? e.target.closest('.bar') : null;
+                var n = bar ? state.byKey[bar.getAttribute('data-key')] : null;
+                if (!n) {
+                    tip.style.display = 'none';
+                    return;
+                }
+                var s = n.span;
+                tip.innerHTML =
+                    '<div><b>' + esc(s.operationName || '') + '</b>' + (s.peer ? ' \u2192 ' + esc(s.peer) : '') + '</div>' +
+                    '<div class="t-sub">' + esc(n.service || '') + (s.componentName ? ' · ' + esc(s.componentName) : '') + '</div>' +
+                    '<div>耗时 ' + fmtDur(spanDur(n)) + ' · 起点 +' + (spanStart(n) - T0) + ' ms</div>' +
+                    '<div class="t-sub">' + esc(fmtTime(spanStart(n))) + ' \u2192 ' + esc(fmtTime(spanEnd(n))) + '</div>' +
+                    '<div class="t-sub">SpanId ' + esc(String(s.spanId)) + ' / Parent ' + esc(String(s.parentSpanId != null ? s.parentSpanId : '-')) + '</div>' +
+                    (s.isError ? '<div><span class="badge err">ERR</span></div>' : '');
+                tip.style.display = 'block';
+                var x = e.clientX + 14;
+                var y = e.clientY + 14;
+                var w = tip.offsetWidth;
+                var h = tip.offsetHeight;
+                if (x + w > window.innerWidth - 8) x = e.clientX - w - 14;
+                if (y + h > window.innerHeight - 8) y = e.clientY - h - 14;
+                tip.style.left = x + 'px';
+                tip.style.top = y + 'px';
+            }
+
+            function bind() {
+                $('main').addEventListener('click', onViewClick);
+                document.addEventListener('mousemove', onTipMove);
+
+                $('viewSwitch').addEventListener('click', function (e) {
+                    var btn = e.target.closest ? e.target.closest('button[data-view]') : null;
+                    if (!btn) return;
+                    setView(btn.getAttribute('data-view'));
+                    renderView();
+                });
+
+                $('axisSwitch').addEventListener('click', function (e) {
+                    var btn = e.target.closest ? e.target.closest('button[data-axis]') : null;
+                    if (!btn) return;
+                    setAxis(btn.getAttribute('data-axis'));
+                    renderView();
+                });
+
+                $('filterInput').addEventListener('input', function () {
+                    state.filter = this.value || '';
+                    renderView();
+                });
+
+                $('copyTraceBtn').addEventListener('click', function () {
+                    if (state.traceId) copyText(state.traceId);
+                });
+
+                $('linkBtn').addEventListener('click', function () {
+                    copyText(window.location.href);
+                });
+
+                $('reloadBtn').addEventListener('click', function () { load(); });
+
+                $('spanDetail').addEventListener('click', function (e) {
+                    var tab = e.target.closest ? e.target.closest('.pill[data-tab]') : null;
+                    if (tab) {
+                        state.detailTab = tab.getAttribute('data-tab');
+                        renderDetail();
+                        return;
+                    }
+                    if (e.target.id === 'sdClose') {
+                        clearSelection();
+                        return;
+                    }
+                    if (e.target.id === 'copyRawBtn') {
+                        var n = state.selected ? state.byKey[state.selected] : null;
+                        if (n) {
+                            try { copyText(JSON.stringify(n.span, null, 2)); } catch (err) { /* ignore */ }
+                        }
+                    }
+                });
+            }
+
+            // 按 traceId 拉本进程收到的应用日志(详情面板「日志」页签用);结果缓存,避免重复请求
+            function loadTraceLogs() {
+                if (state.traceLogsLoading || state.traceLogsLoaded || state.traceLogsError) return;
+                if (!state.traceId) return;
+                state.traceLogsLoading = true;
+                fetch('../mock-oap/logs?limit=200&traceId=' + encodeURIComponent(state.traceId)).then(function (resp) {
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    return resp.json();
+                }).then(function (list) {
+                    state.traceLogs = Array.isArray(list) ? list : [];
+                    state.traceLogsLoaded = true;
+                }).catch(function (err) {
+                    state.traceLogsError = '日志加载失败:' + err;
+                }).then(function () {
+                    state.traceLogsLoading = false;
+                    renderDetail();
+                });
+            }
+
+            function load() {
+                var traceId = getQueryParam('traceid') || getQueryParam('traceId');
+                if (!traceId) {
+                    showState('请在 URL 加上 ?traceId=xxx 参数(或从 mock-oap.html 点一条链路进入)');
+                    return;
+                }
+                state.traceId = traceId;
+                state.selected = null;
+                state.collapsed = {};
+                state.traceLogs = null;
+                state.traceLogsLoaded = false;
+                state.traceLogsLoading = false;
+                state.traceLogsError = '';
+                $('traceIdText').textContent = traceId;
+                showState('加载中…');
+
+                fetch('../mock-oap/segments?traceId=' + encodeURIComponent(traceId)).then(function (resp) {
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    return resp.json();
+                }).then(function (data) {
+                    var segments = normalizeResponse(data);
+                    if (!segments.length) {
+                        showState('无数据:该 traceId 暂无上报,或已被 FIFO 淘汰');
+                        return;
+                    }
+                    var tree = buildTree(segments);
+                    if (!tree.nodes.length) {
+                        showState('无可展示节点');
+                        return;
+                    }
+                    state.roots = tree.roots;
+                    state.nodes = tree.nodes;
+                    state.byKey = tree.byKey;
+
+                    var seen = {};
+                    state.services = [];
+                    state.nodes.forEach(function (n) {
+                        var svc = n.service || '(unknown)';
+                        if (!seen[svc]) { seen[svc] = 1; state.services.push(svc); colorOf(svc); }
+                    });
+
+                    computeRange(state.nodes);
+                    renderAll();
+                }).catch(function (err) {
+                    showState('加载失败:' + err, true);
+                });
+            }
+
+            bind();
+            load();
+        })();
+    </script>
+</body>
+
+</html>
