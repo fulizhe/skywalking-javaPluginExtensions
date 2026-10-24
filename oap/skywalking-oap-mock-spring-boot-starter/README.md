@@ -77,3 +77,14 @@ flowchart LR
 - **快速体验**：[demo](demo/README.md) —— 自带页面、演示流量与一键启动脚本，挂上 agent 即可看链路和日志。
 - **方案介绍**：[在业务进程里 Mock 一个 OAP，把多语言链路泥沼一次性抽干](https://fulizhe.blog.csdn.net/article/details/168453067)
 - **业务端示例**：[MockOapObservabilityController.java](https://gitee.com/lqzkcx3/javaLearning/blob/master/demo/sb-skywalking/sb-skywalking/src/main/java/com/fulizhe/demo/controller/MockOapObservabilityController.java)
+
+## 与同类方案的边界
+
+SkyWalking 官方测试工具链里有一个 **mock-collector**（[apache/skywalking-agent-test-tool](https://github.com/apache/skywalking-agent-test-tool)），描述为 "a SkyWalking receiver, like OAP server"。**本 starter 不是这个思路的首创者**，但两者运行位置不同，用途也不同：
+
+- 官方 collector 是**独立进程**，用于 Agent 端到端测试，收到数据后导出 YAML 交给 validator 断言；
+- 本 starter **寄居业务进程内**，用于现场排障，按 `traceId` 拼装跨进程链路，并保留有界缓存供宿主查询。
+
+位置差异直接决定了技术栈：进程外的接收端可以放心使用标准 `io.grpc`；进程内的接收端若这么做，会被 Agent 的 `grpc-1.x` 插件埋点，形成"收段 → 生成 span → 再发段"的自激循环，真实链路会被挤出缓冲。因此本 starter 依赖 Agent 自带的 shaded gRPC。
+
+与 Glowroot、JavaMelody、otlp-embedded 等嵌入式方案的逐项对比，以及各项目的许可证与近期活跃度，见 **[同类方案对比](docs/comparison.md)**。
