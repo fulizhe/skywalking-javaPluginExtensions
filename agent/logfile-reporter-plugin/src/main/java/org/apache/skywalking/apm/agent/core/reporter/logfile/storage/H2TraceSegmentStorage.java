@@ -54,6 +54,8 @@ import org.h2.tools.Server;
  * <p>
  * 所有异常就地捕获（计数 + 限速日志），绝不向上抛——"监控只能是助力，不是阻碍"。
  * </p>
+ *
+ * <p> https://github.com/glowroot/glowroot/blob/main/agent/embedded/src/main/java/org/glowroot/agent/embedded/util/CappedDatabase.java
  */
 public class H2TraceSegmentStorage implements TraceSegmentStorage {
 
