@@ -116,3 +116,10 @@ java -javaagent:E:\path\to\skywalking-agent\skywalking-agent.jar -jar target\moc
 demo 里的 Controller 与页面只用于演示；starter 本身不含 Controller、HTML 或 Web 依赖。
 接入真实业务时，可参考 `MockOapObservabilityController` 的读接口，或直接注入 buffer Bean 自行展示。
 字段含义、Bean 列表与配置项见 [../docs/usage.md](../docs/usage.md)。
+
+## 部署
+
+- 本地起一套：`mvn -B -DskipTests package && docker compose up -d` —— 四语言链路
+  (Java → Go → C++ → Node)，见 [`docker-compose.yaml`](docker-compose.yaml)。
+- 远端 Linux 服务器(镜像搬运、端口、排错表)：
+  [`README-remoteDeploy.md`](README-remoteDeploy.md)。

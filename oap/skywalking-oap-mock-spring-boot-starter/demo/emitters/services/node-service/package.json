@@ -1,0 +1,12 @@
+{
+  "name": "mock-oap-node-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "mock-OAP external reporter (Node.js, SkyWalking native agent)",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "express": "^4.19.2",
+    "google-protobuf": "^3.14.0",
+    "skywalking-backend-js": "0.9.0"
+  }
+}

@@ -49,11 +49,12 @@
 	<div class="panel">
 		<h2>第一步:生成演示流量</h2>
 		<div class="toolbar">
-			<button data-url="/demo/chain?steps=3" data-label="链路">生成链路(3 跳)</button>
+			<button data-url="/mock-oap/demo/go-chain?hops=3&amp;latency=20" data-label="跨语言链路">生成链路(3 跳)</button>
+			<button class="ghost" data-url="/demo/chain?steps=3" data-label="本机链路">仅本机链路(Java 自调)</button>
 			<button class="ghost" data-url="/demo/slow?delayMs=500" data-label="慢调用">慢调用(500ms)</button>
 			<button class="ghost" data-url="/demo/error" data-label="错误调用">错误调用</button>
 		</div>
-		<div id="result" class="muted">生成后打开「采集总览」,点链路清单里的 traceId 看时序图。</div>
+		<div id="result" class="muted">第一条是 <b>Java → Go → C++ → Node</b> 的跨语言链路(需要 emitters 起着);生成后打开「采集总览」,点链路清单里的 traceId 看时序图。</div>
 	</div>
 
 	<div>
@@ -138,7 +139,11 @@
 						}
 						var data = JSON.parse(res.body);
 						var text;
-						if (data.orderId) {
+						if (data.targetUrl) {
+							// 跨语言链路(Java -> Go -> C++ -> Node)
+							text = '跨语言链路 ' + data.orderId + ': HTTP ' + data.status + ','
+								+ data.costMs + ' ms,下游返回「' + (data.body || '') + '」。';
+						} else if (data.orderId) {
 							text = '链路 ' + data.orderId + ':' + data.steps + ' 次调用,' + data.costMs + ' ms。';
 						} else if (data.delayMs != null) {
 							text = '慢调用 ' + data.delayMs + ' ms。';

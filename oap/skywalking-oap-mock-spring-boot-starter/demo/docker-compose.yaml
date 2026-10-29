@@ -1,0 +1,115 @@
+# ============================================================================
+#  mock-OAP 演示栈:Java(入口 + 接收端) + Go + C++ + Node
+#
+#  一条命令起全套:
+#      docker compose up -d
+#
+#  链路(同一条 trace,四段靠 sw8 串起来,全部上报到 Java 进程内的 mock-OAP):
+#      curl http://<host>:9601/mock-oap/demo/go-chain?hops=3&latency=20
+#      Java --HTTP+sw8--> go-service --HTTP+sw8--> cpp-service --HTTP+sw8--> node-service
+#         \______________________ native gRPC / OTLP gRPC ______________________/
+#                                 ▼
+#                      mock-oap-demo:11800 (进程内 collector)
+#
+#  端口:只有 Java 对外(宿主 ${MOCK_OAP_DEMO_PORT:-9601} -> 容器 9600);
+#        go/cpp/node 只在 compose 内网,不占宿主端口。
+#
+#  镜像:
+#      mock-oap/demo:2.0.0                 本目录 Dockerfile 构建(JDK17 + agent 9.4.0)
+#      mock-oap-emitters/*:1.0.0           由 emitters/services/* 构建;已构建好时
+#                                          `docker compose up -d --no-build` 直接复用
+# ============================================================================
+name: mock-oap-stack
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Java:既是业务入口,也是 mock-OAP 接收端(agent 的 shaded gRPC,监听 0.0.0.0:11800)
+  # --------------------------------------------------------------------------
+  mock-oap-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mock-oap/demo:2.0.0
+    container_name: mock-oap-demo
+    restart: unless-stopped
+    ports:
+      - "${MOCK_OAP_DEMO_PORT:-9601}:9600"
+    environment:
+      SW_AGENT_NAME: mock-oap-demo
+      # agent 上报到**本进程内**的 collector:同容器回环,不走网关
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: 127.0.0.1:11800
+      # 跨语言链路入口要调的 go-service(compose 服务名解析)
+      DEMO_GO_SERVICE_URL: http://go-service:8080
+    mem_limit: 1g
+    healthcheck:
+      # slim 镜像没有 curl,用 bash 的 /dev/tcp 探端口
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/9600' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      # agent 连 collector 需要几秒,启动期别急着判死
+      start_period: 45s
+
+  # --------------------------------------------------------------------------
+  # Go:skywalking-go(编译期 -toolexec 注入),链路第一跳
+  # --------------------------------------------------------------------------
+  go-service:
+    build: ./emitters/services/go-service
+    image: mock-oap-emitters/go-service:1.0.0
+    container_name: mock-oap-go
+    restart: unless-stopped
+    environment:
+      SW_AGENT_NAME: go-service
+      # 注意:SkyWalking Go agent 的后端地址变量名与 Java/Node **不同**。
+      # 写 SW_AGENT_COLLECTOR_BACKEND_SERVICES 会被静默忽略并回落到 127.0.0.1:11800。
+      SW_AGENT_REPORTER_GRPC_BACKEND_SERVICE: mock-oap-demo:11800
+      SERVER_PORT: "8080"
+      # 日志上报:skywalking-go 的日志插件接管 logrus
+      SW_AGENT_LOG_TYPE: logrus
+      SW_AGENT_LOG_REPORTER_ENABLE: "true"
+      SW_AGENT_LOG_REPORTER_LABEL_KEYS: "orderId,hops,status,costMs"
+      # gRPC 入口(proto.KQService/Call);当前演示只用 HTTP 一跳,留着不影响
+      GRPC_PORT: "9090"
+      NEXT_SERVICE_URL: http://cpp-service:8083
+    depends_on:
+      mock-oap-demo:
+        condition: service_started
+      cpp-service:
+        condition: service_started
+
+  # --------------------------------------------------------------------------
+  # C++:OpenTelemetry C++ SDK,OTLP/gRPC 上报(把 sw8 坐标作为属性带走)
+  # --------------------------------------------------------------------------
+  cpp-service:
+    build: ./emitters/services/cpp-service
+    image: mock-oap-emitters/cpp-service:1.0.0
+    container_name: mock-oap-cpp
+    restart: unless-stopped
+    environment:
+      OTEL_SERVICE_NAME: cpp-service
+      # 与 main.cpp 的默认值一致(host:port,不带 scheme)
+      OTEL_EXPORTER_OTLP_ENDPOINT: mock-oap-demo:11800
+      SERVER_PORT: "8083"
+      NEXT_SERVICE_URL: http://node-service:8081
+    depends_on:
+      mock-oap-demo:
+        condition: service_started
+      node-service:
+        condition: service_started
+
+  # --------------------------------------------------------------------------
+  # Node:skywalking-backend-js(agent 必须在 load express 之前 start),链路终点
+  # --------------------------------------------------------------------------
+  node-service:
+    build: ./emitters/services/node-service
+    image: mock-oap-emitters/node-service:1.0.0
+    container_name: mock-oap-node
+    restart: unless-stopped
+    environment:
+      SW_AGENT_NAME: node-service
+      SW_AGENT_COLLECTOR_BACKEND_SERVICES: mock-oap-demo:11800
+      SERVER_PORT: "8081"
+    depends_on:
+      mock-oap-demo:
+        condition: service_started
