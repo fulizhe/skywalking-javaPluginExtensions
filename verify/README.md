@@ -54,7 +54,7 @@ CI 上每次是全新 runner,命名卷必为空 —— 故 workflow 用 `VERIFY_
 CI 上是**「(场景 × 版本)」每个组合一个并行 job**(matrix + `fail-fast: false`),墙钟取最慢那个,而不是串行。
 矩阵由 `plan` job 从场景声明现场生成:有 `support-version.list` 的场景每个版本一个 job,没有的取一个默认版本 ——
 **CI 不重抄场景清单,加版本只改 `.list` 一个文件**。各场景的默认依赖版本本来就在自己的 `.list` 里,所以版本覆盖是
-取代而非叠加(当前 5 个 job:`logfile-reporter` ×1、httpclient ×2、hutool ×2)。
+取代而非叠加(job 总数 = 各场景 `support-version.list` 行数之和,无该文件则计 1)。
 
 代价主要在 m2 缓存带宽:job 数变多 → 同一份约 1GB 的缓存被并发恢复的次数变多(缓存刚失效时是每个 job 各下全量)。
 仓库是 public,Actions 分钟不收费。
@@ -105,6 +105,7 @@ verify/scenarios/<plugin>/
 |------|------|
 | `logfile-reporter` | 与 `agent/demo-app/scripts/validate.ps1` 的 A/B/C/D 等价:trace 缓存合并、告警链端到端 + webhook 收讫、运行时开关、五类数据流读口冒烟 |
 | `override-httpclient` | 采集开关读口 + enable/disable;httpclient POST 表单体采为 `http.request.params` tag 端到端;httpclient `4.5.13`/`4.5.14` 版本矩阵 |
+| `override-httpclient5x` | 采集开关读口 + enable/disable(关断后新 span 不再带表单体 tag);httpclient5 POST 表单体采为 `http.request.params` tag 端到端;httpclient5 `5.0`/`5.1.4`/`5.2.1` 版本矩阵 |
 | `override-hutool` | hutool 四类采集面(query / 表单体 / `body(...)` 原始体 / multipart 文件元数据)+ `http.response.body` + 目标 500 置 `isError` + 超阈值裁剪 + 运行时开关(关断后 span 在、参数与响应体 tag 消失);hutool `5.4.1`/`5.8.47` 版本矩阵 |
 
 > 每个已接入 verify 的插件各有一个场景(`bash verify/run.sh` 一条命令全跑);场景清单见 `verify/scenarios/`。
@@ -118,6 +119,7 @@ verify/scenarios/<plugin>/
 | 场景 | `MATRIX_PROPERTY` | 对应 demo-app pom 属性 |
 |------|------------------|----------------------|
 | `override-httpclient` | `httpclient.version` | 覆盖 Spring Boot 托管的 Apache HttpClient 版本 |
+| `override-httpclient5x` | `httpclient5.version` | Apache HttpClient 5.x 出口版本 |
 | `override-hutool` | `hutool.version` | 同时对齐 `hutool-http` 与 `hutool-json`/`hutool-core` |
 
 ## 新增一个插件场景

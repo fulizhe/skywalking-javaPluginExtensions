@@ -1,0 +1,6 @@
+# override-httpclient5x 场景支持的 Apache HttpClient 5.x 版本(demo-app 依赖版本矩阵)。
+# 每行一个版本,由 verify/run.sh --matrix 读取并逐版本构建 demo-app。
+# 5.2.1 = demo-app pom 的默认 <httpclient5.version>, 保证不带 --matrix 的默认路径也被覆盖。
+5.0
+5.1.4
+5.2.1
