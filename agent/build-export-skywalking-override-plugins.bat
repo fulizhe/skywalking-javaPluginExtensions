@@ -24,7 +24,7 @@ if "%~1"=="" (
 )
 
 if "%~2"=="" (
-    set "JDK_HOME=D:\apps\java\jdk-17.0.8"
+    set "JDK_HOME=D:\apps\java\jdk-17.0.2"
 ) else (
     set "JDK_HOME=%~2"
 )
