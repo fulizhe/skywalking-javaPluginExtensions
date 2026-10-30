@@ -17,6 +17,8 @@ import com.fulizhe.observability.mockoap.jvmmetrics.JVMMetricBuffer;
 import com.fulizhe.observability.mockoap.jvmmetrics.JVMMetricReportServiceImpl;
 import com.fulizhe.observability.mockoap.log.LogBuffer;
 import com.fulizhe.observability.mockoap.log.LogReportServiceImpl;
+import com.fulizhe.observability.mockoap.management.ManagementServiceImpl;
+import com.fulizhe.observability.mockoap.meter.MeterReportServiceImpl;
 import com.fulizhe.observability.mockoap.trace.TraceSegmentBuffer;
 import com.fulizhe.observability.mockoap.trace.TraceSegmentReportServiceImpl;
 
@@ -89,6 +91,8 @@ class AgentShadedGrpcLauncher implements MockOapEmbeddedServer {
 				.addService(trace)
 				.addService(logs)
 				.addService(new ConfigurationDiscoveryServiceImpl())
+				.addService(new ManagementServiceImpl())
+				.addService(new MeterReportServiceImpl())
 				.addService(jvm);
 		for (ServerServiceDefinition service : additionalServices) {
 			builder.addService(service);
@@ -104,7 +108,8 @@ class AgentShadedGrpcLauncher implements MockOapEmbeddedServer {
 			this.jvmService = null;
 			throw e;
 		}
-		log.info("### [mock-oap] gRPC server started on port {} (agent shaded gRPC; native trace + OTLP trace + log + configuration discovery + JVM metrics)", getPort());
+		log.info("### [mock-oap] gRPC server started on port {} (agent shaded gRPC; native trace + OTLP trace + log + "
+				+ "configuration discovery + management + meter + JVM metrics)", getPort());
 	}
 
 	@Override

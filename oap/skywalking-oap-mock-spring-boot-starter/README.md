@@ -51,6 +51,7 @@ flowchart LR
 ```
 
 - **Agent 保持原生**：不改 SkyWalking Agent、不加定制插件，也不改变其上报协议；只需把各服务的 `collector.backend_service` 指向宿主进程的地址和端口。
+- **注册 / 心跳 / meter 只确认不保存**：`ManagementService` 与 `MeterReportService` 返回空 `Commands`，多语言 Agent 不会因 `UNIMPLEMENTED` 刷日志；实例注册表和 meter 数据不进入缓存。
 - **宿主就是业务进程**：在一台已有 Java 服务上引入 starter 并显式开启，不需要再起独立 OAP 进程。宿主本身仍通过 `-javaagent` 使用原生 SkyWalking Agent。
 - **跨进程 Trace 可拼接**：Agent 产生的 Trace ID 与跨进程引用让浅层调用链可以在接收端关联；日志带有 Trace / Segment / Span 上下文时可与链路及 Span 对齐展示。
 - **接入方负责展示**：starter 提供接收、处理和有界缓存 Bean，不包含 Controller、HTML 或 Web 依赖。图中的展示层由宿主应用已有页面或单独的 UI 适配模块提供。

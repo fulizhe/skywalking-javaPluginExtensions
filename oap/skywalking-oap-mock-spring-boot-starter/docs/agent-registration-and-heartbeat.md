@@ -359,28 +359,26 @@ public Commands keepAlive(final InstancePingPkg request) {
 
 所以“注册”并不是 OAP 里的一个独立注册接口，而是 Agent 上报 `service + serviceInstance`，OAP 侧把它当成 `ServiceInstanceUpdate` 做 upsert。
 
-## 6. 对 mock-OAP starter 的含义
+## 6. mock-OAP starter 的实现
 
-当前 mock-OAP 注册的 SkyWalking native 服务如下（OTLP trace 通过 `additionalServices` 追加）：
+mock-OAP 在 `AgentShadedGrpcLauncher` 里注册的 SkyWalking native 服务如下（OTLP trace 通过 `additionalServices` 追加）：
 
 ```java
-// oap/skywalking-oap-mock-spring-boot-starter/src/main/java/.../AgentShadedGrpcLauncher.java:87-92
+// oap/skywalking-oap-mock-spring-boot-starter/src/main/java/.../AgentShadedGrpcLauncher.java
 NettyServerBuilder builder = NettyServerBuilder.forPort(configuredPort)
     .maxInboundMessageSize(maxInboundMessageSize)
     .addService(trace)
     .addService(logs)
     .addService(new ConfigurationDiscoveryServiceImpl())
+    .addService(new ManagementServiceImpl())
+    .addService(new MeterReportServiceImpl())
     .addService(jvm);
 ```
 
-这里没有 `ManagementService`。因此：
-
-- 未安装 `logfile-reporter-plugin` 的原生 Agent 指向 mock-OAP 时，`reportInstanceProperties` 和 `keepAlive` 会收到 gRPC 默认的 `UNIMPLEMENTED`。
-- `ServiceManagementClient` 会按 30 秒周期打印 `ServiceManagementClient execute fail.`。
-- 这不会影响 trace / log / JVM metrics 的接收。
-- `GRPCChannelManager.isNetworkError(...)` 只把 `UNAVAILABLE`、`PERMISSION_DENIED`、`UNAUTHENTICATED`、`RESOURCE_EXHAUSTED`、`UNKNOWN` 当作需要重连的网络错误，不包含 `UNIMPLEMENTED`，所以不会因此触发重连。
-
-如果只想用 mock-OAP 看链路、日志和 JVM 指标，可以接受这些日志；如果要让 mock 完整模拟 OAP 的注册/心跳，需要在 `AgentShadedGrpcLauncher` 里补一个 `ManagementService` 实现。
+- `ManagementServiceImpl` 实现 `reportInstanceProperties` 与 `keepAlive`，返回空 `Commands`。未安装 `logfile-reporter-plugin` 的 Agent 不会再收到 `UNIMPLEMENTED`，`ServiceManagementClient` 也不会每 30 秒打印 `ServiceManagementClient execute fail.`。
+- `MeterReportServiceImpl` 实现 `collect` / `collectBatch`，把客户端流读完后返回空 `Commands`；Go 等 Agent 的 meter 上报不再报 `Method not found`。
+- 两者都只做确认，不保存数据：没有实例注册表、最后心跳时间，也没有 meter 缓存。需要“在线实例”或 meter 曲线时，要在此基础上补存储。
+- `UNIMPLEMENTED` 不在 `GRPCChannelManager.isNetworkError(...)` 的重连集合里；这条结论仍然成立，只是现在不会再触发。
 
 ## 7. 本仓库定制 Agent 的例外
 

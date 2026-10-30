@@ -56,7 +56,7 @@ java -javaagent:/path/to/skywalking-agent.jar -jar app.jar
 
 将每个原生 Agent 的 `collector.backend_service` 配置为宿主进程可达的地址与端口。默认 gRPC 端口同时提供：
 
-- SkyWalking native gRPC：trace segment、log、JVM metrics、configuration discovery；
+- SkyWalking native gRPC：trace segment、log、JVM metrics、configuration discovery，以及实例注册/心跳和 meter 上报（后两者仅确认收到，不落缓存）；
 - OTLP/gRPC `opentelemetry.proto.collector.trace.v1.TraceService/Export`。
 
 collector 使用 Agent 自带的 shaded gRPC 栈，避免被 Agent 的 `grpc-1.x` 插件再次埋点。业务侧未 shaded 的 `io.grpc.*` 调用仍会正常生成 span。

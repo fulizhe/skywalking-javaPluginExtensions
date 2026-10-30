@@ -50,7 +50,7 @@ if defined FORCE_BUILD (
         echo     cd ..
         echo     mvn -B install -DskipTests
         echo     cd demo
-        echo     mvn -B package
+        echo     mvn -B clean package
         pause
         exit /b 1
     )
@@ -65,7 +65,7 @@ if defined FORCE_BUILD (
     )
     popd
     echo [2/2] building demo ...
-    call mvn -B -q -DskipTests package
+    call mvn -B -q -DskipTests clean package
     if errorlevel 1 (
         echo [ERROR] demo build failed.
         pause

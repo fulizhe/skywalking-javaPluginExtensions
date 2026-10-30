@@ -3,7 +3,7 @@
 把 `demo/docker-compose.yaml` 这套**四语言链路（Java → Go → C++ → Node）**部署到一台 Linux 服务器。
 一条命令起齐 + 一个地址看效果；踩过的坑集中在 §5，出问题先查那张表。
 
-> 本地只想起来看一眼:`mvn -B package && docker compose up -d`(同一份 compose,不需要搬镜像)。
+> 本地只想起来看一眼:`mvn -B clean package && docker compose up -d`(同一份 compose,不需要搬镜像)。
 > **这份文档只讲远端 + 镜像搬运。**
 
 ---
@@ -72,7 +72,7 @@ flowchart LR
 | 端口 | 宿主 `9601` 空闲 | `ss -ltn \| grep 9601` |
 | 内存 | 实测四服务合计 **约 420MB**(Java 375 + node 27 + go 8 + cpp 6);只有 Java 设了 `mem_limit: 1g` | `docker stats --no-stream` |
 | 基础镜像 | `openjdk:17-jdk-slim`、`demo-app-agent:9.4.0`(只为取其中的 SkyWalking agent) | `docker images \| grep -E 'openjdk:17\|demo-app-agent'` |
-| 构建产物 | `demo/target/mock-oap-demo-2.0.0.jar`(本地 `mvn -B package` 产出) | — |
+| 构建产物 | `demo/target/mock-oap-demo-2.0.0.jar`(本地 `mvn -B clean package` 产出) | — |
 
 ---
 
@@ -84,7 +84,7 @@ flowchart LR
 ```bash
 # ---- 本地 ----
 cd oap/skywalking-oap-mock-spring-boot-starter/demo
-mvn -B -DskipTests package
+mvn -B -DskipTests clean package
 
 # 三个 emitter 镜像只需导出一次(改了 emitters/services 才重做)
 docker save -o emitters.tar \
@@ -118,7 +118,7 @@ docker compose ps
 
 | 场景 | 做法 |
 | --- | --- |
-| 只改了 Java 代码 / 页面 | 本地 `mvn -B package` → scp jar 到 `target/` → `docker compose build mock-oap-demo && docker compose up -d` |
+| 只改了 Java 代码 / 页面 | 本地 `mvn -B clean package` → scp jar 到 `target/` → `docker compose build mock-oap-demo && docker compose up -d` |
 | 只改了 compose | scp `docker-compose.yaml` → `docker compose up -d`(只重建配置变了的服务) |
 | 看日志 | `docker compose logs -f mock-oap-demo`(**应用日志**);agent 自己的日志在容器内 `/opt/skywalking-agent/logs/skywalking-api.log` |
 | 看各语言 | `docker compose logs -f go-service cpp-service node-service` |
@@ -136,10 +136,10 @@ docker compose ps
 | 1 | `status.running=true`、日志也收得到,但**一条链路都没有**;采集器 `submittedTotal` 恒 0 | `demo-app-agent` 那个镜像里装着 `logfile-reporter-plugin`,它用 `@OverrideImplementor(TraceSegmentServiceClient.class)` 把 trace 上报**整个替换成写本地文件**(日志走另一个客户端,所以日志正常) | Dockerfile 里 `rm -f /opt/skywalking-agent/plugins/logfile-reporter-plugin-*.jar`,重建 Java 镜像。**这是最容易误判成"网络不通"的一条** |
 | 2 | 点「生成链路(3 跳)」只出一条 **Java 单服务**链路 | 按钮 `data-url` 曾是 `/demo/chain`(Java 自调自己) | 主按钮已改为 `/mock-oap/demo/go-chain`;自调链路降为「仅本机链路」按钮 |
 | 3 | 四段里**偶尔少 `go-service`** | skywalking-go 刚启动时 gRPC 流断开:`send segment error EOF` / `RST_STREAM CANCEL` | 预热后再点;缺了**再点一次**。稳定态实测 3/3 |
-| 4 | go 日志持续刷 `Method not found: skywalking.v3.MeterReportService/collectBatch`、`ManagementService/reportInstanceProperties` | mock-OAP 只实现 trace / log / JVM,心跳与指标服务未实现 | **预期噪音**,不影响 trace 与日志 |
+| 4 | go 日志持续刷 `Method not found: skywalking.v3.MeterReportService/collectBatch`、`ManagementService/reportInstanceProperties` | 镜像里的 mock-OAP 还是旧版:只注册 trace / log / CDS / JVM,没有 `ManagementService` 与 `MeterReportService` | 用新 jar 重建 `mock-oap-demo`:scp jar → `docker compose build mock-oap-demo && docker compose up -d`;新版两个服务返回空 `Commands`,不再刷这条 |
 | 5 | `cpp-service` 不出现在 `segment received` 日志里 | C++ 走 **OTLP**,不是 native 协议,日志行不同 | 看 `/mock-oap/status` 的 `otlpReceivedRecords`;它在链路里照样有节点 |
 | 6 | emitter 连不上 `mock-oap-demo:11800` | 一般是 Java 容器没起来 | starter 用 `NettyServerBuilder.forPort()`,监听 **0.0.0.0**;先 `docker exec mock-oap-demo ss -lntp \| grep 11800` |
-| 7 | `docker compose build` 报找不到 jar | build context 需要 `target/mock-oap-demo-2.0.0.jar` | 先 `mvn -B package`,并把 jar 放到远端 `target/` 下 |
+| 7 | `docker compose build` 报找不到 jar | build context 需要 `target/mock-oap-demo-2.0.0.jar` | 先 `mvn -B clean package`,并把 jar 放到远端 `target/` 下 |
 | 8 | 9601 打不开 | 端口被别的栈占 / 防火墙 | `ss -ltn \| grep 9601`;compose 里 `MOCK_OAP_DEMO_PORT` 可换宿主端口 |
 
 ---

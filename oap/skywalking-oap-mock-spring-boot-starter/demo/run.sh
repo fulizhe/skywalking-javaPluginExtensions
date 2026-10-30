@@ -61,7 +61,7 @@ JAR="target/mock-oap-demo-2.0.0.jar"
 FORCE_BUILD="${MOCK_OAP_REBUILD:-}"
 if [ ! -f "$JAR" ]; then
     FORCE_BUILD=1
-elif [ -n "$(find pom.xml src -type f -newer "$JAR" -print -quit 2>/dev/null)" ]; then
+elif [ -n "$(find pom.xml src ../src ../pom.xml -type f -newer "$JAR" -print -quit 2>/dev/null)" ]; then
     FORCE_BUILD=1
 fi
 
@@ -69,13 +69,13 @@ if [ -n "$FORCE_BUILD" ]; then
     if ! command -v mvn >/dev/null 2>&1; then
         echo "[ERROR] 没有找到 mvn。请先安装 Maven,或手动构建:" >&2
         echo "    cd .. && mvn -B install -DskipTests" >&2
-        echo "    cd demo && mvn -B package" >&2
+        echo "    cd demo && mvn -B clean package" >&2
         exit 1
     fi
     echo "[1/2] 构建 starter ..."
     (cd .. && mvn -B -q -DskipTests install)
     echo "[2/2] 构建 demo ..."
-    mvn -B -q -DskipTests package
+    mvn -B -q -DskipTests clean package
 fi
 
 if [ ! -f "$JAR" ]; then

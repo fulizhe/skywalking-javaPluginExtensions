@@ -21,7 +21,7 @@ bash run.sh /path/to/skywalking-agent/skywalking-agent.jar
 
 agent 路径也可以放进环境变量 `SKYWALKING_AGENT_JAR`，或直接把 agent 目录放到 `demo/skywalking-agent/`。
 
-改了 demo 源码或拉了新版本后，强制重建一次：
+改了 demo 或 starter 源码、或拉了新版本后，强制重建一次：
 
 ```bat
 set MOCK_OAP_REBUILD=1
@@ -45,7 +45,7 @@ mvn -B install -DskipTests
 
 # 2. 构建 demo
 cd demo
-mvn -B package
+mvn -B clean package
 
 # 3. 挂 agent 启动（路径换成你自己的 agent）
 java -javaagent:/path/to/skywalking-agent/skywalking-agent.jar \
@@ -119,7 +119,7 @@ demo 里的 Controller 与页面只用于演示；starter 本身不含 Controlle
 
 ## 部署
 
-- 本地起一套：`mvn -B -DskipTests package && docker compose up -d` —— 四语言链路
+- 本地起一套：`mvn -B -DskipTests clean package && docker compose up -d` —— 四语言链路
   (Java → Go → C++ → Node)，见 [`docker-compose.yaml`](docker-compose.yaml)。
 - 远端 Linux 服务器(镜像搬运、端口、排错表)：
   [`README-remoteDeploy.md`](README-remoteDeploy.md)。
