@@ -107,6 +107,13 @@ final class HttpClientParamCollector {
         if (!containsIgnoreCase(contentType, ContentType.APPLICATION_FORM_URLENCODED.getMimeType())) {
             return false;
         }
+        // 读取不可重复实体会耗尽真正发出的请求体; 只记录元数据, 不消费。
+        if (!entity.isRepeatable()) {
+            paramEntries.add(clip("form_meta={contentType=" + nullSafe(contentType)
+                + ",contentLength=" + entity.getContentLength()
+                + ",repeatable=false}"));
+            return true;
+        }
         final String text = safeReadEntity(entity);
         if (StringUtil.isNotEmpty(text)) {
             paramEntries.add(clip("form=" + text));

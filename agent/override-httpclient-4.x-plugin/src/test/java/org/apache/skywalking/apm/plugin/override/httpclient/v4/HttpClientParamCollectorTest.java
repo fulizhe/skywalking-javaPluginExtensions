@@ -5,12 +5,14 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
+import org.apache.http.entity.InputStreamEntity;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
 import org.junit.After;
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -132,6 +134,23 @@ public class HttpClientParamCollectorTest {
         final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
 
         assertThat(tags.getParams(), is("form=x=10&y=hello"));
+        assertThat(tags.getFiles(), is((String) null));
+    }
+
+    @Test
+    public void shouldNotConsumeNonRepeatableFormEntity() {
+        HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
+        final byte[] bytes = "x=10&y=hello".getBytes(StandardCharsets.UTF_8);
+        final HttpPost request = new HttpPost("http://127.0.0.1:8080/path");
+        request.setEntity(new InputStreamEntity(new ByteArrayInputStream(bytes), bytes.length,
+            ContentType.APPLICATION_FORM_URLENCODED));
+
+        final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
+
+        // 不可重复实体不能被 form 分支读走; 仍归为表单, 只记元数据, 不记为文件
+        assertThat(tags.getParams(), containsString("form_meta="));
         assertThat(tags.getFiles(), is((String) null));
     }
 
