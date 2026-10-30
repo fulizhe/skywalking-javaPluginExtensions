@@ -15,6 +15,7 @@
 		<module>logfile-reporter-plugin</module>
 
         <module>override-httpclient-4.x-plugin</module>
+        <module>override-httpclient-5.x-plugin</module>
 		<module>override-hutool-http-5.x-plugin</module>
     </modules>
     <packaging>pom</packaging>
