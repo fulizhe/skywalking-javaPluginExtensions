@@ -18,7 +18,7 @@ Blocked by: 02
   - `shouldCollectOnlyBodyWhenOnlyOverrideSwitchIsTurnedOn`
   - 开关/运行时开关用例（`shouldReportOfficialCollectionSwitch...`、`shouldEnableOnlyOverrideCollection...`）
 - `HttpClientResponseCollectorTest`，镜像 4.x。
-- `OverrideHttpClient5PluginConfigTest`，镜像 4.x。
+- 配置开关测试由 4.x 的 `OverrideHttpClientPluginConfigTest` 覆盖（5.x 无独立配置类）。
 - 测试 request 用 5.x 类型（如 `BasicClassicHttpRequest` / `HttpPost`，`MultipartEntityBuilder` 用 client5 对应类）。
 - `@After` 还原三个静态配置值，避免用例互相污染。
 

@@ -28,12 +28,12 @@ E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-
 
 ## 采集开关模型
 
-与 4.x override 同构,采集职责拆分:
+复用 4.x override 的开关(同一个 key、同一个运行时入口),采集职责拆分:
 
 | 用途 | 配置 key | 默认 |
 |------|----------|------|
 | query string(官方) | `plugin.httpclient.collect_http_params` | `false` |
-| 请求体 / 表单 / multipart / 响应体(override) | `plugin.overridehttpclient5.collect_http_params` | `false` |
+| 请求体 / 表单 / multipart / 响应体(override) | `plugin.overridehttpclient.collect_http_params` | `false` |
 | 裁剪长度(官方,共用) | `plugin.http.http_params_length_threshold` | `1024` |
 
 - `application/x-www-form-urlencoded` 采为 `form=...`
@@ -42,22 +42,32 @@ E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-
 
 ## 运行时开关
 
-宿主工具类:`org.apache.skywalking.apm.toolkit.SWHttpClient5CollectUtils`
+与 `override-httpclient-4.x-plugin`、`override-hutool-http-5.x-plugin` **共用**同一个宿主工具类:
 
 ```java
-SWHttpClient5CollectUtils.enableCollect(Collections.emptyMap());
-SWHttpClient5CollectUtils.disableCollect(Collections.emptyMap());
-SWHttpClient5CollectUtils.statisticStatus();
+org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils
+```
+
+```java
+SWHttpClientCollectUtils.enableCollect(Collections.emptyMap());
+SWHttpClientCollectUtils.disableCollect(Collections.emptyMap());
+SWHttpClientCollectUtils.statisticStatus();
 ```
 
 状态 map 键:`officialCollectHttpParams` / `overrideCollectHttpParams` / `httpParamsLengthThreshold`。
 运行时开关只改 override 开关(请求体/响应体),不动官方 query 开关。
 
+开关的拥有者是 4.x 插件:本插件**不注册**自己的 `HttpClientParamRuntimeInstrumentation`,
+只读共享的 `OverrideHttpClientPluginConfig`。这样同一个被增强类只有一个增强者,
+两个插件同时装载时不会出现外层拦截器压住内层、运行时开关只生效一个的问题。
+
 ## 部署注意
 
 部署前移走官方 `apm-httpclient-5.x-plugin-*.jar`(脚本会自动挪到 `optional-plugins/`),否则同步路径会被官方与本插件双重增强。
 
-本插件与 `override-httpclient-4.x-plugin` 可同时装载:两者增强的类不同(4.x 是 `org.apache.http.*`,5.x 是 `org.apache.hc.*`),toolkit 类名也不同,互不冲突。
+本插件**必须与 `override-httpclient-4.x-plugin` 一起部署**:开关配置类与 `SWHttpClientCollectUtils`
+的增强都由 4.x 插件提供,单独安装 5.x jar 会在加载开关时缺类。两个插件增强的业务类不同
+(4.x 是 `org.apache.http.*`,5.x 是 `org.apache.hc.*`),可以同 agent 共存。
 
 ## 异步路径为什么"未修改"
 

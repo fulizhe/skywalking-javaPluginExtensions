@@ -17,9 +17,8 @@ Type: task
   - `<finalName>override-apm-httpclient-5.x-plugin-${skywalking.version}</finalName>`
 - 在 `agent/pom.xml` 的 `<modules>` 注册新模块。
 - 新建包根 `org.apache.skywalking.apm.plugin.override.httpclient.v5`，落地：
-  - `OverrideHttpClient5PluginConfig`（`@PluginConfig(root=...)` 标记内层 `Plugin.OverrideHttpClient5`，字段 `COLLECT_HTTP_PARAMS=false` → key `plugin.overridehttpclient5.collect_http_params`）
-  - 采集开关聚合类（等价 4.x `HttpClientCollectionSwitch`）：`isOfficialCollectEnabled` / `isOverrideCollectEnabled` / `toggleRuntimeCollect` / `currentStatus`
-  - `org.apache.skywalking.apm.toolkit.SWHttpClient5CollectUtils` 桩类（`enableCollect(Map)` / `disableCollect(Map)` 返回 Boolean.FALSE，`statisticStatus()` 返回空 map）
+  - 采集开关聚合类（等价 4.x `HttpClientCollectionSwitch`）：`isOfficialCollectEnabled` / `isOverrideCollectEnabled`，读 4.x 的 `OverrideHttpClientPluginConfig`（key `plugin.overridehttpclient.collect_http_params`）
+  - **不新增** 5.x 配置类与 toolkit 桩：复用 4.x 的 `OverrideHttpClientPluginConfig` 与 `org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils`
 - 130 行内的 license 头与现有模块保持一致。
 
 ## 验收

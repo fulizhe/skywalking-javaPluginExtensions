@@ -1,23 +1,20 @@
 # 05 运行时开关拦截器 + 静态增强
 
-Status: done
+Status: superseded（已改为复用 4.x 的开关，见 spec）
 Type: task
 Blocked by: 01
 
-## 目标
+## 目标（已被后续决定取代）
 
-让应用侧 `SWHttpClient5CollectUtils` 的静态方法在运行时被 agent 接管，用于开关请求体采集与查询状态。
+原计划让 5.x 自带 `SWHttpClient5CollectUtils` 的静态增强。实施后改为**复用 4.x 的开关**：
+`SWHttpClientCollectUtils` 只由 4.x 插件增强，5.x 只读共享的 `OverrideHttpClientPluginConfig`。
+这样两个插件同装时不会出现外层拦截器压住内层、运行时开关只生效一个的问题（与 hutool 同模式）。
 
-## 范围
+## 范围（已删除）
 
-- 三个 `StaticMethodsAroundInterceptor`（镜像 4.x）：
-  - `HttpClientCollectEnableRuntimeInterceptor` → `toggleRuntimeCollect(true)` 并 `defineReturnValue(currentStatus())`
-  - `HttpClientCollectDisableRuntimeInterceptor` → `toggleRuntimeCollect(false)`
-  - `HttpClientCollectStatusExposeInterceptor` → `defineReturnValue(currentStatus())`
-- `define/HttpClientParamRuntimeInstrumentation`（`ClassStaticMethodsEnhancePluginDefine`）：
-  - enhanceClass = `org.apache.skywalking.apm.toolkit.SWHttpClient5CollectUtils`
-  - 匹配 `enableCollect(Map)` / `disableCollect(Map)` / `statisticStatus()`
-- `skywalking-plugin.def` 追加该条注册。
+- 三个 `StaticMethodsAroundInterceptor`：已删除。
+- `define/HttpClientParamRuntimeInstrumentation`：已删除。
+- `skywalking-plugin.def`：不注册运行时增强。
 
 ## 硬约束
 

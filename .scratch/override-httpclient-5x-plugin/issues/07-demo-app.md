@@ -15,8 +15,8 @@ Blocked by: 01
   - 新增 `org.apache.httpcomponents.client5:httpclient5:${httpclient5.version}` 依赖
 - 新增出口端点 `/api/trace-alert-demo/httpclient5-post`：
   - 用 httpclient5 向应用自身 POST 表单体（镜像 4.x 的 `httpclient-post` 回环），返回 `client=apache-httpclient5`
-- 新增 `org.apache.skywalking.apm.toolkit.SWHttpClient5CollectUtils` 宿主桩类（方法同插件侧，桩返回 FALSE/空 map）
-- 新增 httpclient5 collect 读口控制器（`status` / `statistic` / `toggle`，镜像 `SWHttpClientCollectController`，内部调 `SWHttpClient5CollectUtils`），路径建议 `/httpclient5/collect/*`
+- 复用已有的 4.x `org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils` 宿主桩类（不新增 5.x 桩）
+- 新增 httpclient5 collect 读口控制器（`status` / `statistic` / `toggle`，镜像 `SWHttpClientCollectController`，内部调共享的 `SWHttpClientCollectUtils`），路径 `/httpclient5/collect/*`
 
 ## 验收
 
