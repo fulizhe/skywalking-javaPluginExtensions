@@ -8,6 +8,7 @@ on:
       - 'verify/**'
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-httpclient-5.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/demo-app/**'
       # 带自身路径:否则改 workflow 永远不触发它自己,验证逻辑改动得不到验证
@@ -19,6 +20,7 @@ on:
       - 'verify/**'
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-httpclient-5.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/demo-app/**'
       - '.github/workflows/verify.yml'
@@ -28,7 +30,7 @@ env:
   # 改版本(agent 版本)时两处一起改。
   RUNNER_IMAGE_VERSION: 9.4.0
 
-# 运行器镜像只构建一次,推 GHCR;三个场景 job 各自 pull。
+# 运行器镜像只构建一次,推 GHCR;各场景 job 各自 pull。
 # 为什么不用 artifact 分发:那要上传 ~1GB、再让 3 个 job 各下 ~1GB(gzip 来回一趟),
 # 而 GHCR 是内容寻址的 —— 镜像没变时重推只传 manifest(几 KB),job 侧 pull 走 registry
 # 的压缩层拉取,比 buildkit 从 cache 服务导层 + load 进 docker image store 更快。

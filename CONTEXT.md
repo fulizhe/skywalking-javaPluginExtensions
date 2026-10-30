@@ -1,6 +1,6 @@
 # SkyWalking Java 插件扩展
 
-本仓库为 SkyWalking Java Agent 的扩展插件集。当前有效模块:`logfile-reporter-plugin`、`dynamic-debug-runtime-9.x-plugin`(活跃迭代)与两个 override 插件(`override-httpclient-4.x-plugin`、`override-hutool-http-5.x-plugin`,同为活跃维护)。
+本仓库为 SkyWalking Java Agent 的扩展插件集。当前有效模块:`logfile-reporter-plugin`、`dynamic-debug-runtime-9.x-plugin`(活跃迭代)与三个 override 插件(`override-httpclient-4.x-plugin`、`override-httpclient-5.x-plugin`、`override-hutool-http-5.x-plugin`,同为活跃维护)。
 
 ## Language
 

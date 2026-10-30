@@ -1,6 +1,6 @@
 name: Package plugins
 
-# 打包四个活跃插件的 jar。一个 build 承担两种角色:
+# 打包五个活跃插件的 jar。一个 build 承担两种角色:
 #   - 干跑(push / PR):jar 存成 workflow artifact 供下载自测,不发布任何东西
 #   - 发布(tag / release / 手动):jar 挂到该 tag 的 GitHub Release
 #
@@ -25,6 +25,7 @@ on:
     paths:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-httpclient-5.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
@@ -38,6 +39,7 @@ on:
     paths:
       - 'agent/logfile-reporter-plugin/**'
       - 'agent/override-httpclient-4.x-plugin/**'
+      - 'agent/override-httpclient-5.x-plugin/**'
       - 'agent/override-hutool-http-5.x-plugin/**'
       - 'agent/dynamic-debug-runtime-9.x-plugin/**'
       - 'agent/pom.xml'
@@ -56,9 +58,9 @@ run-name: package ${{ inputs.tag || (github.event_name == 'release' && github.ev
 env:
   # 三种触发面的 tag 取值:手动输入 > release 事件的 tag_name > 当前 ref。
   TAG: ${{ inputs.tag || (github.event_name == 'release' && github.event.release.tag_name) || github.ref_name }}
-  # 只打这四个活跃插件(docs/repo/module-status.md)。把归档模块一起拖进来,
+  # 只打这五个活跃插件(docs/repo/module-status.md)。把归档模块一起拖进来,
   # 等于让发布链路 hostage 于它们在 JDK 17 下的编译状态。列表与 build-and-test.yml 一致。
-  MODULES: logfile-reporter-plugin,override-httpclient-4.x-plugin,override-hutool-http-5.x-plugin,dynamic-debug-runtime-9.x-plugin
+  MODULES: logfile-reporter-plugin,override-httpclient-4.x-plugin,override-httpclient-5.x-plugin,override-hutool-http-5.x-plugin,dynamic-debug-runtime-9.x-plugin
 
 permissions: {}   # 默认全关,每个 job 单独声明最小权限
 
@@ -90,7 +92,7 @@ jobs:
         working-directory: ./agent
         run: mvn -B package -pl "$MODULES" -am
 
-      # 只从这四个模块的 target 里取,maxdepth 1 —— 不递归扫 agent/**,
+      # 只从这五个模块的 target 里取,maxdepth 1 —— 不递归扫 agent/**,
       # 免得哪天某个归档模块残留的 target 混进发布资产。
       # 两个排除项都是实测踩到的:
       #   *-sources.jar  —— sources jar
