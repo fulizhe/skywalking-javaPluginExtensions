@@ -24,14 +24,16 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.skywalking.apm.toolkit.SWHttpClient5CollectUtils;
+import org.apache.skywalking.apm.toolkit.SWHttpClientCollectUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * override-httpclient-5.x 插件的 httpclient5 参数采集(collect)演示读口:
- * 运行时开关与采集快照查看端点。未挂载该插件时,桩方法返回未启用/空数据,读口照常响应(便于对比)。
+ * 运行时开关与采集快照查看端点。开关入口与 4.x 插件共用同一个
+ * {@code SWHttpClientCollectUtils} 宿主工具类(5.x 插件只读共享配置,不再自带开关)。
+ * 未挂载插件时,桩方法返回未启用/空数据,读口照常响应(便于对比)。
  */
 @RestController
 public class SWHttpClient5CollectController {
@@ -59,9 +61,9 @@ public class SWHttpClient5CollectController {
         Boolean targetEnabled = Boolean.TRUE.equals(enable);
         Object invokeResult;
         if (Boolean.TRUE.equals(enable)) {
-            invokeResult = SWHttpClient5CollectUtils.enableCollect(Collections.emptyMap());
+            invokeResult = SWHttpClientCollectUtils.enableCollect(Collections.emptyMap());
         } else {
-            invokeResult = SWHttpClient5CollectUtils.disableCollect(Collections.emptyMap());
+            invokeResult = SWHttpClientCollectUtils.disableCollect(Collections.emptyMap());
         }
 
         Boolean resultEnabled = toBoolean(invokeResult);
@@ -73,7 +75,7 @@ public class SWHttpClient5CollectController {
     }
 
     private Map<String, Object> safeStatisticStatus() {
-        Map<String, Object> statisticStatus = SWHttpClient5CollectUtils.statisticStatus();
+        Map<String, Object> statisticStatus = SWHttpClientCollectUtils.statisticStatus();
         return statisticStatus == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<>(statisticStatus);
     }
 
