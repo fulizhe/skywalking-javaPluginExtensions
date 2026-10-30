@@ -105,7 +105,7 @@ verify/scenarios/<plugin>/
 |------|------|
 | `logfile-reporter` | 与 `agent/demo-app/scripts/validate.ps1` 的 A/B/C/D 等价:trace 缓存合并、告警链端到端 + webhook 收讫、运行时开关、五类数据流读口冒烟 |
 | `override-httpclient` | 采集开关读口 + enable/disable;httpclient POST 表单体采为 `http.request.params` tag 端到端;httpclient `4.5.13`/`4.5.14` 版本矩阵 |
-| `override-httpclient5x` | 采集开关读口 + enable/disable(关断后新 span 不再带表单体 tag);httpclient5 POST 表单体采为 `http.request.params` tag 端到端;httpclient5 `5.0`/`5.1.4`/`5.2.1` 版本矩阵 |
+| `override-httpclient5x` | 采集开关读口 + enable/disable(关断后新 span 不再带表单体 tag;开关与 toolkit 由 4.x 插件共用,场景同时装载它);httpclient5 POST 表单体采为 `http.request.params` tag 端到端;httpclient5 `5.0`/`5.1.4`/`5.2.1` 版本矩阵 |
 | `override-hutool` | hutool 四类采集面(query / 表单体 / `body(...)` 原始体 / multipart 文件元数据)+ `http.response.body` + 目标 500 置 `isError` + 超阈值裁剪 + 运行时开关(关断后 span 在、参数与响应体 tag 消失);hutool `5.4.1`/`5.8.47` 版本矩阵 |
 
 > 每个已接入 verify 的插件各有一个场景(`bash verify/run.sh` 一条命令全跑);场景清单见 `verify/scenarios/`。
