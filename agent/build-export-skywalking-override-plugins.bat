@@ -41,11 +41,17 @@ set "HUTOOL_MODULE=override-hutool-http-5.x-plugin"
 set "HUTOOL_JAR=override-apm-hutool-http-5.x-plugin-9.4.0.jar"
 set "HUTOOL_OFFICIAL_JAR=apm-hutool-http-5.x-plugin-9.4.0.jar"
 
+set "HTTPCLIENT5_MODULE=override-httpclient-5.x-plugin"
+set "HTTPCLIENT5_JAR=override-apm-httpclient-5.x-plugin-9.4.0.jar"
+set "HTTPCLIENT5_OFFICIAL_JAR=apm-httpclient-5.x-plugin-9.4.0.jar"
+
 rem --- step status (OK / FAILED / SKIPPED) ---
 set "STATUS_BUILD_HTTPCLIENT=SKIPPED"
 set "STATUS_BUILD_HUTOOL=SKIPPED"
+set "STATUS_BUILD_HTTPCLIENT5=SKIPPED"
 set "STATUS_EXPORT_HTTPCLIENT=SKIPPED"
 set "STATUS_EXPORT_HUTOOL=SKIPPED"
+set "STATUS_EXPORT_HTTPCLIENT5=SKIPPED"
 set "FAIL_STEP="
 set "DID_PUSHD=0"
 
@@ -56,6 +62,9 @@ set "EXPORT_HTTPCLIENT_OFFICIAL="
 set "EXPORT_HUTOOL_FROM="
 set "EXPORT_HUTOOL_TO="
 set "EXPORT_HUTOOL_OFFICIAL="
+set "EXPORT_HTTPCLIENT5_FROM="
+set "EXPORT_HTTPCLIENT5_TO="
+set "EXPORT_HTTPCLIENT5_OFFICIAL="
 
 if not exist "%REPO_ROOT%pom.xml" (
     set "FAIL_STEP=pre-check - pom.xml not found"
@@ -117,6 +126,14 @@ if errorlevel 1 (
 )
 set "STATUS_BUILD_HUTOOL=OK"
 
+call :build_module "%HTTPCLIENT5_MODULE%"
+if errorlevel 1 (
+    set "STATUS_BUILD_HTTPCLIENT5=FAILED"
+    set "FAIL_STEP=build %HTTPCLIENT5_MODULE%"
+    goto :summary
+)
+set "STATUS_BUILD_HTTPCLIENT5=OK"
+
 call :export_plugin "%HTTPCLIENT_MODULE%\target\%HTTPCLIENT_JAR%" "%HTTPCLIENT_JAR%" "%HTTPCLIENT_OFFICIAL_JAR%"
 if errorlevel 1 (
     set "STATUS_EXPORT_HTTPCLIENT=FAILED"
@@ -138,6 +155,17 @@ set "STATUS_EXPORT_HUTOOL=OK"
 set "EXPORT_HUTOOL_FROM=!LAST_EXPORT_FROM!"
 set "EXPORT_HUTOOL_TO=!LAST_EXPORT_TO!"
 set "EXPORT_HUTOOL_OFFICIAL=!LAST_EXPORT_OFFICIAL!"
+
+call :export_plugin "%HTTPCLIENT5_MODULE%\target\%HTTPCLIENT5_JAR%" "%HTTPCLIENT5_JAR%" "%HTTPCLIENT5_OFFICIAL_JAR%"
+if errorlevel 1 (
+    set "STATUS_EXPORT_HTTPCLIENT5=FAILED"
+    set "FAIL_STEP=export %HTTPCLIENT5_JAR%"
+    goto :summary
+)
+set "STATUS_EXPORT_HTTPCLIENT5=OK"
+set "EXPORT_HTTPCLIENT5_FROM=!LAST_EXPORT_FROM!"
+set "EXPORT_HTTPCLIENT5_TO=!LAST_EXPORT_TO!"
+set "EXPORT_HTTPCLIENT5_OFFICIAL=!LAST_EXPORT_OFFICIAL!"
 
 goto :summary
 
@@ -208,7 +236,10 @@ echo       status         : %STATUS_BUILD_HTTPCLIENT%
 echo  [Step-2] Build %HUTOOL_MODULE%
 echo       status         : %STATUS_BUILD_HUTOOL%
 
-echo  [Step-3] Export %HTTPCLIENT_JAR%
+echo  [Step-3] Build %HTTPCLIENT5_MODULE%
+echo       status         : %STATUS_BUILD_HTTPCLIENT5%
+
+echo  [Step-4] Export %HTTPCLIENT_JAR%
 echo       status         : %STATUS_EXPORT_HTTPCLIENT%
 if "%STATUS_EXPORT_HTTPCLIENT%"=="OK" (
     echo       built jar      : !EXPORT_HTTPCLIENT_FROM!
@@ -219,7 +250,7 @@ if "%STATUS_EXPORT_HTTPCLIENT%"=="FAILED" (
     echo       intended target  : %PLUGINS_DIR%\%HTTPCLIENT_JAR%
 )
 
-echo  [Step-4] Export %HUTOOL_JAR%
+echo  [Step-5] Export %HUTOOL_JAR%
 echo       status         : %STATUS_EXPORT_HUTOOL%
 if "%STATUS_EXPORT_HUTOOL%"=="OK" (
     echo       built jar      : !EXPORT_HUTOOL_FROM!
@@ -230,6 +261,17 @@ if "%STATUS_EXPORT_HUTOOL%"=="FAILED" (
     echo       intended target  : %PLUGINS_DIR%\%HUTOOL_JAR%
 )
 
+echo  [Step-6] Export %HTTPCLIENT5_JAR%
+echo       status         : %STATUS_EXPORT_HTTPCLIENT5%
+if "%STATUS_EXPORT_HTTPCLIENT5%"=="OK" (
+    echo       built jar      : !EXPORT_HTTPCLIENT5_FROM!
+    echo       copied to      : !EXPORT_HTTPCLIENT5_TO!
+    echo       official jar   : !EXPORT_HTTPCLIENT5_OFFICIAL!
+)
+if "%STATUS_EXPORT_HTTPCLIENT5%"=="FAILED" (
+    echo       intended target  : %PLUGINS_DIR%\%HTTPCLIENT5_JAR%
+)
+
 if not defined FAIL_STEP (
     echo ----------------------------------------------------------------------------
     echo  Deployed override jars in plugins:
@@ -238,7 +280,7 @@ if not defined FAIL_STEP (
     echo ----------------------------------------------------------------------------
     if exist "%AGENT_LOG_FILE%" (
         echo  Recent related log lines:
-        powershell -NoProfile -Command "Get-Content -Path '%AGENT_LOG_FILE%' -Tail 200 | Select-String -Pattern 'override-apm-httpclient-4.x-plugin|override-apm-hutool-http-5.x-plugin'"
+        powershell -NoProfile -Command "Get-Content -Path '%AGENT_LOG_FILE%' -Tail 200 | Select-String -Pattern 'override-apm-httpclient-4.x-plugin|override-apm-hutool-http-5.x-plugin|override-apm-httpclient-5.x-plugin'"
     ) else (
         echo  [WARN] SkyWalking log not found: %AGENT_LOG_FILE%
     )
