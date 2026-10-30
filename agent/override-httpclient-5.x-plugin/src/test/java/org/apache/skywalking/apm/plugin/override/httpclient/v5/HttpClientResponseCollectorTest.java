@@ -9,6 +9,7 @@ import org.apache.hc.core5.http.io.entity.InputStreamEntity;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
+import org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig;
 import org.junit.After;
 import org.junit.Test;
 
@@ -19,18 +20,18 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 public class HttpClientResponseCollectorTest {
-    private final boolean originalOverrideCollectSwitch = OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS;
+    private final boolean originalOverrideCollectSwitch = OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     private final int originalThreshold = HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
 
     @After
     public void tearDown() {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = originalThreshold;
     }
 
     @Test
     public void shouldCollectRepeatableJsonResponseBody() {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         final ClassicHttpResponse response = responseOf(
             new StringEntity("{\"code\":500,\"msg\":\"system error\"}", ContentType.APPLICATION_JSON));
@@ -42,7 +43,7 @@ public class HttpClientResponseCollectorTest {
 
     @Test
     public void shouldSkipWhenOverrideSwitchDisabled() {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = false;
         final ClassicHttpResponse response = responseOf(new StringEntity("blocked", ContentType.TEXT_PLAIN));
 
         final String collected = HttpClientResponseCollector.collect(response);
@@ -52,7 +53,7 @@ public class HttpClientResponseCollectorTest {
 
     @Test
     public void shouldSkipBinaryResponseBody() {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final ClassicHttpResponse response = responseOf(new ByteArrayEntity(new byte[] {1, 2, 3, 4},
             ContentType.APPLICATION_OCTET_STREAM));
 
@@ -63,7 +64,7 @@ public class HttpClientResponseCollectorTest {
 
     @Test
     public void shouldClipCollectedResponseBody() {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 10;
         final ClassicHttpResponse response = responseOf(new StringEntity("0123456789abcdefghijklmnopqrstuvwxyz",
             ContentType.TEXT_PLAIN));
@@ -75,7 +76,7 @@ public class HttpClientResponseCollectorTest {
 
     @Test
     public void shouldSkipNonRepeatableResponseAndLeaveBusinessReadAvailable() throws Exception {
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final byte[] bytes = "stream-body".getBytes(StandardCharsets.UTF_8);
         final HttpEntity entity = new InputStreamEntity(new ByteArrayInputStream(bytes), bytes.length,
             ContentType.TEXT_PLAIN);

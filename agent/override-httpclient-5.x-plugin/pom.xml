@@ -48,6 +48,14 @@
             <version>${skywalking.version}</version>
             <scope>provided</scope>
         </dependency>
+        <!-- 与 override-hutool-http-5.x-plugin 相同: 直接复用 4.x 的配置类与运行时开关,
+             本插件不再自带配置类/toolkit 桩/运行时增强。部署时必须同时安装 4.x 插件。 -->
+        <dependency>
+            <groupId>org.openskywalking</groupId>
+            <artifactId>override-httpclient-4.x-plugin</artifactId>
+            <version>${project.version}</version>
+            <scope>provided</scope>
+        </dependency>
 
         <dependency>
             <groupId>junit</groupId>

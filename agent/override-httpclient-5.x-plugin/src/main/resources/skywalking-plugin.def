@@ -19,4 +19,5 @@ override-httpclient-5.x=org.apache.skywalking.apm.plugin.override.httpclient.v5.
 override-httpclient-5.x=org.apache.skywalking.apm.plugin.override.httpclient.v5.define.MinimalHttpClientInstrumentation
 override-httpclient-5.x=org.apache.skywalking.apm.plugin.override.httpclient.v5.define.HttpAsyncClientInstrumentation
 override-httpclient-5.x=org.apache.skywalking.apm.plugin.override.httpclient.v5.define.IOSessionImplInstrumentation
-override-httpclient-5.x=org.apache.skywalking.apm.plugin.override.httpclient.v5.define.HttpClientParamRuntimeInstrumentation
+# 运行时开关与 toolkit 增强由 override-httpclient-4.x-plugin 统一拥有(与 override-hutool 同模式),
+# 本插件只读共享的 OverrideHttpClientPluginConfig, 不注册自己的 HttpClientParamRuntimeInstrumentation。

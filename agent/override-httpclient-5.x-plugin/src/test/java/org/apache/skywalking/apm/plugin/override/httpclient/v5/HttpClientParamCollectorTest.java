@@ -7,6 +7,7 @@ import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.io.entity.InputStreamEntity;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
+import org.apache.skywalking.apm.plugin.override.httpclient.v4.OverrideHttpClientPluginConfig;
 import org.junit.After;
 import org.junit.Test;
 
@@ -21,13 +22,13 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 public class HttpClientParamCollectorTest {
     private final boolean originalCollectSwitch = HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS;
-    private final boolean originalOverrideCollectSwitch = OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS;
+    private final boolean originalOverrideCollectSwitch = OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS;
     private final int originalThreshold = HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD;
 
     @After
     public void tearDown() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = originalCollectSwitch;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = originalOverrideCollectSwitch;
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = originalThreshold;
     }
 
@@ -35,7 +36,7 @@ public class HttpClientParamCollectorTest {
     public void shouldCollectQueryAndFormBody() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
         request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
 
@@ -49,7 +50,7 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldCollectMultipartFileSizeAndTextPart() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final File temp = File.createTempFile("httpclient5-", ".txt");
         final FileWriter writer = new FileWriter(temp);
         writer.write("abcdef");
@@ -74,7 +75,7 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldClipLargeBodyValues() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 16;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path");
         request.setEntity(new StringEntity("0123456789abcdefghijklmnopqrstuvwxyz", ContentType.TEXT_PLAIN));
 
@@ -86,29 +87,26 @@ public class HttpClientParamCollectorTest {
     @Test
     public void shouldReportOfficialCollectionSwitchWhenOfficialSwitchIsTurnedOn() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = false;
 
         assertThat(HttpClientCollectionSwitch.isOfficialCollectEnabled(), is(true));
         assertThat(HttpClientCollectionSwitch.isOverrideCollectEnabled(), is(false));
     }
 
     @Test
-    public void shouldEnableOnlyOverrideCollectionWhenOnlyRuntimeOverrideSwitchIsTurnedOn() {
+    public void shouldReadSharedOverrideSwitchOwnedByHttpClient4Plugin() {
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = false;
-
-        HttpClientCollectionSwitch.toggleRuntimeCollect(true);
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
 
         assertThat(HttpClientCollectionSwitch.isOfficialCollectEnabled(), is(false));
         assertThat(HttpClientCollectionSwitch.isOverrideCollectEnabled(), is(true));
-        assertThat(OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS, is(true));
     }
 
     @Test
     public void shouldCollectOnlyQueryWhenOnlyOfficialSwitchIsTurnedOn() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = true;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = false;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
         request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
 
@@ -122,7 +120,7 @@ public class HttpClientParamCollectorTest {
     public void shouldCollectOnlyBodyWhenOnlyOverrideSwitchIsTurnedOn() throws Exception {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path?a=1&b=two");
         request.setEntity(new StringEntity("x=10&y=hello", ContentType.APPLICATION_FORM_URLENCODED));
 
@@ -136,7 +134,7 @@ public class HttpClientParamCollectorTest {
     public void shouldNotConsumeNonRepeatableFormEntity() {
         HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
         HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
-        OverrideHttpClient5PluginConfig.Plugin.OverrideHttpClient5.COLLECT_HTTP_PARAMS = true;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
         final byte[] bytes = "x=10&y=hello".getBytes(StandardCharsets.UTF_8);
         final HttpPost request = new HttpPost("http://127.0.0.1:8080/path");
         request.setEntity(new InputStreamEntity(new ByteArrayInputStream(bytes), bytes.length,
