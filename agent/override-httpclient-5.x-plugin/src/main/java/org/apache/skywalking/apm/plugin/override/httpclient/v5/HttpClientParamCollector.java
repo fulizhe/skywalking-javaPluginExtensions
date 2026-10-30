@@ -20,7 +20,10 @@ import org.apache.skywalking.apm.agent.core.logging.api.LogManager;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
 import org.apache.skywalking.apm.util.StringUtil;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.Reader;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -35,6 +38,10 @@ final class HttpClientParamCollector {
     static final String TAG_KEY_HTTP_FILES = "http.request.files";
 
     private static final int READ_BUFFER_SIZE = 256;
+    /**
+     * 单次请求体读取的硬上限。阈值 &lt;= 0 时也用它兜底, 避免无界缓冲。
+     */
+    private static final int MAX_READ_BYTES = 1024 * 1024;
     private static final String MULTIPART_ENTITY_CLASS =
         "org.apache.hc.client5.http.entity.mime.MultipartFormEntity";
     private static final String MULTIPART_PACKAGE =
@@ -263,21 +270,58 @@ final class HttpClientParamCollector {
     }
 
     private static String safeReadEntity(final HttpEntity entity) {
+        final Charset charset = resolveCharset(entity);
+        final int maxBytes = maxReadBytes();
+        final ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(maxBytes, 8192));
         try {
-            Charset charset = StandardCharsets.UTF_8;
-            final String contentType = getContentTypeValue(entity);
-            if (StringUtil.isNotEmpty(contentType)) {
-                final ContentType parsed = ContentType.parse(contentType);
-                if (parsed.getCharset() != null) {
-                    charset = parsed.getCharset();
-                }
-            }
-            return EntityUtils.toString(entity, charset);
+            // 不能只依赖 getContent(): Spring 的 HttpComponentsClientHttpRequest$BodyEntity
+            // 等包装实体会直接抛 UnsupportedOperationException, 但 writeTo 可用。
+            // 调用方已保证 isRepeatable()==true, 因此多写一次不会耗尽业务流。
+            entity.writeTo(new LimitedOutputStream(out, maxBytes));
+        } catch (LimitReachedException e) {
+            // 达到读取上限, 用已写入的前缀; 后续 clip() 继续按字符阈值裁剪。
+            return out.size() == 0 ? null : new String(out.toByteArray(), charset);
         } catch (Exception e) {
-            LOGGER.warn(e, "### Read httpclient5 entity as text failed, entityClass={}, contentType={}, repeatable={}",
-                    entity.getClass().getName(), getContentTypeValue(entity), entity.isRepeatable());
+            // 兼容只实现 getContent() 的自定义实体: writeTo 不可用时回到旧读取路径。
+            out.reset();
+            try {
+                return EntityUtils.toString(entity, charset);
+            } catch (Exception fallback) {
+                LOGGER.warn(fallback, "### Read httpclient5 entity as text failed, entityClass={}, contentType={}, repeatable={}",
+                        entity.getClass().getName(), getContentTypeValue(entity), entity.isRepeatable());
+                return null;
+            }
+        }
+        if (out.size() == 0) {
             return null;
         }
+        return new String(out.toByteArray(), charset);
+    }
+
+    private static Charset resolveCharset(final HttpEntity entity) {
+        final String contentType = getContentTypeValue(entity);
+        if (StringUtil.isNotEmpty(contentType)) {
+            try {
+                final ContentType parsed = ContentType.parse(contentType);
+                if (parsed.getCharset() != null) {
+                    return parsed.getCharset();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return StandardCharsets.UTF_8;
+    }
+
+    /**
+     * 按字符阈值换算字节上限: UTF-8 每字符最多 4 字节, 再留 4 字节余量。
+     * 阈值 &lt;= 0 表示不裁剪, 此时仍受 {@link #MAX_READ_BYTES} 保护。
+     */
+    private static int maxReadBytes() {
+        final int threshold = threshold();
+        if (threshold <= 0) {
+            return MAX_READ_BYTES;
+        }
+        return (int) Math.min((long) threshold * 4 + 4, MAX_READ_BYTES);
     }
 
     private static File extractFile(final HttpEntity entity) {
@@ -352,6 +396,47 @@ final class HttpClientParamCollector {
 
     private static String nullSafe(final String value) {
         return value == null ? "" : value;
+    }
+
+    /**
+     * 写入上限保护: 超过 {@code limit} 时抛 {@link LimitReachedException}, 由调用方保留已写前缀。
+     */
+    private static final class LimitedOutputStream extends OutputStream {
+        private final OutputStream delegate;
+        private final int limit;
+        private int written;
+
+        private LimitedOutputStream(final OutputStream delegate, final int limit) {
+            this.delegate = delegate;
+            this.limit = limit;
+        }
+
+        @Override
+        public void write(final int b) throws IOException {
+            ensureRoom(1);
+            delegate.write(b);
+            written++;
+        }
+
+        @Override
+        public void write(final byte[] bytes, final int off, final int len) throws IOException {
+            if (len <= 0) {
+                return;
+            }
+            ensureRoom(len);
+            delegate.write(bytes, off, len);
+            written += len;
+        }
+
+        private void ensureRoom(final int len) throws LimitReachedException {
+            if (len > limit - written) {
+                throw new LimitReachedException();
+            }
+        }
+    }
+
+    private static final class LimitReachedException extends IOException {
+        private static final long serialVersionUID = 1L;
     }
 
     static final class CollectedTags {

@@ -4,6 +4,7 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.AbstractHttpEntity;
 import org.apache.hc.core5.http.io.entity.InputStreamEntity;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.skywalking.apm.plugin.httpclient.HttpClientPluginConfig;
@@ -14,6 +15,9 @@ import org.junit.Test;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.hamcrest.CoreMatchers.containsString;
@@ -145,5 +149,61 @@ public class HttpClientParamCollectorTest {
         // 不可重复实体不能被 form 分支读走; 但仍归为表单, 只记元数据, 不记为文件
         assertThat(tags.getParams(), containsString("form_meta="));
         assertThat(tags.getFiles(), is((String) null));
+    }
+
+    @Test
+    public void shouldReadRepeatableEntityThatOnlySupportsWriteTo() throws Exception {
+        HttpClientPluginConfig.Plugin.Http.HTTP_PARAMS_LENGTH_THRESHOLD = 1024;
+        HttpClientPluginConfig.Plugin.HttpClient.COLLECT_HTTP_PARAMS = false;
+        OverrideHttpClientPluginConfig.Plugin.OverrideHttpClient.COLLECT_HTTP_PARAMS = true;
+        final HttpPost request = new HttpPost("http://127.0.0.1:8080/path");
+        request.setEntity(new WriteOnlyEntity("{\"k\":\"v\"}", ContentType.APPLICATION_JSON));
+
+        final HttpClientParamCollector.CollectedTags tags = HttpClientParamCollector.collect(request);
+
+        assertThat(tags.getParams(), is("body={\"k\":\"v\"}"));
+        assertThat(tags.getFiles(), is((String) null));
+    }
+
+    /**
+     * 模拟 Spring 的 HttpComponentsClientHttpRequest$BodyEntity:
+     * getContent() 抛 UnsupportedOperationException, 只能通过 writeTo 取 body。
+     */
+    private static final class WriteOnlyEntity extends AbstractHttpEntity {
+        private final byte[] body;
+
+        private WriteOnlyEntity(final String body, final ContentType contentType) {
+            super(contentType, null, false);
+            this.body = body.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public boolean isRepeatable() {
+            return true;
+        }
+
+        @Override
+        public long getContentLength() {
+            return body.length;
+        }
+
+        @Override
+        public InputStream getContent() {
+            throw new UnsupportedOperationException("write-only entity");
+        }
+
+        @Override
+        public void writeTo(final OutputStream outStream) throws IOException {
+            outStream.write(body);
+        }
+
+        @Override
+        public boolean isStreaming() {
+            return false;
+        }
+
+        @Override
+        public void close() {
+        }
     }
 }

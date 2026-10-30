@@ -37,6 +37,7 @@ E:\gitRepository\_skywalking-javaPluginExtensions\agent\build-export-skywalking-
 | 裁剪长度(官方,共用) | `plugin.http.http_params_length_threshold` | `1024` |
 
 - `application/x-www-form-urlencoded` 采为 `form=...`
+- 请求体优先经 `HttpEntity.writeTo(OutputStream)` 读取(仅可重复实体),兼容 Spring `BodyEntity` 这类 `getContent()` 会抛异常、只能 `writeTo` 的包装实体
 - multipart 文本字段进 `http.request.params`,文件项记 `filename / size / contentType` 进 `http.request.files`
 - 响应体只在实体可重复时采集(repeatable-only);不可重复的流/解压包装跳过,避免消费业务响应流
 
