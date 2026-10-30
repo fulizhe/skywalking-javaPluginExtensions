@@ -28,6 +28,7 @@
         .status-block {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 8px;
             min-width: 280px;
         }
@@ -108,8 +109,24 @@
             </div>
             <button id="toggleHttpClientCollectBtn" class="btn btn-sm btn-outline-success" type="button">切换 Body 采集</button>
         </div>
+
+        <div class="control-row mt-3">
+            <div class="status-block">
+                <strong>HttpClient5 出口验证</strong>
+                <span class="muted-note">override-httpclient-5.x-plugin</span>
+                <span id="httpClient5CollectText" class="text-muted">采集开关: 读取中...</span>
+                <span id="httpClient5TestCount" class="text-muted"></span>
+            </div>
+            <button id="httpClient5TestBtn" class="btn btn-sm btn-outline-info" type="button">触发 HttpClient5 测试</button>
+            <button id="httpClient5ViewTraceBtn" class="btn btn-sm btn-outline-primary" type="button" style="display: none;">查看该 Trace</button>
+            <span id="httpClient5TestResult" class="muted-note"></span>
+            <span id="httpClient5TraceId" class="muted-note"></span>
+        </div>
         <div class="muted-note mt-3">
-            页面会自动轮询两个开关状态。点击时序图后，表格页会展示每个 span 的 tags。
+            页面会自动轮询开关状态。点击时序图后，表格页会展示每个 span 的 tags。
+            HttpClient5 测试会经 Apache HttpClient 5.x 回环 POST 一次表单体,自动取回该次 traceId;
+            点「查看该 Trace」可直接看时序图,出口 span 应带 tag
+            <code>http.request.params=form=value=...</code>(采集开关与上面的 Body 采集共用)。
         </div>
     </div>
 
@@ -199,6 +216,8 @@
 <script>
     let enableLogfileReporter = false;
     let enableHttpClientCollect = false;
+    let httpClient5TestCount = 0;
+    let lastHttpClient5TraceId = null;
     let traceTable = null;
 
     function escapeHtml(value) {
@@ -490,7 +509,7 @@
 
     function loadStatistic() {
         return $.get('/statistic', function(data) {
-            enableLogfileReporter = !!data.enbaleLogfileReporter;
+            enableLogfileReporter = !!data.enableLogfileReporter;
             renderLogfileReporterStatus();
             updateLogCount(data);
             ensureDataTable(parseData(data));
@@ -508,13 +527,137 @@
         });
     }
 
+    function refreshHttpClient5CollectStatus() {
+        return $.get('/httpclient5/collect/status', function(data) {
+            const enabled = !!(data && data.enabled);
+            const count = data && typeof data.dataCount === 'number' ? data.dataCount : 0;
+            $('#httpClient5CollectText').text('采集开关: ' + (enabled ? '已启用' : '未启用') + ' | 采集条数: ' + count);
+        }).fail(function() {
+            $('#httpClient5CollectText').text('采集开关: 读取失败');
+        });
+    }
+
+    /**
+     * 从 /inner/sw/trace-recent 里挑出本次测试的 traceId:
+     * 优先 endpoint 命中 httpclient5-post、且 startTime 晚于触发时刻(容差 5s)的最新一条。
+     */
+    function findHttpClient5TraceId(triggeredAt) {
+        return $.get('/inner/sw/trace-recent', { limit: 30 }).then(function(rows) {
+            if (!Array.isArray(rows) || !rows.length) {
+                return null;
+            }
+            const fresh = rows.filter(function(row) {
+                if (!row || !row.traceId) {
+                    return false;
+                }
+                return !row.startTime || row.startTime >= triggeredAt - 5000;
+            });
+            const matched = fresh.find(function(row) {
+                return String(row.endpoint || '').indexOf('httpclient5-post') >= 0;
+            });
+            return matched ? matched.traceId : (fresh[0] ? fresh[0].traceId : null);
+        });
+    }
+
+    function pollHttpClient5TraceId(triggeredAt, attemptsLeft) {
+        findHttpClient5TraceId(triggeredAt).done(function(traceId) {
+            if (traceId) {
+                showHttpClient5TraceId(traceId);
+                return;
+            }
+            if (attemptsLeft > 1) {
+                setTimeout(function() {
+                    pollHttpClient5TraceId(triggeredAt, attemptsLeft - 1);
+                }, 800);
+                return;
+            }
+            $('#httpClient5TraceId').text('未取到 traceId:请确认「Logfile Reporter」已启用且插件已挂载,稍后可点「刷新统计」再试');
+        }).fail(function() {
+            $('#httpClient5TraceId').text('traceId 读取失败');
+        });
+    }
+
+    function showHttpClient5TraceId(traceId) {
+        lastHttpClient5TraceId = traceId;
+        $('#httpClient5TraceId').text('traceId: ' + traceId);
+        $('#httpClient5ViewTraceBtn').show();
+    }
+
+    /** 拉 /inner/sw/trace-query 取回整条链路,用与表格「时序图」相同的弹窗展示 */
+    function viewHttpClient5Trace() {
+        if (!lastHttpClient5TraceId) {
+            return;
+        }
+        const traceId = lastHttpClient5TraceId;
+        $.get('/inner/sw/trace-query', { traceId: traceId }, function(data) {
+            const logs = data && Array.isArray(data.logs) ? data.logs : [];
+            if (!logs.length) {
+                alert('未取到链路详情:插件未挂载或载荷已过期;可在下方表格搜索 ' + traceId);
+                return;
+            }
+            let spans = [];
+            logs.forEach(function(log) {
+                if (Array.isArray(log.spans)) {
+                    spans = spans.concat(log.spans);
+                }
+            });
+            openSpanModal(traceId, spans);
+        }).fail(function(xhr) {
+            alert('链路查询失败: ' + (xhr && xhr.status ? 'HTTP ' + xhr.status : '网络错误'));
+        });
+    }
+
+    /**
+     * 触发一次「本应用 -> 自身 echo」的 Apache HttpClient 5.x 表单 POST,
+     * 由 override-httpclient-5.x-plugin 采出口 span 的 http.request.params。
+     * 完成后从 /inner/sw/trace-recent 取 traceId,可点「查看该 Trace」直接看时序图。
+     */
+    function triggerHttpClient5Test() {
+        const $btn = $('#httpClient5TestBtn');
+        const $result = $('#httpClient5TestResult');
+        const triggeredAt = Date.now();
+        $btn.prop('disabled', true);
+        $result.removeClass('text-success text-danger').text('请求中...');
+        $('#httpClient5TraceId').text('');
+        $('#httpClient5ViewTraceBtn').hide();
+        lastHttpClient5TraceId = null;
+        $.get('/api/trace-alert-demo/httpclient5-post', { value: 'verify-' + triggeredAt }, function(data) {
+            const httpStatus = data && typeof data.httpStatus === 'number' ? data.httpStatus : 0;
+            const ok = httpStatus >= 200 && httpStatus < 300;
+            let snippet = data && data.bodySnippet ? String(data.bodySnippet) : '';
+            if (snippet.length > 120) {
+                snippet = snippet.slice(0, 120) + '...';
+            }
+            httpClient5TestCount += 1;
+            $('#httpClient5TestCount').text('已触发 ' + httpClient5TestCount + ' 次');
+            $result.toggleClass('text-success', ok)
+                .toggleClass('text-danger', !ok)
+                .text((ok ? '成功' : '失败') + ' HTTP ' + httpStatus + (snippet ? ' | ' + snippet : ''));
+            refreshHttpClient5CollectStatus();
+            // 后端能直接给出当前 trace(agent 已挂载)就用它,否则回退到最近链路里找
+            const traceId = data && typeof data.traceId === 'string' && data.traceId ? data.traceId : null;
+            if (traceId) {
+                showHttpClient5TraceId(traceId);
+            } else {
+                pollHttpClient5TraceId(triggeredAt, 6);
+            }
+            // 上报按批落地，稍等再拉一次统计，新 trace 才会出现在下表
+            setTimeout(loadStatistic, 1200);
+        }).fail(function(xhr) {
+            $result.addClass('text-danger').text('触发失败: ' + (xhr && xhr.status ? 'HTTP ' + xhr.status : '网络错误'));
+        }).always(function() {
+            $btn.prop('disabled', false);
+        });
+    }
+
     function refreshStatuses() {
         $.get('/statistic', function(data) {
-            enableLogfileReporter = !!data.enbaleLogfileReporter;
+            enableLogfileReporter = !!data.enableLogfileReporter;
             renderLogfileReporterStatus();
             updateLogCount(data);
         });
         refreshHttpClientCollectStatus();
+        refreshHttpClient5CollectStatus();
     }
 
     function toggleLogfileReporter() {
@@ -547,6 +690,16 @@
         });
     }
 
+    /** 统一的链路弹窗入口:时序图 + 表格两个 Tab */
+    function openSpanModal(traceId, spans) {
+        $('#spanChart').empty();
+        $('#spanDetailTable tbody').empty();
+        renderSpanChart(spans, traceId);
+        renderSpanTable(spans);
+        $('#spanTab a:first').tab('show');
+        $('#spanChartModal').modal('show');
+    }
+
     $(document).on('click', '#copyAllDetailBtn', function() {
         navigator.clipboard.writeText($(this).data('json') || '');
     });
@@ -555,9 +708,12 @@
         $('#toggleBtn').on('click', toggleLogfileReporter);
         $('#refreshStatisticBtn').on('click', loadStatistic);
         $('#toggleHttpClientCollectBtn').on('click', toggleHttpClientCollect);
+        $('#httpClient5TestBtn').on('click', triggerHttpClient5Test);
+        $('#httpClient5ViewTraceBtn').on('click', viewHttpClient5Trace);
 
         loadStatistic();
         refreshHttpClientCollectStatus();
+        refreshHttpClient5CollectStatus();
         setInterval(refreshStatuses, 3000);
 
         $('#traceTable tbody').on('click', '.show-chart-btn', function() {
@@ -577,12 +733,7 @@
                 }
             });
 
-            $('#spanChart').empty();
-            $('#spanDetailTable tbody').empty();
-            renderSpanChart(spans, traceId);
-            renderSpanTable(spans);
-            $('#spanTab a:first').tab('show');
-            $('#spanChartModal').modal('show');
+            openSpanModal(traceId, spans);
         });
 
         $('#traceTable tbody').on('click', '.show-detail-btn', function() {

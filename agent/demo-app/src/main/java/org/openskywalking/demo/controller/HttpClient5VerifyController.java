@@ -26,6 +26,7 @@ import org.apache.hc.core5.http.NameValuePair;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
+import org.apache.skywalking.apm.toolkit.trace.TraceContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -74,6 +75,8 @@ public class HttpClient5VerifyController {
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("client", "apache-httpclient5");
+        result.put("traceId", TraceContext.traceId());
+        result.put("segmentId", TraceContext.segmentId());
         result.put("targetUrl", targetUrl);
         result.put("httpStatus", httpStatus);
         result.put("bodySnippet", bodySnippet);
